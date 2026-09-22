@@ -1,0 +1,289 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '../api/client'
+import { Button, IconButton } from '../components/Button'
+import { Card } from '../components/Card'
+import { Dropdown, Input } from '../components/Form'
+import {
+  IconChevronLeft,
+  IconChevronRight,
+  IconEye,
+  IconLogs,
+  IconRefresh,
+  IconSearch,
+  IconTrash,
+} from '../components/Icons'
+import { useToast } from '../components/Toast'
+import type { LogFacets, LogItem } from '../types'
+import { LogDetailModal } from './LogDetailModal'
+import { fmtShort } from './preprocessShared'
+
+const PAGE_SIZE = 50
+
+function fmtNum(n?: number): string {
+  if (!n) return '0'
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
+  return String(n)
+}
+function fmtTime(ts: number): string {
+  const d = new Date(ts)
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+interface Filters {
+  q: string
+  status: string
+  entry_format: string
+  is_stream: string
+  channel_id: string
+  model: string
+}
+
+const EMPTY: Filters = { q: '', status: '', entry_format: '', is_stream: '', channel_id: '', model: '' }
+
+export function LogsPage() {
+  const [filters, setFilters] = useState<Filters>(EMPTY)
+  const [qInput, setQInput] = useState('')
+  const [offset, setOffset] = useState(0)
+  const [items, setItems] = useState<LogItem[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [facets, setFacets] = useState<LogFacets>({ models: [], channels: [] })
+  const [openId, setOpenId] = useState<number | null>(null)
+  const toast = useToast()
+
+  // 关键词防抖
+  const debTimer = useRef<number | null>(null)
+  useEffect(() => {
+    if (debTimer.current) window.clearTimeout(debTimer.current)
+    debTimer.current = window.setTimeout(() => {
+      setFilters((f) => ({ ...f, q: qInput }))
+      setOffset(0)
+    }, 300)
+    return () => {
+      if (debTimer.current) window.clearTimeout(debTimer.current)
+    }
+  }, [qInput])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const r = await api.listLogs({
+        limit: PAGE_SIZE,
+        offset,
+        status: filters.status || undefined,
+        entry_format: filters.entry_format || undefined,
+        is_stream: filters.is_stream || undefined,
+        channel_id: filters.channel_id ? Number(filters.channel_id) : undefined,
+        model: filters.model || undefined,
+        q: filters.q || undefined,
+      })
+      setItems(r.items)
+      setTotal(r.total)
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [offset, filters, toast])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    api.getLogFacets().then(setFacets).catch(() => {})
+  }, [])
+
+  const setF = <K extends keyof Filters>(k: K, v: Filters[K]) => {
+    setFilters((f) => ({ ...f, [k]: v }))
+    setOffset(0)
+  }
+
+  const reset = () => {
+    setFilters(EMPTY)
+    setQInput('')
+    setOffset(0)
+  }
+
+  const del = async (id: number) => {
+    if (!window.confirm('确认删除这条日志？')) return
+    try {
+      await api.deleteLog(id)
+      toast('ok', '已删除')
+      load()
+    } catch (err: any) {
+      toast('err', err.message)
+    }
+  }
+
+  const clearAll = async () => {
+    if (!window.confirm('确认清空全部请求日志？此操作不可撤销。')) return
+    try {
+      await api.clearLogs()
+      toast('ok', '日志已清空')
+      setOffset(0)
+      load()
+      api.getLogFacets().then(setFacets).catch(() => {})
+    } catch (e: any) {
+      toast('err', e.message)
+    }
+  }
+
+  const hasFilter = filters.q || filters.status || filters.entry_format || filters.is_stream || filters.channel_id || filters.model
+  const page = Math.floor(offset / PAGE_SIZE) + 1
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+
+  return (
+    <div className="ah-fade-up">
+      <div className="ah-page-head">
+        <div>
+          <div className="ah-page-title">请求日志</div>
+          <div className="ah-page-sub">共 {total} 条记录 · 可视化对话 / 请求头 / 原始报文</div>
+        </div>
+        <div className="ah-row">
+          <IconButton title="刷新" onClick={load}>
+            <IconRefresh size={18} />
+          </IconButton>
+          <Button variant="danger" size="sm" icon={<IconTrash size={16} />} onClick={clearAll}>
+            清空
+          </Button>
+        </div>
+      </div>
+
+      {/* 筛选栏 */}
+      <Card className="ah-log-filters">
+        <div className="ah-log-search">
+          <IconSearch size={17} className="ah-log-search-icon" />
+          <Input
+            value={qInput}
+            onChange={(e) => setQInput(e.target.value)}
+            placeholder="搜索模型 / 渠道 / 错误信息…"
+          />
+        </div>
+        <Dropdown
+          value={filters.status}
+          onChange={(v) => setF('status', v)}
+          options={[
+            { value: '', label: '全部状态' },
+            { value: 'success', label: '成功' },
+            { value: 'error', label: '失败' },
+          ]}
+        />
+        <Dropdown
+          value={filters.entry_format}
+          onChange={(v) => setF('entry_format', v)}
+          options={[
+            { value: '', label: '全部格式' },
+            { value: 'openai', label: 'OpenAI' },
+            { value: 'anthropic', label: 'Anthropic' },
+            { value: 'responses', label: 'Responses' },
+          ]}
+        />
+        <Dropdown
+          value={filters.is_stream}
+          onChange={(v) => setF('is_stream', v)}
+          options={[
+            { value: '', label: '流式 / 非流式' },
+            { value: '1', label: '仅流式' },
+            { value: '0', label: '仅非流式' },
+          ]}
+        />
+        <Dropdown
+          value={filters.channel_id}
+          onChange={(v) => setF('channel_id', v)}
+          options={[
+            { value: '', label: '全部渠道' },
+            ...facets.channels.map((c) => ({ value: String(c.channel_id), label: `${c.channel_name || '渠道#' + c.channel_id} (${c.n})` })),
+          ]}
+        />
+        <Dropdown
+          value={filters.model}
+          onChange={(v) => setF('model', v)}
+          options={[
+            { value: '', label: '全部模型' },
+            ...facets.models.map((m) => ({ value: m.model, label: `${m.model} (${m.n})` })),
+          ]}
+        />
+        {hasFilter && (
+          <Button variant="ghost" size="sm" onClick={reset}>
+            重置
+          </Button>
+        )}
+      </Card>
+
+      {/* 列表 */}
+      <Card className="ah-logs-table-card">
+        <div className="ah-logt-head">
+          <span className="c-time">时间</span>
+          <span className="c-status">状态</span>
+          <span className="c-model">模型 / 渠道</span>
+          <span className="c-tok">Token</span>
+          <span className="c-lat">延迟</span>
+          <span className="c-act" />
+        </div>
+
+        {loading ? (
+          <div className="ah-logt-empty">
+            <span className="ah-spin ah-spin-orange" /> 加载中…
+          </div>
+        ) : items.length === 0 ? (
+          <div className="ah-logt-empty">
+            <IconLogs size={30} style={{ opacity: 0.4, display: 'block', margin: '0 auto 10px' }} />
+            {hasFilter ? '没有符合条件的日志' : '暂无请求日志'}
+          </div>
+        ) : (
+          items.map((l) => (
+            <div key={l.id} className="ah-logt-row" onClick={() => setOpenId(l.id)}>
+              <span className="c-time ah-mini ah-faint ah-num">{fmtTime(l.created_at)}</span>
+              <span className="c-status">
+                <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
+                  {l.status === 'success' ? l.status_code || 200 : l.status_code || 'ERR'}
+                </span>
+              </span>
+              <span className="c-model">
+                <span className="ah-logt-model ah-truncate">
+                  <span className={`ah-fmt-badge ${l.entry_format}`}>{fmtShort(l.entry_format)}</span>
+                  {l.model || '-'}
+                  {l.is_stream ? <span className="ah-tag" style={{ marginLeft: 6 }}>stream</span> : null}
+                  {l.preprocessed ? <span className="ah-tag ah-tag-pp" style={{ marginLeft: 6 }}>已改写</span> : null}
+                  {l.pseudo_thinking ? <span className="ah-tag ah-tag-think" style={{ marginLeft: 6 }}>伪思考</span> : null}
+                  {l.retry_count ? <span className="ah-tag ah-tag-warn" style={{ marginLeft: 6 }}>×{l.retry_count}</span> : null}
+                </span>
+                <span className="ah-mini ah-muted ah-truncate">{l.channel_name || '—'}</span>
+              </span>
+              <span className="c-tok ah-mini ah-muted ah-num">{fmtNum(l.total_tokens)}</span>
+              <span className="c-lat ah-mini ah-muted ah-num">{l.latency_ms ?? 0}ms</span>
+              <span className="c-act">
+                <IconButton title="查看详情" onClick={() => setOpenId(l.id)}>
+                  <IconEye size={16} />
+                </IconButton>
+                <IconButton title="删除" danger onClick={(e) => { e.stopPropagation(); del(l.id) }}>
+                  <IconTrash size={16} />
+                </IconButton>
+              </span>
+            </div>
+          ))
+        )}
+
+        {/* 分页 */}
+        {total > PAGE_SIZE && (
+          <div className="ah-logt-pager">
+            <IconButton title="上一页" onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>
+              <IconChevronLeft size={18} />
+            </IconButton>
+            <span className="ah-mini ah-muted ah-num">
+              {page} / {pages}
+            </span>
+            <IconButton title="下一页" onClick={() => setOffset((o) => (o + PAGE_SIZE < total ? o + PAGE_SIZE : o))}>
+              <IconChevronRight size={18} />
+            </IconButton>
+          </div>
+        )}
+      </Card>
+
+      {openId != null && <LogDetailModal id={openId} onClose={() => setOpenId(null)} onDeleted={() => { setOpenId(null); load() }} />}
+    </div>
+  )
+}

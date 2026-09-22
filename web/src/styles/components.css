@@ -1,0 +1,779 @@
+/* ════════════════════════════════════════════════════════
+   AggHub 组件样式 · 橙白 / 软萌 / 无棱角弧度感
+   ════════════════════════════════════════════════════════ */
+
+/* ── 应用骨架 ── */
+.ah-app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.ah-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: var(--sp-8) var(--sp-6) var(--sp-12);
+}
+.ah-page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-6);
+}
+.ah-page-title {
+  font-size: var(--fs-2xl);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.ah-page-sub {
+  color: var(--ink-soft);
+  font-size: var(--fs-sm);
+  margin-top: 2px;
+}
+
+/* ── 顶部导航 ── */
+.ah-nav {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: rgba(255, 251, 247, 0.92);
+  border-bottom: 1px solid var(--line-soft);
+}
+.ah-nav-inner {
+  max-width: 1080px;
+  margin: 0 auto;
+  height: 66px;
+  padding: 0 var(--sp-6);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-6);
+}
+.ah-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-weight: 800;
+  font-size: var(--fs-lg);
+}
+.ah-brand-logo {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  background: var(--grad-warm);
+  box-shadow: var(--shadow-soft);
+}
+.ah-brand small {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-faint);
+  letter-spacing: 0.04em;
+}
+.ah-tabs {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  padding: 5px;
+  background: var(--orange-50);
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-soft);
+}
+.ah-tab {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border-radius: var(--r-pill);
+  color: var(--ink-soft);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  transition: color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+.ah-tab:hover {
+  color: var(--orange-600);
+}
+.ah-tab.is-active {
+  color: #fff;
+  background: var(--grad-warm);
+  box-shadow: var(--shadow-soft);
+}
+.ah-tab svg {
+  opacity: 0.9;
+}
+
+/* ── 卡片 ── */
+.ah-card {
+  background: var(--white);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-card);
+  padding: var(--sp-5);
+}
+.ah-card.is-hover {
+  transition:
+    transform var(--dur) var(--ease-soft),
+    box-shadow var(--dur) var(--ease-out),
+    border-color var(--dur) var(--ease-out);
+}
+.ah-card.is-hover:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-soft);
+  border-color: var(--orange-200);
+}
+
+/* ── 按钮 ── */
+.ah-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px 20px;
+  border-radius: var(--r-pill);
+  font-weight: 700;
+  font-size: var(--fs-base);
+  color: var(--ink);
+  background: var(--orange-50);
+  border: 1px solid transparent;
+  transition: transform var(--dur) var(--ease-soft), background-color var(--dur) var(--ease-soft),
+    color var(--dur) var(--ease-soft), box-shadow var(--dur) var(--ease-soft),
+    border-color var(--dur) var(--ease-soft);
+  white-space: nowrap;
+}
+.ah-btn:active {
+  transform: scale(0.96);
+}
+.ah-btn.is-sm {
+  padding: 8px 14px;
+  font-size: var(--fs-sm);
+}
+.ah-btn.is-block {
+  width: 100%;
+}
+.ah-btn.is-primary {
+  color: #fff;
+  background: var(--grad-warm);
+  box-shadow: var(--shadow-soft);
+}
+.ah-btn.is-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-pop);
+}
+.ah-btn.is-ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+.ah-btn.is-ghost:hover {
+  border-color: var(--orange-300);
+  color: var(--orange-600);
+  background: var(--orange-50);
+}
+.ah-btn.is-soft {
+  background: var(--orange-100);
+  color: var(--orange-700);
+}
+.ah-btn.is-soft:hover {
+  background: var(--orange-200);
+}
+.ah-btn.is-danger {
+  background: var(--err-bg);
+  color: var(--err);
+}
+.ah-btn.is-danger:hover {
+  background: #ffd9c9;
+}
+.ah-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none !important;
+}
+.ah-btn .ah-spin {
+  width: 15px;
+  height: 15px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: ah-spin 0.7s linear infinite;
+}
+.ah-spin-orange {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--orange-200);
+  border-right-color: var(--orange-500);
+  border-radius: 50%;
+  vertical-align: -3px;
+  margin-right: 6px;
+  animation: ah-spin 0.7s linear infinite;
+}
+
+/* ── 图标按钮 ── */
+.ah-iconbtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-soft);
+  background: transparent;
+  transition: background-color var(--dur) var(--ease-soft), color var(--dur) var(--ease-soft),
+    transform var(--dur) var(--ease-soft);
+}
+.ah-iconbtn:hover {
+  background: var(--orange-50);
+  color: var(--orange-600);
+}
+.ah-iconbtn:active {
+  transform: scale(0.92);
+}
+.ah-iconbtn.is-danger:hover {
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+/* ── 开关 ── */
+.ah-toggle {
+  width: 46px;
+  height: 27px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  position: relative;
+  transition: background var(--dur) var(--ease-out);
+  flex: none;
+}
+.ah-toggle::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 5px rgba(74, 63, 55, 0.22);
+  transition: transform var(--dur) var(--ease-soft);
+}
+.ah-toggle.is-on {
+  background: var(--grad-warm);
+}
+.ah-toggle.is-on::after {
+  transform: translateX(19px);
+}
+
+/* ── 徽章 ── */
+.ah-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: var(--orange-100);
+  color: var(--orange-700);
+}
+.ah-badge.t-openai {
+  background: #e4f6ef;
+  color: #1f9d6b;
+}
+.ah-badge.t-anthropic {
+  background: #fae9dd;
+  color: #c2622f;
+}
+.ah-badge.t-vertex {
+  background: #e7eefc;
+  color: #3b6fc4;
+}
+.ah-badge.t-responses {
+  background: #ece9fb;
+  color: #6a4fc9;
+}
+
+/* ── 状态点（呼吸光环）── */
+.ah-dot {
+  position: relative;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+.ah-dot.ok {
+  background: var(--ok);
+  color: var(--ok);
+}
+.ah-dot.warn {
+  background: var(--warn);
+  color: var(--warn);
+}
+.ah-dot.err {
+  background: var(--ink-faint);
+  color: var(--ink-faint);
+}
+.ah-dot.ok::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ah-pulse-ring 1.8s var(--ease-out) infinite;
+}
+
+/* ── 弹窗 ── */
+.ah-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(74, 63, 55, 0.42);
+  display: grid;
+  place-items: center;
+  padding: var(--sp-5);
+  animation: ah-fade-up 0.18s var(--ease-out);
+}
+.ah-modal {
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--paper);
+  border-radius: var(--r-2xl);
+  box-shadow: var(--shadow-pop);
+  border: 1px solid var(--line-soft);
+  animation: ah-pop var(--dur) var(--ease-soft);
+}
+.ah-modal.is-lg {
+  max-width: 720px;
+}
+.ah-modal.is-xl {
+  max-width: 980px;
+  height: 88vh;
+}
+.ah-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--sp-5) var(--sp-6);
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--paper);
+  flex: none;
+}
+.ah-modal-title {
+  font-size: var(--fs-xl);
+  font-weight: 800;
+}
+.ah-modal-body {
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.ah-modal-foot {
+  display: flex;
+  gap: var(--sp-3);
+  justify-content: flex-end;
+  padding: var(--sp-5) var(--sp-6);
+  border-top: 1px solid var(--line-soft);
+  background: var(--paper);
+  flex: none;
+}
+
+/* ── 表单 ── */
+.ah-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.ah-flabel {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ah-flabel .req {
+  color: var(--err);
+}
+.ah-input,
+.ah-textarea,
+.ah-select {
+  width: 100%;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  border: 1.6px solid var(--line);
+  background: var(--cream);
+  font-size: var(--fs-base);
+  color: var(--ink);
+  transition: border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+.ah-textarea {
+  resize: vertical;
+  min-height: 78px;
+  line-height: 1.6;
+}
+.ah-input:focus,
+.ah-textarea:focus,
+.ah-select:focus {
+  outline: none;
+  border-color: var(--orange-400);
+  background: var(--white);
+  box-shadow: var(--shadow-ring);
+}
+.ah-input::placeholder,
+.ah-textarea::placeholder {
+  color: var(--ink-faint);
+}
+.ah-select-wrap {
+  position: relative;
+}
+.ah-select {
+  appearance: none;
+  cursor: pointer;
+  padding-right: 38px;
+}
+.ah-select-wrap .ah-chev {
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--ink-soft);
+  pointer-events: none;
+}
+.ah-hint {
+  font-size: var(--fs-xs);
+  color: var(--ink-faint);
+}
+
+/* ── 滑块 ── */
+.ah-slider-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.ah-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: 1;
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--orange-100);
+  outline: none;
+}
+.ah-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  border: 5px solid var(--orange-500);
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  transition: transform var(--dur) var(--ease-soft);
+}
+.ah-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.12);
+}
+.ah-slider-val {
+  min-width: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--orange-700);
+  background: var(--orange-50);
+  border-radius: var(--r-sm);
+  padding: 5px 8px;
+}
+.ah-slider-input {
+  width: 40px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--orange-700);
+  font-weight: 800;
+  font-size: var(--fs-base);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+}
+.ah-slider-suffix {
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Toast ── */
+.ah-toasts {
+  position: fixed;
+  top: 78px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+}
+.ah-toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border-radius: var(--r-pill);
+  background: var(--white);
+  box-shadow: var(--shadow-pop);
+  border: 1px solid var(--line-soft);
+  font-weight: 600;
+  font-size: var(--fs-sm);
+  animation: ah-toast-in var(--dur) var(--ease-soft);
+}
+.ah-toast .i {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  flex: none;
+}
+.ah-toast.ok .i {
+  background: var(--ok);
+}
+.ah-toast.err .i {
+  background: var(--err);
+}
+.ah-toast.info .i {
+  background: var(--orange-500);
+}
+
+/* ── 空状态 ── */
+.ah-empty {
+  text-align: center;
+  padding: var(--sp-12) var(--sp-6);
+  color: var(--ink-soft);
+}
+.ah-empty-icon {
+  width: 78px;
+  height: 78px;
+  border-radius: 26px;
+  margin: 0 auto var(--sp-4);
+  display: grid;
+  place-items: center;
+  color: var(--orange-400);
+  background: var(--grad-soft);
+  box-shadow: var(--shadow-card);
+}
+.ah-empty h3 {
+  font-size: var(--fs-lg);
+  color: var(--ink);
+  margin-bottom: 5px;
+}
+
+/* ── Chip / Tag ── */
+.ah-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 11px;
+  border-radius: var(--r-pill);
+  background: var(--orange-50);
+  border: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+.ah-tag {
+  display: inline-flex;
+  padding: 3px 9px;
+  border-radius: var(--r-sm);
+  background: var(--orange-50);
+  color: var(--orange-700);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  font-family: var(--font-mono);
+}
+
+/* ── 通用工具 ── */
+.ah-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.ah-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-4);
+}
+.ah-muted {
+  color: var(--ink-soft);
+}
+.ah-faint {
+  color: var(--ink-faint);
+}
+.ah-mini {
+  font-size: var(--fs-xs);
+}
+.ah-num {
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .ah-grid2 {
+    grid-template-columns: 1fr;
+  }
+  .ah-tab span {
+    display: none;
+  }
+  .ah-main {
+    padding: var(--sp-5) var(--sp-4) var(--sp-10);
+  }
+}
+
+/* ── 自写下拉框 ── */
+.ah-dd {
+  position: relative;
+}
+.ah-dd-trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  border: 1.6px solid var(--line);
+  background: var(--cream);
+  font-size: var(--fs-base);
+  color: var(--ink);
+  text-align: left;
+  transition: border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+.ah-dd-trigger:hover {
+  border-color: var(--orange-300);
+}
+.ah-dd.is-open .ah-dd-trigger {
+  border-color: var(--orange-400);
+  background: var(--white);
+  box-shadow: var(--shadow-ring);
+}
+.ah-dd-chev {
+  color: var(--ink-soft);
+  flex: none;
+  transition: transform var(--dur) var(--ease-out);
+}
+.ah-dd-chev.is-open {
+  transform: rotate(180deg);
+}
+.ah-dd-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 70;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--white);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-pop);
+  animation: ah-pop var(--dur) var(--ease-soft);
+}
+.ah-dd-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--ink-soft);
+  text-align: left;
+  transition: background-color var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.ah-dd-item:hover {
+  background: var(--orange-50);
+  color: var(--orange-600);
+}
+.ah-dd-item.is-active {
+  background: var(--orange-50);
+  color: var(--orange-700);
+}
+.ah-dd-item svg {
+  color: var(--orange-600);
+  flex: none;
+}
+
+/* ── 拉取模型面板 ── */
+.ah-model-fetch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 9px;
+}
+.ah-model-pick {
+  margin-top: 10px;
+  max-height: 184px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: var(--orange-50);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+}
+.ah-model-pick-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 11px;
+  background: var(--white);
+  border-radius: var(--r-sm);
+}
+.ah-model-pick-item > span {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--ink);
+}
+.ah-model-pick-add {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--grad-warm);
+  flex: none;
+  transition: transform var(--dur) var(--ease-soft), box-shadow var(--dur) var(--ease-soft),
+    background-color var(--dur) var(--ease-soft), color var(--dur) var(--ease-soft);
+}
+.ah-model-pick-add:hover:not(:disabled) {
+  transform: scale(1.1);
+  box-shadow: var(--shadow-soft);
+}
+.ah-model-pick-add:disabled {
+  background: var(--orange-100);
+  color: var(--orange-400);
+  cursor: default;
+}
