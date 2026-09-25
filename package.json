@@ -13,9 +13,13 @@
     "dev:server": "npm -w server run dev",
     "dev:web": "npm -w web run dev",
     "build": "npm -w web run build",
-    "start": "npm -w server run start"
+    "start": "npm -w server run start",
+    "test": "node scripts/run-tests.mjs",
+    "test:e2e": "node --import tsx scripts/run-e2e.ts",
+    "typecheck": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json && tsc -p server/tsconfig.test.json && tsc -p tsconfig.tools.json"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.1.0"
   }
 }

@@ -1,6 +1,7 @@
 import { contentToText, genId, nowSec, splitContent } from './ir'
 import type { StreamDecoder } from './ir'
-import { getProxyAgent } from '../core/proxy'
+import { CandidateError } from '../core/failover'
+export { resolveImageUrls } from '../core/imageResolver'
 import { emptyUsage, usageFromGemini } from './usage'
 
 // Gemini 仅作上游渠道（vertex API key 模式走 Gemini generateContent 协议）。
@@ -13,68 +14,6 @@ const SAFETY_SETTINGS = [
   { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_NONE' },
   { category: 'HARM_CATEGORY_CIVIC_INTEGRITY', threshold: 'BLOCK_NONE' },
 ]
-
-const MIME_MAP: Record<string, string> = {
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif',
-  '.webp': 'image/webp',
-  '.bmp': 'image/bmp',
-  '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-}
-
-function guessMimeFromUrl(url: string): string {
-  try {
-    const pathname = new URL(url).pathname.toLowerCase()
-    for (const [ext, mime] of Object.entries(MIME_MAP)) {
-      if (pathname.endsWith(ext)) return mime
-    }
-  } catch {}
-  return 'image/jpeg'
-}
-
-/**
- * 异步前置步骤：将 IR 消息中的 HTTP/HTTPS 图片 URL 下载并替换为 data URL。
- * 仅在上游为 Gemini 时调用（Gemini 不接受 HTTP URL 的 image_url）。
- */
-export async function resolveImageUrls(ir: any, proxyUrl?: string): Promise<void> {
-  const promises: Promise<void>[] = []
-
-  for (const msg of ir?.messages || []) {
-    if (!Array.isArray(msg.content)) continue
-    for (const part of msg.content) {
-      if (part?.type !== 'image_url') continue
-      const urlObj = typeof part.image_url === 'string' ? { url: part.image_url } : part.image_url
-      if (!urlObj?.url) continue
-      const u: string = urlObj.url
-      if (u.startsWith('data:')) continue
-      if (!u.startsWith('http://') && !u.startsWith('https://')) continue
-
-      promises.push(
-        (async () => {
-          try {
-            const opts: any = { signal: AbortSignal.timeout(15000) }
-            if (proxyUrl) opts.dispatcher = getProxyAgent(proxyUrl)
-            const resp = await fetch(u, opts)
-            if (!resp.ok) return
-            const buf = Buffer.from(await resp.arrayBuffer())
-            const contentType = resp.headers.get('content-type')?.split(';')[0]?.trim() || guessMimeFromUrl(u)
-            const dataUrl = `data:${contentType};base64,${buf.toString('base64')}`
-            if (typeof part.image_url === 'string') {
-              part.image_url = dataUrl
-            } else {
-              part.image_url.url = dataUrl
-            }
-          } catch {}
-        })(),
-      )
-    }
-  }
-
-  if (promises.length) await Promise.allSettled(promises)
-}
 
 function finishMap(fr: string | null | undefined): string | null {
   switch (fr) {
@@ -97,7 +36,7 @@ function finishMap(fr: string | null | undefined): string | null {
 function dataUrlToInline(u: string): any | null {
   const m = /^data:([^;]+);base64,(.*)$/.exec(u)
   if (m) return { inlineData: { mimeType: m[1], data: m[2] } }
-  return null
+  throw new CandidateError('Gemini 图片尚未解析为有效 data URL，已停止发送缺图请求')
 }
 
 // Gemini 的 functionDeclarations 仅接受 OpenAPI 3.0 Schema 子集，
@@ -375,7 +314,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
       return out
     },
     flush() {
-      return []
+      return usage ? [{ id, object: 'chat.completion.chunk', created, model, choices: [], usage }] : []
     },
   }
 }

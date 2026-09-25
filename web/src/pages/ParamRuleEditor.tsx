@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast'
 import type { ParamOp, ParamOpType, ParamRule, ParamTestResult } from '../types'
 import { FORMAT_OPTIONS, LogPickerModal, MultiChips } from './preprocessShared'
 import type { Opt } from './preprocessShared'
+import { newId } from '../lib/id'
 
 // ── 参数修改规则编辑器：增删改上游请求体参数 / 对排除消息的请求体 JSON 做正则替换 ──
 
@@ -30,7 +31,7 @@ export function newParamOp(type: ParamOpType = 'set'): ParamOp {
 }
 
 export function newParamRule(partial?: Partial<ParamRule>): ParamRule {
-  return { id: crypto.randomUUID(), enabled: true, ops: [newParamOp()], ...partial }
+  return { id: newId(), enabled: true, ops: [newParamOp()], ...partial }
 }
 
 function regexValid(pattern: string | undefined, flags: string | undefined): boolean {

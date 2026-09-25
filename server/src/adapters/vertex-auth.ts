@@ -1,5 +1,7 @@
 import crypto from 'node:crypto'
 import { getProxyAgent } from '../core/proxy'
+import { abortable } from '../core/requestLifecycle'
+import { readBodyText } from '../core/bodyReader'
 
 export interface Credentials {
   project_id: string
@@ -25,15 +27,17 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>()
 
-export async function getAccessToken(creds: Credentials, proxyUrl?: string): Promise<string> {
+export async function getAccessToken(creds: Credentials, proxyUrl?: string, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
   const key = creds.client_email
   const now = Date.now()
   const cached = cache.get(key)
   if (cached && cached.expiresAt > now) return cached.token
 
   const jwt = createSignedJWT(creds.client_email, creds.private_key)
-  const token = await exchangeJwtForAccessToken(jwt, proxyUrl)
-  cache.set(key, { token, expiresAt: now + 50 * 60 * 1000 })
+  const token = await exchangeJwtForAccessToken(jwt, proxyUrl, signal)
+  signal?.throwIfAborted()
+  cache.set(key, { token, expiresAt: Date.now() + 50 * 60 * 1000 })
   return token
 }
 
@@ -82,25 +86,26 @@ function base64url(str: string): string {
 }
 
 // ── token 交换 ────────────────────────────────────────────
-async function exchangeJwtForAccessToken(jwt: string, proxyUrl?: string): Promise<string> {
-  const body = new URLSearchParams({
-    grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-    assertion: jwt,
-  })
-
-  const opts: any = {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
+async function exchangeJwtForAccessToken(jwt: string, proxyUrl?: string, signal?: AbortSignal): Promise<string> {
+  const controller = new AbortController()
+  const stop = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', stop, { once: true })
+  if (signal?.aborted) stop()
+  const timer = setTimeout(() => controller.abort(new DOMException('OAuth 交换超过 15 秒时限', 'TimeoutError')), 15_000)
+  try {
+    controller.signal.throwIfAborted()
+    const body = new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion: jwt })
+    const opts: any = { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: body.toString(), signal: controller.signal }
+    if (proxyUrl) opts.dispatcher = getProxyAgent(proxyUrl)
+    const resp = await abortable(fetch('https://www.googleapis.com/oauth2/v4/token', opts), controller.signal, late => { void late.body?.cancel().catch(() => {}) })
+    const text = await readBodyText(resp.body, { signal: controller.signal, maxBytes: 1024 * 1024 })
+    if (!resp.ok) throw new Error(`Google OAuth token exchange failed (${resp.status}): ${text.slice(0, 300)}`)
+    const json: any = JSON.parse(text)
+    if (typeof json.access_token !== 'string' || !json.access_token) throw new Error('Google OAuth response missing access_token')
+    return json.access_token
+  } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', stop)
+    controller.abort()
   }
-  if (proxyUrl) opts.dispatcher = getProxyAgent(proxyUrl)
-
-  const resp = await fetch('https://www.googleapis.com/oauth2/v4/token', opts)
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => '')
-    throw new Error(`Google OAuth token exchange failed (${resp.status}): ${text.slice(0, 300)}`)
-  }
-  const json: any = await resp.json()
-  if (!json.access_token) throw new Error(`Google OAuth response missing access_token: ${JSON.stringify(json).slice(0, 300)}`)
-  return json.access_token
 }

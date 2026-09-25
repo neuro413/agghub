@@ -4,6 +4,8 @@ import { claudeStopToFinish, finishToClaudeStop } from './reasonmap'
 import { claudeThinkingMode, effortForClaude, effortToBudget, reasoningFromClaude, reasoningItemsText } from './reasoning'
 import { usageFromClaude, usageToClaude } from './usage'
 import type { IRReasoningItem } from '../types'
+import { serialToolBlocks } from './serialToolBlocks'
+import { BufferBudget } from '../core/capture'
 
 const DEFAULT_MAX_TOKENS = 4096
 const MIN_THINKING_BUDGET = 1024
@@ -385,7 +387,8 @@ export function parseResponse(resp: any, model: string): any {
 //   reasoning_content    thinking 正文增量
 //   reasoning_signature  当前 thinking 块的签名（块结束）
 //   reasoning_redacted   一个完整的 redacted_thinking 块的 data
-export function createStreamDecoder(model: string): StreamDecoder {
+export function createStreamDecoder(model: string, budget = new BufferBudget(16 * 1024 * 1024)): StreamDecoder {
+  const budgetKey = Symbol('anthropic-decoder')
   let id = genId()
   const created = nowSec()
   let started = false
@@ -450,11 +453,13 @@ export function createStreamDecoder(model: string): StreamDecoder {
         chunk.usage = merged
         out.push(chunk)
       }
+      budget.hold(budgetKey, toolIndexMap.size * 64)
       return out
     },
     flush() {
       return []
     },
+    dispose() { toolIndexMap.clear(); budget.release(budgetKey) },
   }
 }
 
@@ -694,7 +699,11 @@ export function buildResponse(ir: any): any {
 // ═══════════ 入口方向：IR(OpenAI) chunks → Claude SSE 事件 ═══════════
 // 覆盖文本 / 扩展思考 / 工具调用的流式重组：每路 IR delta 映射到一个 Claude
 // content block，按出现顺序分配 index，切换块类型前先发 content_block_stop。
-export function createStreamEncoder(opts?: { estimatePromptTokens?: number }): StreamEncoder {
+export function createStreamEncoder(opts?: { estimatePromptTokens?: number; budget?: BufferBudget }): StreamEncoder {
+  return serialToolBlocks(createSequentialEncoder(opts), opts?.budget)
+}
+
+function createSequentialEncoder(opts?: { estimatePromptTokens?: number }): StreamEncoder {
   let started = false
   let msgId = genId('msg')
   let model = ''

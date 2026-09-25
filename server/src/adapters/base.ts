@@ -1,5 +1,6 @@
 import type { Channel, WireFormat } from '../types'
 import type { StreamDecoder } from '../convert/ir'
+import type { BufferBudget } from '../core/capture'
 
 export interface UpstreamRequest {
   url: string
@@ -12,10 +13,18 @@ export interface BuildRequestOptions {
   autoAdjust?: boolean
 }
 
+export interface UpstreamContext {
+  requestedModel: string
+  upstreamModel: string
+  upstreamWire: WireFormat
+  budget?: BufferBudget
+}
+
 export interface Adaptor {
   wireFormat: WireFormat
-  /** 可选的异步前置步骤：在 buildRequest 之前调用，用于预热 token 等需要网络的操作 */
-  prepareChannel?(channel: Channel, proxyUrl?: string): Promise<void>
+  resolveWireFormat?(upstreamModel: string): WireFormat
+  /** 预热属于当前尝试，必须接收取消/超时信号。 */
+  prepareChannel?(channel: Channel, proxyUrl?: string, signal?: AbortSignal): Promise<void>
   buildRequest(channel: Channel, ir: any, upstreamModel: string, stream: boolean, opts?: BuildRequestOptions): UpstreamRequest
   /** 同格式透传：用客户端原始 body（仅替换 model），保留 cache_control 等全部特有字段 */
   buildPassthroughRequest?(
@@ -25,8 +34,8 @@ export interface Adaptor {
     stream: boolean,
     rawHeaders?: Record<string, any>,
   ): UpstreamRequest
-  parseResponse(json: any, model: string): any
-  createStreamDecoder(model: string): StreamDecoder
+  parseResponse(json: any, context: UpstreamContext): any
+  createStreamDecoder(context: UpstreamContext): StreamDecoder
 }
 
 export function trimSlash(s: string): string {

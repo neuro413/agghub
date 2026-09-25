@@ -39,11 +39,12 @@ export function MultiChips({
   onChange: (v: string[]) => void
   empty?: string
 }) {
-  if (!options.length) return <span className="ah-mini ah-faint">{empty || '无可选项'}</span>
+  const visible = [...options, ...selected.filter(value => !options.some(option => option.value === value)).map(value => ({ value, label: `${value}（已失效，可移除）` }))]
+  if (!visible.length) return <span className="ah-mini ah-faint">{empty || '无可选项'}</span>
   const toggle = (v: string) => onChange(selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v])
   return (
     <div className="ah-pp-chips">
-      {options.map((o) => (
+      {visible.map((o) => (
         <button
           type="button"
           key={o.value}

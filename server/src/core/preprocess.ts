@@ -135,13 +135,21 @@ function applyRule(target: any, rule: PreprocessRule): void {
       if (!msg) continue
       // Responses 的 function_call_output 相当于 Chat 的 tool 消息
       if (msg.type === 'function_call_output' || msg.type === 'custom_tool_call_output') {
-        if ((!roles || roles.has('tool')) && typeof msg.output === 'string') msg.output = apply(msg.output)
+        if (!roles || roles.has('tool')) msg.output = transformContentText(msg.output, apply)
         continue
       }
       const role = msg.role === 'developer' ? 'system' : msg.role
       if (!role) continue
-      if (roles && !roles.has(role)) continue
-      msg.content = transformContentText(msg.content, apply)
+      const selected = !roles || roles.has(role)
+      // Claude 将工具结果放在 user.content 中，角色按文本节点的语义区分。
+      if (Array.isArray(msg.content)) {
+        msg.content = msg.content.map((part: any) => {
+          if (part?.type === 'tool_result') {
+            return !roles || roles.has('tool') ? { ...part, content: transformContentText(part.content, apply) } : part
+          }
+          return selected ? transformContentText([part], apply)[0] : part
+        })
+      } else if (selected) msg.content = transformContentText(msg.content, apply)
     }
   }
 }
@@ -155,6 +163,20 @@ function collectBlockedTools(meta: PreprocessMeta, settings: Settings): Set<stri
     for (const t of rule.tools) blocked.add(t)
   }
   return blocked
+}
+
+function toolName(tool: any): string | undefined {
+  return tool?.function?.name || tool?.custom?.name || tool?.name
+}
+
+function filterToolDefinitions(tools: any[], blocked: Set<string>): any[] {
+  return tools.filter(tool => {
+    if (tool?.type === 'namespace' && Array.isArray(tool.tools)) {
+      tool.tools = filterToolDefinitions(tool.tools, blocked)
+      return tool.tools.length > 0
+    }
+    return !blocked.has(toolName(tool) || '')
+  })
 }
 
 /** 从 Anthropic 格式请求体中移除被屏蔽的工具 */
@@ -197,12 +219,12 @@ function filterToolsAnthropic(target: any, blocked: Set<string>): void {
 function filterToolsOpenAI(target: any, blocked: Set<string>): void {
   // 1. 移除 tools 定义
   if (Array.isArray(target.tools)) {
-    target.tools = target.tools.filter((t: any) => !blocked.has(t?.function?.name))
+    target.tools = filterToolDefinitions(target.tools, blocked)
     if (target.tools.length === 0) delete target.tools
   }
 
   // 2. 处理 tool_choice
-  if (target.tool_choice?.type === 'function' && blocked.has(target.tool_choice.function?.name)) {
+  if (blocked.has(toolName(target.tool_choice) || '')) {
     target.tool_choice = 'auto'
   }
 
@@ -213,7 +235,7 @@ function filterToolsOpenAI(target: any, blocked: Set<string>): void {
     if (msg?.role !== 'assistant' || !Array.isArray(msg.tool_calls)) continue
     const orig = msg.tool_calls
     msg.tool_calls = orig.filter((tc: any) => {
-      if (blocked.has(tc?.function?.name)) {
+      if (blocked.has(toolName(tc) || '')) {
         if (tc.id) blockedCallIds.add(tc.id)
         return false
       }
@@ -235,13 +257,7 @@ function filterToolsOpenAI(target: any, blocked: Set<string>): void {
 function filterToolsResponses(target: any, blocked: Set<string>): void {
   // 1. 移除 tools 定义（function / custom 按 name；命名空间内递归）
   if (Array.isArray(target.tools)) {
-    target.tools = target.tools.filter((t: any) => {
-      if (t?.type === 'namespace' && Array.isArray(t.tools)) {
-        t.tools = t.tools.filter((x: any) => !blocked.has(x?.name))
-        return t.tools.length > 0
-      }
-      return !blocked.has(t?.name)
-    })
+    target.tools = filterToolDefinitions(target.tools, blocked)
     if (target.tools.length === 0) delete target.tools
   }
 
@@ -274,9 +290,12 @@ function filterToolsResponses(target: any, blocked: Set<string>): void {
 function applyToolFilter(target: any, meta: PreprocessMeta, settings: Settings): void {
   const blocked = collectBlockedTools(meta, settings)
   if (blocked.size === 0) return
+  const hadTools = Array.isArray(target.tools) && target.tools.length > 0
   if (meta.passthrough && meta.entryFormat === 'anthropic') filterToolsAnthropic(target, blocked)
   else if (meta.passthrough && meta.entryFormat === 'responses') filterToolsResponses(target, blocked)
   else filterToolsOpenAI(target, blocked)
+  if (Array.isArray(target.custom_tool_names)) target.custom_tool_names = target.custom_tool_names.filter((name: string) => !blocked.has(name))
+  if (hadTools && !target.tools?.length && !target.hosted_tools?.length) delete target.tool_choice
 }
 
 /** 丢弃 thinking 的渠道/模型限定是否命中本次请求（空 = 全部） */

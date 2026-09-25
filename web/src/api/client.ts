@@ -40,6 +40,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
       ...(opts?.headers as Record<string, string> | undefined),
     },
   })
+  opts?.signal?.throwIfAborted()
   if (r.status === 401) {
     onUnauthorized?.()
     throw new Error('需要访问令牌')
@@ -58,7 +59,7 @@ async function req<T>(path: string, opts?: RequestInit): Promise<T> {
 
 export const api = {
   // ── 渠道 ──
-  listChannels: () => req<Channel[]>('/channels'),
+  listChannels: (signal?: AbortSignal) => req<Channel[]>('/channels', { signal }),
   createChannel: (data: Partial<Channel>) => req<Channel>('/channels', { method: 'POST', body: JSON.stringify(data) }),
   updateChannel: (id: number, data: Partial<Channel>) =>
     req<Channel>(`/channels/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
@@ -67,11 +68,11 @@ export const api = {
     req<TestResult>('/channels/test', { method: 'POST', body: JSON.stringify(data) }),
 
   // ── 设置 ──
-  getSettings: () => req<Settings>('/settings'),
+  getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),
   updateSettings: (data: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // ── 统计 ──
-  getStats: (range: string) => req<Stats>(`/stats?range=${range}`),
+  getStats: (range: string, signal?: AbortSignal) => req<Stats>(`/stats?range=${range}`, { signal }),
 
   // ── 日志 ──
   listLogs: (
@@ -85,6 +86,7 @@ export const api = {
       is_stream?: string
       q?: string
     } = {},
+    signal?: AbortSignal,
   ) => {
     const query = new URLSearchParams()
     if (p.limit != null) query.set('limit', String(p.limit))
@@ -95,21 +97,21 @@ export const api = {
     if (p.entry_format) query.set('entry_format', p.entry_format)
     if (p.is_stream) query.set('is_stream', p.is_stream)
     if (p.q) query.set('q', p.q)
-    return req<{ total: number; limit: number; offset: number; items: LogItem[] }>(`/logs?${query.toString()}`)
+    return req<{ total: number; limit: number; offset: number; items: LogItem[] }>(`/logs?${query.toString()}`, { signal })
   },
-  getLog: (id: number) => req<LogDetail>(`/logs/${id}`),
-  getLogFacets: () => req<LogFacets>('/logs/facets'),
+  getLog: (id: number, signal?: AbortSignal) => req<LogDetail>(`/logs/${id}`, { signal }),
+  getLogFacets: (signal?: AbortSignal) => req<LogFacets>('/logs/facets', { signal }),
   deleteLog: (id: number) => req<{ ok: boolean }>(`/logs/${id}`, { method: 'DELETE' }),
   clearLogs: () => req<{ ok: boolean }>('/logs', { method: 'DELETE' }),
 
   // ── 思维链存储 ──
-  listThinking: (p: { limit?: number; offset?: number } = {}) => {
+  listThinking: (p: { limit?: number; offset?: number } = {}, signal?: AbortSignal) => {
     const query = new URLSearchParams()
     if (p.limit != null) query.set('limit', String(p.limit))
     if (p.offset != null) query.set('offset', String(p.offset))
-    return req<{ total: number; items: ThinkingEntry[] }>(`/thinking?${query.toString()}`)
+    return req<{ total: number; items: ThinkingEntry[] }>(`/thinking?${query.toString()}`, { signal })
   },
-  getThinking: (sig: string) => req<ThinkingDetail>(`/thinking/${encodeURIComponent(sig)}`),
+  getThinking: (sig: string, signal?: AbortSignal) => req<ThinkingDetail>(`/thinking/${encodeURIComponent(sig)}`, { signal }),
   deleteThinking: (sigs: string[]) =>
     req<{ ok: boolean; deleted: number }>('/thinking', { method: 'DELETE', body: JSON.stringify({ signatures: sigs }) }),
 

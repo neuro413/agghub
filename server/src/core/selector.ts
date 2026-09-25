@@ -4,13 +4,16 @@ import type { Channel } from '../types'
 /** 渠道是否支持该模型（直接列出 或 通过 model_mapping 的别名 key）*/
 function channelSupportsModel(channel: Channel, model: string): boolean {
   if (channel.models.includes(model)) return true
-  if (channel.model_mapping && model in channel.model_mapping) return true
+  if (channel.model_mapping && Object.hasOwn(channel.model_mapping, model)) return true
   return false
 }
 
 /** 把请求模型解析为上游真实模型名 */
 export function resolveUpstreamModel(channel: Channel, requestedModel: string): string {
-  if (channel.model_mapping && channel.model_mapping[requestedModel]) return channel.model_mapping[requestedModel]
+  if (channel.model_mapping && Object.hasOwn(channel.model_mapping, requestedModel)) {
+    const mapped = channel.model_mapping[requestedModel]
+    if (typeof mapped === 'string' && mapped) return mapped
+  }
   return requestedModel
 }
 

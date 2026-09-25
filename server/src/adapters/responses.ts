@@ -24,8 +24,8 @@ export const responsesAdaptor: Adaptor = {
       body: JSON.stringify(body),
     }
   },
-  parseResponse: conv.parseResponse,
-  createStreamDecoder: conv.createStreamDecoder,
+  parseResponse: (json, context) => conv.parseResponse(json, context.requestedModel),
+  createStreamDecoder: context => conv.createStreamDecoder(context.requestedModel, context.budget),
   // 同格式直通：原样转发客户端 body（含 previous_response_id / 内置工具 / reasoning.encrypted_content 等全部字段）
   buildPassthroughRequest(channel, rawBody, upstreamModel, stream) {
     const body: any = { ...rawBody, model: upstreamModel, stream }

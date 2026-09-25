@@ -1,6 +1,7 @@
 import type { ParamOp, ParamRule, Settings, WireFormat } from '../types'
 import { ruleMatchesMeta } from './preprocess'
 import type { PreprocessMeta } from './preprocess'
+import { DANGEROUS_KEYS, isArrayIndex, parseSafePath } from './safePath'
 
 /**
  * 参数修改规则：在发往上游的「最终请求体」上增删改顶层 / 嵌套参数，或对排除消息后的
@@ -48,58 +49,46 @@ export function parseValue(text: string | undefined): any {
   }
 }
 
-function splitPath(key: string | undefined): string[] {
-  return (key ?? '')
-    .split('.')
-    .map((s) => s.trim())
-    .filter(Boolean)
-}
-
-function isIndex(seg: string): boolean {
-  return /^\d+$/.test(seg)
-}
-
 function isContainer(v: any): boolean {
   return v !== null && typeof v === 'object'
 }
 
-/** 读取路径值；不存在返回 undefined */
+function checkArrayKey(obj: any, key: string): void {
+  if (Array.isArray(obj) && !isArrayIndex(key)) throw new Error('数组仅允许通过合法整数下标访问')
+}
+
+/** 只读取自身属性；同时预检整条已有路径，写入前即可发现非法数组访问。 */
 function getPath(obj: any, segs: string[]): any {
   let cur = obj
   for (const seg of segs) {
     if (!isContainer(cur)) return undefined
-    cur = Array.isArray(cur) ? (isIndex(seg) ? cur[Number(seg)] : undefined) : cur[seg]
-    if (cur === undefined) return undefined
+    checkArrayKey(cur, seg)
+    if (!Object.hasOwn(cur, seg)) return undefined
+    cur = cur[seg]
   }
   return cur
 }
 
-/** 写入路径值；中间层缺失或不是容器时创建为对象 */
 function setPath(obj: any, segs: string[], value: any): void {
+  getPath(obj, segs)
   let cur = obj
-  for (let i = 0; i < segs.length - 1; i++) {
-    const seg = segs[i]
-    const k: any = Array.isArray(cur) && isIndex(seg) ? Number(seg) : seg
-    if (!isContainer(cur[k])) cur[k] = {}
-    cur = cur[k]
+  for (const seg of segs.slice(0, -1)) {
+    if (!Object.hasOwn(cur, seg) || !isContainer(cur[seg])) {
+      Object.defineProperty(cur, seg, { value: Object.create(null), writable: true, enumerable: true, configurable: true })
+    }
+    cur = cur[seg]
   }
-  const last = segs[segs.length - 1]
-  if (Array.isArray(cur) && isIndex(last)) cur[Number(last)] = value
-  else cur[last] = value
+  Object.defineProperty(cur, segs[segs.length - 1], { value, writable: true, enumerable: true, configurable: true })
 }
 
-/** 删除路径值；返回是否真的删掉了东西 */
 function deletePath(obj: any, segs: string[]): boolean {
   const parent = segs.length > 1 ? getPath(obj, segs.slice(0, -1)) : obj
   if (!isContainer(parent)) return false
   const last = segs[segs.length - 1]
-  if (Array.isArray(parent)) {
-    if (!isIndex(last) || Number(last) >= parent.length) return false
-    parent.splice(Number(last), 1)
-    return true
-  }
-  if (!(last in parent)) return false
-  delete parent[last]
+  checkArrayKey(parent, last)
+  if (!Object.hasOwn(parent, last)) return false
+  if (Array.isArray(parent)) parent.splice(Number(last), 1)
+  else delete parent[last]
   return true
 }
 
@@ -126,11 +115,7 @@ export function applyParamRulesToObject(body: any, wire: WireFormat, rules: Para
           applyRegexOp(body, op, protectedKeys, errors, label)
           continue
         }
-        const segs = splitPath(op.key)
-        if (!segs.length) {
-          errors.push(`[${label}] ${op.type}: 参数名为空，已跳过`)
-          continue
-        }
+        const segs = parseSafePath(op.key)
         if (protectedKeys.has(segs[0])) {
           errors.push(`[${label}] ${op.type} ${op.key}: ${segs[0]} 为受保护字段，已跳过`)
           continue
@@ -169,7 +154,7 @@ function applyRegexOp(body: any, op: ParamOp, protectedKeys: Set<string>, errors
     errors.push(`[${label}] regex: 正则表达式无效，已跳过`)
     return
   }
-  const rest: Record<string, any> = {}
+  const rest: Record<string, any> = Object.create(null)
   for (const [k, v] of Object.entries(body)) if (!protectedKeys.has(k)) rest[k] = v
   const text = JSON.stringify(rest)
   const replaced = text.replace(re, op.replacement ?? '')
@@ -185,8 +170,15 @@ function applyRegexOp(body: any, op: ParamOp, protectedKeys: Set<string>, errors
     errors.push(`[${label}] regex: 替换结果不是 JSON 对象，已跳过`)
     return
   }
+  const forbidden = Object.keys(parsed).find(k => protectedKeys.has(k) || DANGEROUS_KEYS.has(k))
+  if (forbidden) {
+    errors.push(`[${label}] regex: ${forbidden} 为受保护或危险字段，整条操作已跳过`)
+    return
+  }
   for (const k of Object.keys(body)) if (!protectedKeys.has(k)) delete body[k]
-  Object.assign(body, parsed)
+  for (const [key, value] of Object.entries(parsed)) {
+    Object.defineProperty(body, key, { value, writable: true, enumerable: true, configurable: true })
+  }
 }
 
 /**

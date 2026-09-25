@@ -46,7 +46,9 @@ logsRouter.get('/', (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, created_at, channel_id, channel_name, entry_format, model, upstream_model,
-              status, status_code, latency_ms, prompt_tokens, completion_tokens, total_tokens,
+              status, status_code, latency_ms, request_id, attempt_latency_ms,
+              response_body_truncated, upstream_response_body_truncated,
+              prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
               retry_count, is_stream, error_message, preprocessed, pseudo_thinking
        FROM request_logs ${whereSql}

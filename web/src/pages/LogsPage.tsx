@@ -16,6 +16,7 @@ import { useToast } from '../components/Toast'
 import type { LogFacets, LogItem } from '../types'
 import { LogDetailModal } from './LogDetailModal'
 import { fmtShort } from './preprocessShared'
+import { clampOffset, useLatestRequest } from '../lib/useLatestRequest'
 
 const PAGE_SIZE = 50
 
@@ -49,6 +50,7 @@ export function LogsPage() {
   const [items, setItems] = useState<LogItem[]>([])
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [refresh, setRefresh] = useState(0)
   const [facets, setFacets] = useState<LogFacets>({ models: [], channels: [] })
   const [openId, setOpenId] = useState<number | null>(null)
   const toast = useToast()
@@ -56,6 +58,7 @@ export function LogsPage() {
   // 关键词防抖
   const debTimer = useRef<number | null>(null)
   useEffect(() => {
+    if (qInput === filters.q) return
     if (debTimer.current) window.clearTimeout(debTimer.current)
     debTimer.current = window.setTimeout(() => {
       setFilters((f) => ({ ...f, q: qInput }))
@@ -64,10 +67,14 @@ export function LogsPage() {
     return () => {
       if (debTimer.current) window.clearTimeout(debTimer.current)
     }
-  }, [qInput])
+  }, [qInput, filters.q])
 
+  const requests = useLatestRequest()
+  const [loadError, setLoadError] = useState('')
   const load = useCallback(async () => {
+    const request = requests.begin()
     setLoading(true)
+    setLoadError('')
     try {
       const r = await api.listLogs({
         limit: PAGE_SIZE,
@@ -78,19 +85,23 @@ export function LogsPage() {
         channel_id: filters.channel_id ? Number(filters.channel_id) : undefined,
         model: filters.model || undefined,
         q: filters.q || undefined,
-      })
-      setItems(r.items)
+      }, request.signal)
+      if (!request.current()) return
       setTotal(r.total)
+      const valid = clampOffset(offset, r.total, PAGE_SIZE)
+      if (valid !== offset) { setOffset(valid); return }
+      setItems(r.items)
     } catch (e: any) {
-      toast('err', e.message)
+      if (request.current()) { setLoadError(e.message); toast('err', e.message) }
     } finally {
-      setLoading(false)
+      if (request.current()) setLoading(false)
     }
-  }, [offset, filters, toast])
+  }, [offset, filters, toast, requests])
 
   useEffect(() => {
     load()
-  }, [load])
+    return () => requests.cancel()
+  }, [load, requests, refresh])
 
   useEffect(() => {
     api.getLogFacets().then(setFacets).catch(() => {})
@@ -112,7 +123,8 @@ export function LogsPage() {
     try {
       await api.deleteLog(id)
       toast('ok', '已删除')
-      load()
+      setOpenId(current => current === id ? null : current)
+      setRefresh(value => value + 1)
     } catch (err: any) {
       toast('err', err.message)
     }
@@ -123,8 +135,9 @@ export function LogsPage() {
     try {
       await api.clearLogs()
       toast('ok', '日志已清空')
+      setOpenId(null)
       setOffset(0)
-      load()
+      setRefresh(value => value + 1)
       api.getLogFacets().then(setFacets).catch(() => {})
     } catch (e: any) {
       toast('err', e.message)
@@ -228,7 +241,7 @@ export function LogsPage() {
           <div className="ah-logt-empty">
             <span className="ah-spin ah-spin-orange" /> 加载中…
           </div>
-        ) : items.length === 0 ? (
+        ) : loadError ? <div className="ah-logt-empty" role="alert">加载失败：{loadError}</div> : items.length === 0 ? (
           <div className="ah-logt-empty">
             <IconLogs size={30} style={{ opacity: 0.4, display: 'block', margin: '0 auto 10px' }} />
             {hasFilter ? '没有符合条件的日志' : '暂无请求日志'}
@@ -268,7 +281,7 @@ export function LogsPage() {
         )}
 
         {/* 分页 */}
-        {total > PAGE_SIZE && (
+        {(total > PAGE_SIZE || offset > 0) && (
           <div className="ah-logt-pager">
             <IconButton title="上一页" onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>
               <IconChevronLeft size={18} />
@@ -283,7 +296,7 @@ export function LogsPage() {
         )}
       </Card>
 
-      {openId != null && <LogDetailModal id={openId} onClose={() => setOpenId(null)} onDeleted={() => { setOpenId(null); load() }} />}
+      {openId != null && <LogDetailModal id={openId} onClose={() => setOpenId(null)} onDeleted={() => { setOpenId(null); setRefresh(value => value + 1) }} />}
     </div>
   )
 }

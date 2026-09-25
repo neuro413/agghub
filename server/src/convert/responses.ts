@@ -5,6 +5,7 @@ import { finishToResponsesStatus, responsesStatusToFinish } from './reasonmap'
 import { decodeReasoningItem, encodeReasoningItem, reasoningFromResponses, reasoningItemsText, stableReasoningId } from './reasoning'
 import { usageFromResponses, usageToResponses } from './usage'
 import type { IRReasoningItem } from '../types'
+import { BufferBudget } from '../core/capture'
 
 // OpenAI Responses API：既可作上游渠道（POST /v1/responses），也可作对外入口（/v1/responses）。
 // IR 仍以 OpenAI Chat 结构为枢纽，本模块负责 Responses ↔ IR 的双向转换。
@@ -647,7 +648,8 @@ export function parseResponse(resp: any, model: string): any {
 }
 
 // ═══════════ 上游方向：Responses SSE 事件 → IR(OpenAI Chat) chunks ═══════════
-export function createStreamDecoder(model: string): StreamDecoder {
+export function createStreamDecoder(model: string, budget = new BufferBudget(16 * 1024 * 1024)): StreamDecoder {
+  const budgetKey = Symbol('responses-decoder')
   const id = genId()
   const created = nowSec()
   let started = false
@@ -954,11 +956,16 @@ export function createStreamDecoder(model: string): StreamDecoder {
         default:
           break
       }
+      const toolBytes = [...new Set(tools.values())].reduce((n, tool) => n + 128 + Buffer.byteLength(tool.args) + Buffer.byteLength(tool.name) + Buffer.byteLength(tool.callId), 0)
+      const reasonBytes = [...new Set(reasons.values())].reduce((n, reason) => n + 64 + Buffer.byteLength(reason.text), 0)
+      const groupBytes = [...new Set([group, closedGroup])].reduce((n, item) => n + (item ? Buffer.byteLength(item.text) + item.items.reduce((sum, part) => sum + Buffer.byteLength(part.encrypted) + 64, 0) : 0), 0)
+      budget.hold(budgetKey, toolBytes + reasonBytes + groupBytes + followerKeys.size * 64)
       return out
     },
     flush() {
       return []
     },
+    dispose() { tools.clear(); reasons.clear(); followerKeys.clear(); group = null; closedGroup = null; budget.release(budgetKey) },
   }
 }
 
@@ -1253,6 +1260,7 @@ function reasoningItemToOutput(it: IRReasoningItem, status: string): any {
 
 export interface ResponsesEncodeOptions {
   model?: string
+  budget?: BufferBudget
   /** 请求侧声明的 custom 工具名，用于把同名 tool_call 还原为 custom_tool_call */
   customToolNames?: string[]
 }
@@ -1356,6 +1364,10 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
     callId?: string
     name?: string
     custom?: boolean
+    sourceKind?: 'function' | 'custom'
+    wrapped?: boolean
+    added?: boolean
+    emitted?: number
     done: boolean
   }
   const order: Item[] = []
@@ -1363,6 +1375,10 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
   let curMsg: Item | null = null
   let curReason: Item | null = null
   const tools = new Map<number, Item>()
+  const budget = opts?.budget ?? new BufferBudget(16 * 1024 * 1024)
+  const budgetKey = Symbol('responses-output')
+  const updateBudget = () => budget.hold(budgetKey, order.reduce((n, item) => n + 256 + Buffer.byteLength(item.text) + Buffer.byteLength(item.refusal) + Buffer.byteLength(item.encrypted || '') + Buffer.byteLength(item.name || '') + Buffer.byteLength(item.callId || ''), 0))
+  const clear = () => { order.length = 0; tools.clear(); curMsg = null; curReason = null; budget.release(budgetKey) }
 
   const ev = (type: string, data: any): string => `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: seq++, ...data })}\n\n`
 
@@ -1432,14 +1448,41 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
     out += ev('response.output_item.done', { output_index: it.outputIndex, item: reasoningItem(it, itemStatus()) })
     return out
   }
+  const addTool = (it: Item): string => {
+    if (it.added || !it.callId || !it.name) return ''
+    it.custom = it.sourceKind === 'custom' || customNames.has(it.name)
+    it.wrapped = it.custom && it.sourceKind !== 'custom'
+    it.added = true
+    const item = it.custom
+      ? { id: it.id, type: 'custom_tool_call', status: 'in_progress', call_id: it.callId, name: it.name, input: '' }
+      : { id: it.id, type: 'function_call', status: 'in_progress', call_id: it.callId, name: it.name, arguments: '' }
+    return ev('response.output_item.added', { output_index: it.outputIndex, item })
+  }
+  const emitToolInput = (it: Item): string => {
+    if (!it.added || it.wrapped) return ''
+    const delta = it.text.slice(it.emitted || 0)
+    it.emitted = it.text.length
+    if (!delta) return ''
+    return ev(it.custom ? 'response.custom_tool_call_input.delta' : 'response.function_call_arguments.delta', { item_id: it.id, output_index: it.outputIndex, delta })
+  }
   const closeTool = (it: Item): string => {
     if (it.done) return ''
-    it.done = true
+    let out = addTool(it)
+    if (!it.added) throw new Error('上游工具调用缺少 ID 或名称')
+    if (it.wrapped) {
+      let parsed: any
+      try { parsed = JSON.parse(it.text) } catch { throw new Error('custom 工具的包装 JSON 不完整') }
+      if (!parsed || typeof parsed.input !== 'string') throw new Error('custom 工具包装缺少字符串 input')
+      it.text = parsed.input
+      it.wrapped = false
+    }
     if (!it.custom && !it.text) it.text = '{}'
+    out += emitToolInput(it)
+    it.done = true
     const doneEv = it.custom
       ? ev('response.custom_tool_call_input.done', { item_id: it.id, output_index: it.outputIndex, input: it.text })
       : ev('response.function_call_arguments.done', { item_id: it.id, output_index: it.outputIndex, name: it.name || '', arguments: it.text })
-    return doneEv + ev('response.output_item.done', { output_index: it.outputIndex, item: toolItem(it, itemStatus()) })
+    return out + doneEv + ev('response.output_item.done', { output_index: it.outputIndex, item: toolItem(it, itemStatus()) })
   }
 
   const openMsg = (): string => {
@@ -1465,6 +1508,7 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
 
   return {
     encode(chunk) {
+      if (finalized) return ''
       let out = ''
       model = chunk.model || model
       if (chunk.usage) usage = chunk.usage
@@ -1489,7 +1533,6 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       if (typeof delta.reasoning_signature === 'string' && delta.reasoning_signature.length) {
         // 签名到达 = 一个 thinking 块结束：把正文 + 签名打包成 encrypted_content 并关闭该项
         out += openReason()
-        curReason!.id = stableReasoningId(delta.reasoning_signature)
         out += closeReason(encodeReasoningItem({ text: curReason!.text, signature: delta.reasoning_signature }))
       }
       if (typeof delta.content === 'string' && delta.content.length) {
@@ -1509,56 +1552,39 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
         for (const tc of delta.tool_calls) {
           if (!tc) continue
           const idx = tc.index ?? 0
+          if (!Number.isSafeInteger(idx) || idx < 0) throw new Error('工具调用 index 无效')
           let it = tools.get(idx)
           if (!it) {
             out += closeMsg() + closeReason()
             const custom = isCustomCall(tc, customNames)
             it = {
-              kind: 'tool',
-              outputIndex: nextOutputIndex++,
-              id: rid(custom ? 'ctc' : 'fc'),
-              text: '',
-              refusal: '',
-              callId: tc.id || genId('call'),
-              name: tc.function?.name || tc.custom?.name || '',
-              custom,
-              done: false,
+              kind: 'tool', outputIndex: nextOutputIndex++, id: rid(custom ? 'ctc' : 'fc'),
+              text: '', refusal: '', callId: '', name: '', custom, done: false,
+              sourceKind: tc.type === 'custom' || tc.custom ? 'custom' : 'function', emitted: 0,
             }
             tools.set(idx, it)
             order.push(it)
-            const added = custom
-              ? { id: it.id, type: 'custom_tool_call', status: 'in_progress', call_id: it.callId, name: it.name, input: '' }
-              : { id: it.id, type: 'function_call', status: 'in_progress', call_id: it.callId, name: it.name, arguments: '' }
-            out += ev('response.output_item.added', { output_index: it.outputIndex, item: added })
-          } else if ((tc.function?.name || tc.custom?.name) && !it.name) {
-            it.name = tc.function?.name || tc.custom?.name
           }
-          const args = tc.type === 'custom' ? tc.custom?.input : tc.function?.arguments
-          if (typeof args === 'string' && args.length) {
-            it.text += args
-            out += it.custom
-              ? ev('response.custom_tool_call_input.delta', { item_id: it.id, output_index: it.outputIndex, delta: args })
-              : ev('response.function_call_arguments.delta', { item_id: it.id, output_index: it.outputIndex, delta: args })
-          }
+          const name = tc.function?.name || tc.custom?.name
+          if (tc.id && it.callId && tc.id !== it.callId) throw new Error('同一工具调用的 ID 发生变化')
+          if (name && it.name && name !== it.name) throw new Error('同一工具调用的名称发生变化')
+          if (tc.id) it.callId = tc.id
+          if (name) it.name = name
+          const args = it.sourceKind === 'custom' ? tc.custom?.input : tc.function?.arguments
+          if (typeof args === 'string') it.text += args
+          out += addTool(it)
+          out += emitToolInput(it)
         }
       }
       if (fr) finishReason = fr
+      updateBudget()
       return out
     },
     finalize() {
       if (finalized) return ''
-      finalized = true
       let out = ensureStart()
       out += closeMsg() + closeReason()
       for (const it of tools.values()) out += closeTool(it)
-      // Claude 侧 custom 工具的 { input } 包装在收尾时解开
-      for (const it of tools.values()) {
-        if (!it.custom) continue
-        try {
-          const parsed = JSON.parse(it.text)
-          if (parsed && typeof parsed === 'object' && typeof parsed.input === 'string') it.text = parsed.input
-        } catch {}
-      }
       if (!finishReason && tools.size) finishReason = 'tool_calls'
       const { status, incomplete_details } = finishToResponsesStatus(finishReason)
       const resp = responseObj(status)
@@ -1567,6 +1593,8 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       resp.output = order.map((it) => (it.kind === 'message' ? messageItem(it, st) : it.kind === 'reasoning' ? reasoningItem(it, st) : toolItem(it, st)))
       resp.usage = usageToResponses(usage)
       out += ev(status === 'incomplete' ? 'response.incomplete' : 'response.completed', { response: resp })
+      finalized = true
+      clear()
       return out
     },
     fail(message) {
@@ -1578,8 +1606,10 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       resp.output = order.map((it) => (it.kind === 'message' ? messageItem(it, 'incomplete') : it.kind === 'reasoning' ? reasoningItem(it, 'incomplete') : toolItem(it, 'incomplete')))
       resp.usage = usageToResponses(usage)
       out += ev('response.failed', { response: resp })
+      clear()
       return out
     },
+    dispose() { finalized = true; clear() },
   }
 }
 
@@ -1596,7 +1626,7 @@ export function isEmptyResponseBody(json: any): boolean {
         if (c?.type === 'refusal' && (c.refusal || '').trim()) return false
       }
     } else if (item.type === 'reasoning') {
-      if (reasoningItemText(item).trim()) return false
+      if (reasoningItemText(item).trim() || item.encrypted_content) return false
     } else if (item.type === 'function_call' || item.type === 'custom_tool_call' || HOSTED_CALL_TYPES.has(item.type)) {
       return false
     }

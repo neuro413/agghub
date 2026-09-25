@@ -5,6 +5,7 @@ import { IconTrash } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import type { ThinkingDetail, ThinkingEntry } from '../types'
+import { clampOffset, useLatestRequest } from '../lib/useLatestRequest'
 
 const PAGE_SIZE = 30
 
@@ -12,30 +13,42 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
   const toast = useToast()
   const [items, setItems] = useState<ThinkingEntry[] | null>(null)
   const [total, setTotal] = useState(0)
+  const [refresh, setRefresh] = useState(0)
   const [offset, setOffset] = useState(0)
   const [detail, setDetail] = useState<ThinkingDetail | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
+  const requests = useLatestRequest()
+  const detailRequests = useLatestRequest()
+  const [loadError, setLoadError] = useState('')
   const load = useCallback(async () => {
+    const request = requests.begin()
+    setLoadError('')
     try {
-      const r = await api.listThinking({ limit: PAGE_SIZE, offset })
-      setItems(r.items)
+      const r = await api.listThinking({ limit: PAGE_SIZE, offset }, request.signal)
+      if (!request.current()) return
       setTotal(r.total)
+      const valid = clampOffset(offset, r.total, PAGE_SIZE)
+      if (valid !== offset) { setOffset(valid); return }
+      setItems(r.items)
+      setSelected(prev => new Set([...prev].filter(sig => r.items.some(item => item.signature === sig))))
     } catch (e: any) {
-      toast('err', e.message)
+      if (request.current()) { setLoadError(e.message); toast('err', e.message) }
     }
-  }, [offset, toast])
+  }, [offset, toast, requests])
 
   useEffect(() => {
     load()
-  }, [load])
+    return () => requests.cancel()
+  }, [load, requests, refresh])
 
   const viewFull = async (sig: string) => {
+    const request = detailRequests.begin()
     try {
-      const d = await api.getThinking(sig)
-      setDetail(d)
+      const d = await api.getThinking(sig, request.signal)
+      if (request.current()) setDetail(d)
     } catch (e: any) {
-      toast('err', e.message)
+      if (request.current()) toast('err', e.message)
     }
   }
 
@@ -45,7 +58,9 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
       const r = await api.deleteThinking([...selected])
       toast('ok', `已删除 ${r.deleted} 条`)
       setSelected(new Set())
-      load()
+      detailRequests.cancel()
+      setDetail(null)
+      setRefresh(value => value + 1)
     } catch (e: any) {
       toast('err', e.message)
     }
@@ -78,12 +93,10 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
             {detail.thinking}
           </pre>
         </div>
-      ) : !items ? (
+      ) : loadError ? <div role="alert">加载失败：{loadError}<Button onClick={load}>重试</Button></div> : !items ? (
         <div className="ah-logt-empty">
           <span className="ah-spin ah-spin-orange" /> 加载中&hellip;
         </div>
-      ) : !items.length ? (
-        <div className="ah-detail-empty">暂无已保存的思维链</div>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
@@ -95,6 +108,7 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
               </Button>
             )}
           </div>
+          {!items.length && <div className="ah-detail-empty">暂无已保存的思维链</div>}
           <div className="ah-pp-picker">
             {items.map((e) => (
               <div
@@ -127,7 +141,9 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
                       .deleteThinking([e.signature])
                       .then(() => {
                         toast('ok', '已删除')
-                        load()
+                        detailRequests.cancel()
+                        setDetail(null)
+                        setRefresh(value => value + 1)
                       })
                       .catch((err) => toast('err', err.message))
                   }
@@ -137,7 +153,7 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
               </div>
             ))}
           </div>
-          {total > PAGE_SIZE && (
+          {(total > PAGE_SIZE || offset > 0) && (
             <div className="ah-logt-pager">
               <Button variant="ghost" size="sm" disabled={offset === 0} onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}>
                 上一页

@@ -1,5 +1,9 @@
 import type { Settings } from '../types'
 import { matchesDropThinking } from './preprocess'
+import { validateThinkingTags } from './settingsValidation'
+import { BufferBudget } from './capture'
+
+let lastInvalidTagWarning = -Infinity
 
 // ── 命中判断 ──────────────────────────────────────────────
 
@@ -12,6 +16,13 @@ export function matchesPseudoThinking(
 ): boolean {
   if (entryFormat !== 'anthropic' || wireFormat !== 'anthropic') return false
   if (!settings.pseudo_thinking_enabled || !settings.drop_thinking) return false
+  try { validateThinkingTags(settings.pseudo_thinking_open_tag, settings.pseudo_thinking_close_tag) } catch {
+    if (Date.now() - lastInvalidTagWarning > 60_000) {
+      lastInvalidTagWarning = Date.now()
+      console.warn('[agghub] 伪思考标签配置无效，本次跳过伪思考；请在预处理页修正标签')
+    }
+    return false
+  }
   if (settings.drop_thinking_keep_last > 0) return false
   // 伪思考依赖丢弃 thinking：本请求未命中丢弃范围（渠道/模型限定）时不得附加伪思考
   if (!matchesDropThinking(channelId, model, settings)) return false
@@ -120,16 +131,19 @@ export function splitIRResponse(
 export interface ChunkTransform {
   transform(chunk: any): any[]
   flush(): any[]
+  dispose?(): void
 }
 
 export function createPseudoThinkingTransform(
   settings: Settings,
   storeSave: (text: string) => string,
+  budget?: BufferBudget,
 ): ChunkTransform {
   const splitter = new ThinkingTextSplitter(
     settings.pseudo_thinking_open_tag,
     settings.pseudo_thinking_close_tag,
     storeSave,
+    budget,
   )
   let shell: any = null
 
@@ -149,6 +163,7 @@ export function createPseudoThinkingTransform(
     flush() {
       return splitter.flush().map((d) => wrapDelta(shell || {}, d))
     },
+    dispose() { splitter.dispose(); shell = null },
   }
 }
 
@@ -178,8 +193,11 @@ class ThinkingTextSplitter {
   private lstripThink = false
   private lstripText = true
   private thinkParts: string[] = []
+  private thinkBytes = 0
+  private budgetKey = Symbol('pseudo-thinking')
 
-  constructor(open: string, close: string, onClose: (thinking: string) => string) {
+  constructor(open: string, close: string, onClose: (thinking: string) => string, private budget = new BufferBudget(16 * 1024 * 1024)) {
+    validateThinkingTags(open, close)
     this.open = open
     this.close = close
     this.onClose = onClose
@@ -189,7 +207,10 @@ class ThinkingTextSplitter {
     if (!text) return []
     this.buf += text
     const out: any[] = []
+    let previousLength = this.buf.length + 1
     for (;;) {
+      if (this.buf.length >= previousLength) throw new Error('伪思考切分器未推进')
+      previousLength = this.buf.length
       if (this.inThink) {
         const idx = this.buf.indexOf(this.close)
         if (idx >= 0) {
@@ -253,13 +274,24 @@ class ThinkingTextSplitter {
       if (!t) return
       this.lstripThink = false
     }
+    this.thinkBytes += Buffer.byteLength(t) + 32
+    this.budget.hold(this.budgetKey, this.thinkBytes + 512)
     this.thinkParts.push(t)
     out.push({ reasoning_content: t })
+  }
+
+  dispose(): void {
+    this.buf = ''
+    this.thinkParts = []
+    this.thinkBytes = 0
+    this.budget.release(this.budgetKey)
   }
 
   private emitSignature(out: any[]): void {
     const full = this.thinkParts.join('')
     this.thinkParts = []
+    this.thinkBytes = 0
+    this.budget.release(this.budgetKey)
     if (!full) return
     const sig = this.onClose(full)
     if (sig) out.push({ reasoning_signature: sig })

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
-import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
+import { BACKUP_DIR, DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
+import { migrateLogs } from './migrations/logs'
 import type { Channel, ChannelRow, ChannelStatus, ParamRule, PreprocessRule, Settings, ToolFilterRule } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -9,16 +10,10 @@ export const db = new Database(DB_PATH)
 db.pragma('journal_mode = WAL')
 db.pragma('busy_timeout = 5000')
 
-// ── 旧版日志表迁移（破坏性）────────────────────────────
-// 旧版把请求 / 响应正文以 TEXT 直接存在 request_logs 行里，重试行、原始 / 预处理双份、多轮对话历史全部重复落盘。
-// 新版改为 blobs 内容寻址块存储，格式不兼容：检测到旧列则整表丢弃重建（渠道 / 设置不受影响）。
-{
-  const cols = db.prepare('PRAGMA table_info(request_logs)').all() as { name: string }[]
-  if (cols.length && cols.some((c) => c.name === 'request_body')) {
-    console.warn('[agghub] 检测到旧版 request_logs（行内正文），迁移到块存储：丢弃旧日志并重建表')
-    db.exec('DROP TABLE request_logs')
-  }
-}
+// 日志结构变更先创建包含 WAL 的一致性备份；失败时停止启动，旧日志不会被丢弃。
+const logMigration = migrateLogs(db, BACKUP_DIR)
+if (logMigration.backupPath) console.warn(`[agghub] 日志迁移前备份：${logMigration.backupPath}`)
+if (logMigration.legacyTable) console.warn(`[agghub] 旧日志保留于 ${logMigration.legacyTable}，请验收后再安排归档清理`)
 // 增量自动回收：删日志后能逐步归还空闲页而不用整库 VACUUM。修改该 pragma 需要 VACUUM 一次才生效。
 if (db.pragma('auto_vacuum', { simple: true }) !== 2) {
   db.pragma('auto_vacuum = INCREMENTAL')
@@ -45,59 +40,6 @@ CREATE TABLE IF NOT EXISTS channels (
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
-
-CREATE TABLE IF NOT EXISTS request_logs (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at      INTEGER NOT NULL,
-  channel_id      INTEGER,
-  channel_name    TEXT,
-  entry_format    TEXT    NOT NULL DEFAULT 'openai',
-  model           TEXT,
-  upstream_model  TEXT,
-  status          TEXT    NOT NULL,
-  status_code     INTEGER,
-  latency_ms      INTEGER,
-  prompt_tokens   INTEGER DEFAULT 0,
-  completion_tokens INTEGER DEFAULT 0,
-  total_tokens    INTEGER DEFAULT 0,
-  cache_read_tokens  INTEGER DEFAULT 0,
-  cache_write_tokens INTEGER DEFAULT 0,
-  retry_count     INTEGER DEFAULT 0,
-  is_stream       INTEGER DEFAULT 0,
-  is_retry        INTEGER DEFAULT 0,
-  error_message   TEXT,
-  preprocessed    INTEGER DEFAULT 0,
-  pseudo_thinking INTEGER DEFAULT 0,
-  -- 大正文一律存 blobs 表，这里只放 32 字节 sha256 引用（见 stats/blobstore.ts）
-  request_headers_ref        BLOB,
-  request_body_ref           BLOB,
-  response_body_ref          BLOB,
-  preprocessed_body_ref      BLOB,
-  thinking_inject_ref        BLOB,
-  upstream_response_body_ref BLOB
-);
-
-CREATE INDEX IF NOT EXISTS idx_logs_created  ON request_logs(created_at);
-CREATE INDEX IF NOT EXISTS idx_logs_channel  ON request_logs(channel_id);
-CREATE INDEX IF NOT EXISTS idx_logs_model    ON request_logs(model);
-CREATE INDEX IF NOT EXISTS idx_logs_status   ON request_logs(status);
-
--- 内容寻址块：hash = sha256(原文)，codec 0=raw 1=zstd 2=gzip
-CREATE TABLE IF NOT EXISTS blobs (
-  hash       BLOB    PRIMARY KEY,
-  raw_size   INTEGER NOT NULL,
-  codec      INTEGER NOT NULL,
-  data       BLOB    NOT NULL,
-  created_at INTEGER NOT NULL
-) WITHOUT ROWID;
-
--- manifest → 子块 引用边，供 GC 判活
-CREATE TABLE IF NOT EXISTS blob_edges (
-  parent BLOB NOT NULL,
-  child  BLOB NOT NULL,
-  PRIMARY KEY (parent, child)
-) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_blob_edges_child ON blob_edges(child);
 
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
@@ -131,7 +73,7 @@ CREATE TABLE IF NOT EXISTS settings (
 // ── settings 读写 ───────────────────────────────────────
 export function getSettingsRaw(): Record<string, string> {
   const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-  const o: Record<string, string> = {}
+  const o: Record<string, string> = Object.create(null)
   for (const r of rows) o[r.key] = r.value
   return o
 }
@@ -143,6 +85,15 @@ export function getSettings(): Settings {
     channel_retry_times: Number(r.channel_retry_times ?? 2),
     retry_interval_ms: Number(r.retry_interval_ms ?? 0),
     request_timeout_ms: Number(r.request_timeout_ms ?? 120000),
+    request_max_duration_ms: Number(r.request_max_duration_ms ?? DEFAULT_SETTINGS.request_max_duration_ms),
+    downstream_timeout_ms: Number(r.downstream_timeout_ms ?? DEFAULT_SETTINGS.downstream_timeout_ms),
+    log_response_max_bytes: Number(r.log_response_max_bytes ?? DEFAULT_SETTINGS.log_response_max_bytes),
+    stream_buffer_max_bytes: Number(r.stream_buffer_max_bytes ?? DEFAULT_SETTINGS.stream_buffer_max_bytes),
+    image_max_bytes: Number(r.image_max_bytes ?? DEFAULT_SETTINGS.image_max_bytes),
+    image_total_max_bytes: Number(r.image_total_max_bytes ?? DEFAULT_SETTINGS.image_total_max_bytes),
+    image_max_count: Number(r.image_max_count ?? DEFAULT_SETTINGS.image_max_count),
+    image_download_concurrency: Number(r.image_download_concurrency ?? DEFAULT_SETTINGS.image_download_concurrency),
+    image_allowed_hosts: safeArray(r.image_allowed_hosts),
     failover_strategy: 'priority_descend',
     auto_ban: r.auto_ban === '1',
     auto_ban_codes: r.auto_ban_codes ?? '401,403',

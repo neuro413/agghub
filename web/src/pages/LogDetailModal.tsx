@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast'
 import { contentToText, paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
 import type { LogDetail } from '../types'
+import { copyText } from '../lib/clipboard'
 
 const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|password|proxy-authorization/i
 
@@ -66,15 +67,15 @@ export function LogDetailModal({
   const [showUpstream, setShowUpstream] = useState(false)
 
   useEffect(() => {
-    api
-      .getLog(id)
-      .then(setDetail)
-      .catch((e) => toast('err', e.message))
+    const controller = new AbortController()
+    setDetail(null)
+    api.getLog(id, controller.signal).then(value => { if (!controller.signal.aborted) setDetail(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    return () => controller.abort()
   }, [id, toast])
 
-  const copy = (text: string, label = '已复制') => {
-    navigator.clipboard?.writeText(text)
-    toast('ok', label)
+  const copy = async (text: string, label = '已复制') => {
+    if (await copyText(text)) toast('ok', label)
+    else toast('err', '复制失败，请选择显示的内容手动复制')
   }
 
   const del = async () => {
@@ -123,6 +124,9 @@ export function LogDetailModal({
       ) : (
         <>
           <LogMeta detail={detail} />
+          {detail.request_id && <div className="ah-mini ah-muted">请求 ID：{detail.request_id} · 总耗时 {detail.latency_ms ?? 0}ms · 最后尝试 {detail.attempt_latency_ms ?? '—'}ms</div>}
+          {!!(detail.response_body_truncated || detail.upstream_response_body_truncated) && <div role="note" className="ah-detail-empty">日志正文已截断，仅保存前缀；复制得到的也只有已保存内容。实际业务输出不受日志上限影响。</div>}
+          {detail.preprocessed_body?.includes('"contents"') && !showOriginal && <div className="ah-mini ah-muted">当前为 Gemini 上游请求体，请在「原始」标签查看 contents；切换原始请求可查看客户端对话。</div>}
           {detail.preprocessed_body && (
             <div className="ah-pp-viewbar">
               <span className={`ah-pp-viewflag${showOriginal ? '' : ' is-pp'}`}>

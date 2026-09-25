@@ -1,3 +1,14 @@
+import { RequestStopped } from './requestLifecycle'
+
+export class LocalRequestError extends Error {
+  constructor(message: string, readonly status = 400) { super(message); this.name = 'LocalRequestError' }
+}
+
+/** 当前渠道无法处理输入，可切换渠道，重复尝试当前渠道没有帮助。 */
+export class CandidateError extends Error {
+  constructor(message: string) { super(message); this.name = 'CandidateError' }
+}
+
 /** 上游返回的 HTTP 错误（非 2xx）*/
 export class UpstreamError extends Error {
   status: number
@@ -30,22 +41,18 @@ export function isBudgetPoolExhausted(err: any): boolean {
 
 /** 是否为瞬时错误、值得在「本渠道」再试一次：网络/超时/5xx/429/402 额度池耗尽 → true；其余 4xx → false */
 export function shouldRetry(err: any): boolean {
-  if (!(err instanceof UpstreamError)) return true // 网络错误 / 超时 / abort
+  if (err instanceof LocalRequestError || err instanceof CandidateError) return false
+  if (err instanceof RequestStopped) return err.reason === 'upstream_idle'
+  if (!(err instanceof UpstreamError)) return true // 网络错误 / 上游超时
   if (err.status === 429) return true
   if (err.status >= 500) return true
   if (isBudgetPoolExhausted(err)) return true
   return false
 }
 
-/**
- * 是否为「请求级」错误：请求本身有问题（参数非法/过大/无法处理），换任何渠道都会同样失败。
- * 命中则直接把原始错误返回客户端，不再重试、不再换渠道，避免空跑拖延。
- * 注意 401/403（凭证失效）/404（该渠道无此模型）不算请求级 —— 换个渠道仍可能成功。
- */
+/** 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理。 */
 export function isRequestError(err: any): boolean {
-  if (!(err instanceof UpstreamError)) return false // 网络/超时归为可换渠道重试
-  const s = err.status
-  return s === 400 || s === 413 || s === 422
+  return err instanceof LocalRequestError
 }
 
 /** 是否应自动禁用该渠道：命中熔断状态码（默认 401/403，多为凭证失效）*/

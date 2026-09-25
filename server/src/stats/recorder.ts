@@ -1,4 +1,5 @@
 import { db, getSettings } from '../db'
+import type { Settings } from '../types'
 import { gcBlobs, getBlob, getJsonBody, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
 
 export interface LogEntry {
@@ -10,6 +11,10 @@ export interface LogEntry {
   status: 'success' | 'error'
   status_code: number | null
   latency_ms: number | null
+  request_id?: string | null
+  attempt_latency_ms?: number | null
+  response_body_truncated?: boolean
+  upstream_response_body_truncated?: boolean
   prompt_tokens?: number
   completion_tokens?: number
   total_tokens?: number
@@ -39,20 +44,21 @@ const insertStmt = db.prepare(
     latency_ms, prompt_tokens, completion_tokens, total_tokens, cache_read_tokens, cache_write_tokens,
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
-    upstream_response_body_ref)
+    upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
-    @upstream_response_body_ref)`,
+    @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated)`,
 )
 
-const opt = (s: string | null | undefined, put: (t: string) => Buffer): Buffer | null => (s ? put(s) : null)
+const opt = (s: string | null | undefined, put: (t: string) => Buffer): Buffer | null => (s == null ? null : put(s))
+type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
 
-/** 写一条日志；大正文写入块存储（去重 + 压缩），整个过程在一个事务内 */
-export const recordLog = db.transaction((e: LogEntry): void => {
-  const s = getSettings()
+/** 写一条日志；大正文写入块存储（去重 + 压缩），整个过程在一个事务内。 */
+export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings): void => {
+  const s = snapshot ?? getSettings()
   const storeReq = s.store_request_body
   const storeRes = s.store_response_body
   insertStmt.run({
@@ -65,6 +71,10 @@ export const recordLog = db.transaction((e: LogEntry): void => {
     status: e.status,
     status_code: e.status_code ?? null,
     latency_ms: e.latency_ms ?? null,
+    request_id: e.request_id ?? null,
+    attempt_latency_ms: e.attempt_latency_ms ?? null,
+    response_body_truncated: e.response_body_truncated ? 1 : 0,
+    upstream_response_body_truncated: e.upstream_response_body_truncated ? 1 : 0,
     prompt_tokens: e.prompt_tokens ?? 0,
     completion_tokens: e.completion_tokens ?? 0,
     total_tokens: e.total_tokens ?? 0,
@@ -84,6 +94,22 @@ export const recordLog = db.transaction((e: LogEntry): void => {
     upstream_response_body_ref: storeRes ? opt(e.upstream_response_body, putBlob) : null,
   })
 })
+
+let lastLogWarning = -Infinity
+
+/** 包含日志构造/序列化的完整故障边界，绝不因此再次请求上游。 */
+export function safeRecordLog(build: () => LogEntry, snapshot?: StorageSettings, requestId?: string): boolean {
+  try {
+    recordLog(build(), snapshot)
+    return true
+  } catch (error) {
+    if (Date.now() - lastLogWarning > 60_000) {
+      lastLogWarning = Date.now()
+      console.error('[agghub] 请求日志未能持久化', { request_id: requestId, category: error instanceof Error ? error.name : 'unknown' })
+    }
+    return false
+  }
+}
 
 /** 日志行 → 对外 API 形状（把 *_ref 解开成原来的正文字段，接口对前端保持不变）*/
 export function hydrateLogRow(row: any): any {

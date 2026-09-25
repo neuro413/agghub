@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
-import { getProxyAgent } from '../core/relay'
+import { getProxyAgent } from '../core/proxy'
+import { abortable } from '../core/requestLifecycle'
+import { readBodyText } from '../core/bodyReader'
 import type { ChannelRow, ChannelType } from '../types'
 
 export const channelsRouter = Router()
@@ -154,14 +156,19 @@ channelsRouter.post('/test', async (req, res) => {
   const started = Date.now()
   const ac = new AbortController()
   const timer = setTimeout(() => ac.abort(), 10_000)
+  const close = () => { if (!res.writableEnded) ac.abort() }
+  res.on('close', close)
   try {
     const proxyUrl = getSettings().proxy_url || undefined
-    const result = await probe(input, ac.signal, proxyUrl)
-    res.json({ ...result, latency_ms: Date.now() - started })
+    const result = await abortable(probe(input, ac.signal, proxyUrl), ac.signal)
+    ac.signal.throwIfAborted()
+    if (!res.destroyed) res.json({ ...result, latency_ms: Date.now() - started })
   } catch (e: any) {
-    res.json({ ok: false, message: e?.name === 'AbortError' ? '请求超时' : String(e?.message || e), latency_ms: Date.now() - started })
+    if (!res.destroyed) res.json({ ok: false, message: e?.name === 'AbortError' ? '请求超时' : String(e?.message || e), latency_ms: Date.now() - started })
   } finally {
     clearTimeout(timer)
+    res.off('close', close)
+    ac.abort()
   }
 })
 
@@ -179,8 +186,10 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
     const root = base || 'https://api.openai.com'
     const url = (/\/v1$/.test(root) ? root : root + '/v1') + '/models'
     const r = await fetch(url, { headers: { Authorization: `Bearer ${key}` }, signal, dispatcher } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }
-    const data: any = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
+    const text = await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
+    let data: any = {}
+    try { data = JSON.parse(text) } catch {}
     const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined
     return { ok: true, message: '连接成功', models }
   }
@@ -189,8 +198,10 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
     const root = base || 'https://api.anthropic.com'
     const url = (/\/v1$/.test(root) ? root : root + '/v1') + '/models'
     const r = await fetch(url, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, signal, dispatcher } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }
-    const data: any = await r.json().catch(() => ({}))
+    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
+    const text = await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
+    let data: any = {}
+    try { data = JSON.parse(text) } catch {}
     const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined
     return { ok: true, message: '连接成功', models }
   }
@@ -210,7 +221,8 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
   if (creds) {
     let token: string
     try {
-      token = await getAccessToken(creds, proxyUrl || undefined)
+      token = await getAccessToken(creds, proxyUrl || undefined, signal)
+      signal.throwIfAborted()
     } catch (e: any) {
       return { ok: false, message: `获取 access_token 失败: ${e.message?.slice(0, 200)}` }
     }
@@ -224,7 +236,8 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
       signal,
       dispatcher,
     } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }
+    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
+    await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
     return { ok: true, message: '连接成功（JSON 凭证）' }
   }
 
@@ -237,6 +250,7 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
     signal,
     dispatcher,
   } as any)
-  if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }
+  if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
+  await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
   return { ok: true, message: '连接成功' }
 }

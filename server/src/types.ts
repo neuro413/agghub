@@ -58,6 +58,11 @@ export interface LogRow {
   status: 'success' | 'error'
   status_code: number | null
   latency_ms: number | null
+  request_id: string | null
+  attempt_latency_ms: number | null
+  response_body_truncated: number
+  upstream_response_body_truncated: number
+  upstream_response_body: string | null
   prompt_tokens: number | null
   completion_tokens: number | null
   total_tokens: number | null
@@ -87,6 +92,15 @@ export interface Settings {
   channel_retry_times: number
   retry_interval_ms: number
   request_timeout_ms: number
+  request_max_duration_ms: number
+  downstream_timeout_ms: number
+  log_response_max_bytes: number
+  stream_buffer_max_bytes: number
+  image_max_bytes: number
+  image_total_max_bytes: number
+  image_max_count: number
+  image_download_concurrency: number
+  image_allowed_hosts: string[]
   failover_strategy: 'priority_descend'
   auto_ban: boolean
   auto_ban_codes: string

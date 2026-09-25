@@ -9,6 +9,7 @@ import { Card } from '../components/Card'
 import { IconBolt, IconCheck, IconChevronRight, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
 import { useToast } from '../components/Toast'
 import type { LogItem, Stats } from '../types'
+import { useLatestRequest } from '../lib/useLatestRequest'
 
 const RANGES: { k: string; label: string }[] = [
   { k: '24h', label: '24 小时' },
@@ -34,19 +35,23 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   const [logs, setLogs] = useState<LogItem[]>([])
   const toast = useToast()
 
+  const requests = useLatestRequest()
   const load = useCallback(async () => {
+    const request = requests.begin()
     try {
-      const [s, l] = await Promise.all([api.getStats(range), api.listLogs({ limit: 5 })])
+      const [s, l] = await Promise.all([api.getStats(range, request.signal), api.listLogs({ limit: 5 }, request.signal)])
+      if (!request.current()) return
       setStats(s)
       setLogs(l.items)
     } catch (e: any) {
-      toast('err', e.message)
+      if (request.current()) toast('err', e.message)
     }
-  }, [range, toast])
+  }, [range, toast, requests])
 
   useEffect(() => {
     load()
-  }, [load])
+    return () => requests.cancel()
+  }, [load, requests])
 
   const ov = stats?.overview
   const rate = Math.round((ov?.success_rate ?? 1) * 100)

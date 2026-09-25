@@ -7,10 +7,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 export const SERVER_ROOT = path.resolve(__dirname, '..')
 /** 项目根 agghub/ */
 export const PROJECT_ROOT = path.resolve(SERVER_ROOT, '..')
-/** SQLite 数据目录 */
-export const DATA_DIR = path.resolve(PROJECT_ROOT, 'data')
+/** SQLite 数据目录；测试必须在进程启动前指定隔离位置。 */
+export const DATA_DIR = path.resolve(process.env.AGGHUB_DATA_DIR || path.join(PROJECT_ROOT, 'data'))
+if (process.env.AGGHUB_TESTING === '1' && DATA_DIR.toLowerCase() === path.join(PROJECT_ROOT, 'data').toLowerCase()) {
+  throw new Error('测试禁止使用项目实际 data 目录，请通过隔离测试启动器运行')
+}
 /** 数据库文件 */
 export const DB_PATH = path.join(DATA_DIR, 'agghub.db')
+/** 迁移前一致性备份目录 */
+export const BACKUP_DIR = path.resolve(process.env.AGGHUB_BACKUP_DIR || path.join(DATA_DIR, 'backups'))
 /** 前端构建产物（生产托管）*/
 export const WEB_DIST = path.resolve(PROJECT_ROOT, 'web', 'dist')
 /** 网关端口（默认 3210，避开常见代理端口）*/
@@ -22,6 +27,15 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   channel_retry_times: '2',
   retry_interval_ms: '0',
   request_timeout_ms: '120000',
+  request_max_duration_ms: '1800000',
+  downstream_timeout_ms: '30000',
+  log_response_max_bytes: '4194304',
+  stream_buffer_max_bytes: '16777216',
+  image_max_bytes: '20971520',
+  image_total_max_bytes: '41943040',
+  image_max_count: '20',
+  image_download_concurrency: '4',
+  image_allowed_hosts: '[]',
   failover_strategy: 'priority_descend',
   auto_ban: '1',
   auto_ban_codes: '401,403',

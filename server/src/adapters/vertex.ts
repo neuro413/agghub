@@ -38,10 +38,13 @@ function buildClaudeUrl(baseUrl: string | null, region: string, projectId: strin
 export const vertexAdaptor: Adaptor = {
   wireFormat: 'gemini',
 
-  async prepareChannel(channel: Channel, proxyUrl?: string) {
+  resolveWireFormat: model => isClaudeModel(model) ? 'anthropic' : 'gemini',
+
+  async prepareChannel(channel: Channel, proxyUrl?: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
     const creds = parseCredentials(channel.api_key)
     if (!creds) return
-    await getAccessToken(creds, proxyUrl)
+    await getAccessToken(creds, proxyUrl, signal)
   },
 
   buildRequest(channel, ir, upstreamModel, stream, opts) {
@@ -105,13 +108,13 @@ export const vertexAdaptor: Adaptor = {
     return { url: `${url}${sep}key=${encodeURIComponent(channel.api_key)}`, headers, body: JSON.stringify(body) }
   },
 
-  parseResponse(json, model) {
-    if (isClaudeModel(model)) return anth.parseResponse(json, model)
-    return gem.parseResponse(json, model)
+  parseResponse(json, context) {
+    if (context.upstreamWire === 'anthropic') return anth.parseResponse(json, context.requestedModel)
+    return gem.parseResponse(json, context.requestedModel)
   },
 
-  createStreamDecoder(model) {
-    if (isClaudeModel(model)) return anth.createStreamDecoder(model)
-    return gem.createStreamDecoder(model)
+  createStreamDecoder(context) {
+    if (context.upstreamWire === 'anthropic') return anth.createStreamDecoder(context.requestedModel, context.budget)
+    return gem.createStreamDecoder(context.requestedModel)
   },
 }

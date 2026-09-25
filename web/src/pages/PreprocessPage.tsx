@@ -14,6 +14,7 @@ import { ThinkingStoreModal } from './ThinkingStoreModal'
 import { ParamRuleEditor, newParamRule } from './ParamRuleEditor'
 import { FORMAT_OPTIONS, LogPickerModal, MultiChips, fmtLabel } from './preprocessShared'
 import type { Opt } from './preprocessShared'
+import { newId, uniqueIds } from '../lib/id'
 
 const ROLE_OPTIONS: Opt[] = [
   { value: 'system', label: 'system' },
@@ -27,11 +28,11 @@ function escapeRegExp(s: string): string {
 }
 
 function newRule(partial?: Partial<PreprocessRule>): PreprocessRule {
-  return { id: crypto.randomUUID(), enabled: true, source: 'regex', pattern: '', flags: 'g', replacement: '', ...partial }
+  return { id: newId(), enabled: true, source: 'regex', pattern: '', flags: 'g', replacement: '', ...partial }
 }
 
 function newToolFilterRule(partial?: Partial<ToolFilterRule>): ToolFilterRule {
-  return { id: crypto.randomUUID(), enabled: true, tools: [], ...partial }
+  return { id: newId(), enabled: true, tools: [], ...partial }
 }
 
 export function PreprocessPage() {
@@ -46,20 +47,22 @@ export function PreprocessPage() {
   const [showStore, setShowStore] = useState(false)
 
   useEffect(() => {
-    api.getSettings().then(setS).catch((e) => toast('err', e.message))
-    api.listChannels().then(setChannels).catch(() => {})
+    const controller = new AbortController()
+    api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    api.listChannels(controller.signal).then(value => { if (!controller.signal.aborted) setChannels(value) }).catch(() => {})
+    return () => controller.abort()
   }, [toast])
 
   const rules = s?.preprocess_rules ?? []
   const toolFilterRules = s?.tool_filter_rules ?? []
   const modelOptions = useMemo<Opt[]>(() => {
     const set = new Set<string>()
-    for (const c of channels) for (const m of c.models || []) set.add(m)
+    for (const c of channels) for (const m of [...(c.models || []), ...Object.keys(c.model_mapping || {})]) set.add(m)
     return [...set].sort().map((m) => ({ value: m, label: m }))
   }, [channels])
   const channelOptions = useMemo<Opt[]>(() => channels.map((c) => ({ value: String(c.id), label: c.name })), [channels])
   const anthChannelOptions = useMemo<Opt[]>(
-    () => channels.filter((c) => c.type === 'anthropic').map((c) => ({ value: String(c.id), label: c.name })),
+    () => channels.filter((c) => c.type === 'anthropic' || c.type === 'vertex').map((c) => ({ value: String(c.id), label: c.name })),
     [channels],
   )
 
@@ -103,8 +106,10 @@ export function PreprocessPage() {
       return n
     })
 
+  const tagError = s && (!s.pseudo_thinking_open_tag.trim() || !s.pseudo_thinking_close_tag.trim() || s.pseudo_thinking_open_tag === s.pseudo_thinking_close_tag || s.pseudo_thinking_open_tag.length > 256 || s.pseudo_thinking_close_tag.length > 256)
+    ? '伪思考开始/结束标签须非空、不同且各不超过 256 字符，请在高级设置中修正。' : ''
   const save = async () => {
-    if (!s) return
+    if (!s || saving || tagError) return
     setSaving(true)
     try {
       const saved = await api.updateSettings({
@@ -161,7 +166,7 @@ export function PreprocessPage() {
         if (!Array.isArray(parsed)) throw new Error('格式应为规则数组')
         const imported = parsed.map((r: any) =>
           newRule({
-            id: typeof r.id === 'string' ? r.id : crypto.randomUUID(),
+            id: typeof r.id === 'string' ? r.id : newId(),
             name: r.name,
             source: r.source === 'visual' ? 'visual' : 'regex',
             pattern: String(r.pattern ?? ''),
@@ -175,7 +180,8 @@ export function PreprocessPage() {
             depth: typeof r.depth === 'number' ? r.depth : undefined,
           }),
         )
-        setRules([...rules, ...imported])
+        setS(current => current ? { ...current, preprocess_rules: [...current.preprocess_rules, ...uniqueIds(imported, current.preprocess_rules.map(rule => rule.id))] } : current)
+        setDirty(true)
         toast('ok', `已导入 ${imported.length} 条规则`)
       } catch (e: any) {
         toast('err', '导入失败：' + e.message)
@@ -204,11 +210,13 @@ export function PreprocessPage() {
           <div className="ah-page-title">提示词预处理</div>
           <div className="ah-page-sub">发往上游前改写请求体 · 丢弃 thinking · 正则替换 · 参数修改</div>
         </div>
-        <Button variant="primary" loading={saving} disabled={!dirty} onClick={save}>
+        <Button variant="primary" loading={saving} disabled={!dirty || !!tagError} onClick={save}>
           {dirty ? '保存修改' : '已保存'}
         </Button>
       </div>
 
+      {tagError && <div role="alert" className="ah-detail-empty">{tagError}</div>}
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       {/* 通用参数预处理 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">
@@ -482,6 +490,7 @@ export function PreprocessPage() {
           }}
         />
       </Card>
+      </fieldset>
       {showStore && <ThinkingStoreModal onClose={() => setShowStore(false)} />}
     </div>
   )

@@ -16,8 +16,8 @@ export const openaiAdaptor: Adaptor = {
       body: JSON.stringify(body),
     }
   },
-  parseResponse: oai.parseResponse,
-  createStreamDecoder: oai.createStreamDecoder,
+  parseResponse: (json, context) => oai.parseResponse(json, context.requestedModel),
+  createStreamDecoder: context => oai.createStreamDecoder(context.requestedModel),
   buildPassthroughRequest(channel, rawBody, upstreamModel, stream) {
     const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
     const url = withV1(root) + '/chat/completions'

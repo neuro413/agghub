@@ -12,6 +12,7 @@ import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
 import { cleanupOldLogs } from './stats/recorder'
+import { createTokenGuard } from './core/accessToken'
 
 const app = express()
 app.use(express.json({ limit: '50mb' }))
@@ -22,14 +23,7 @@ app.get('/api/health', (_req, res) => {
 
 // ── 访问令牌校验（内网默认 access_token 为空 = 不校验）──
 // /api 与 /v1 共用同一令牌：不然设置了令牌也能从管理 API 拿到全部渠道 key，形同虚设
-function requireToken(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  const token = getSettings().access_token
-  if (!token) return next()
-  const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
-  const auth = bearer || (req.headers['x-api-key'] as string) || ''
-  if (auth === token) return next()
-  res.status(401).json({ error: { message: 'invalid access token', type: 'auth_error' } })
-}
+const requireToken = createTokenGuard(() => getSettings().access_token)
 
 app.use('/api', requireToken)
 

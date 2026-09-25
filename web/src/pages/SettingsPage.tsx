@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
-import { Input, Select, Slider } from '../components/Form'
+import { Input, Select, Slider, Textarea } from '../components/Form'
+import { copyText } from '../lib/clipboard'
 import { IconBolt, IconCopy, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
@@ -14,7 +15,9 @@ export function SettingsPage() {
   const toast = useToast()
 
   useEffect(() => {
-    api.getSettings().then(setS).catch((e) => toast('err', e.message))
+    const controller = new AbortController()
+    api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    return () => controller.abort()
   }, [toast])
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((p) => (p ? { ...p, [k]: v } : p))
@@ -29,6 +32,15 @@ export function SettingsPage() {
         channel_retry_times: s.channel_retry_times,
         retry_interval_ms: s.retry_interval_ms,
         request_timeout_ms: s.request_timeout_ms,
+        request_max_duration_ms: s.request_max_duration_ms,
+        downstream_timeout_ms: s.downstream_timeout_ms,
+        log_response_max_bytes: s.log_response_max_bytes,
+        stream_buffer_max_bytes: s.stream_buffer_max_bytes,
+        image_max_bytes: s.image_max_bytes,
+        image_total_max_bytes: s.image_total_max_bytes,
+        image_max_count: s.image_max_count,
+        image_download_concurrency: s.image_download_concurrency,
+        image_allowed_hosts: s.image_allowed_hosts,
         failover_strategy: s.failover_strategy,
         auto_ban: s.auto_ban,
         auto_ban_codes: s.auto_ban_codes,
@@ -86,6 +98,7 @@ export function SettingsPage() {
         </Button>
       </div>
 
+      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
       {/* 对外入口 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">
@@ -113,7 +126,7 @@ export function SettingsPage() {
         </div>
         <div className="ah-set-desc">请求失败时如何自动重试、切换渠道与熔断坏渠道</div>
         <SettingRow label="单渠道重试次数" desc="同一个渠道请求失败后，最多在本渠道重试几次">
-          <Slider value={s.single_retry_times} min={0} max={100} onChange={(v) => set('single_retry_times', v)} suffix=" 次" />
+          <Slider value={s.single_retry_times} min={0} max={20} onChange={(v) => set('single_retry_times', v)} suffix=" 次" />
         </SettingRow>
         <SettingRow label="多渠道重试次数" desc="本渠道重试用尽后，最多再切换到下几个渠道继续重试">
           <Slider value={s.channel_retry_times} min={0} max={10} onChange={(v) => set('channel_retry_times', v)} suffix=" 个" />
@@ -121,7 +134,7 @@ export function SettingsPage() {
         <SettingRow label="失败间隔" desc="每次请求失败后，等待多久再发起下一次重试">
           <Slider value={Math.round(s.retry_interval_ms / 1000)} min={0} max={30} onChange={(v) => set('retry_interval_ms', v * 1000)} suffix=" 秒" />
         </SettingRow>
-        <SettingRow label="请求超时" desc="等待上游响应的最长时间">
+        <SettingRow label="上游空闲超时" desc="含等待响应头；收到字节即刷新，心跳有效。整次总时限另行配置。">
           <Slider
             value={Math.round(s.request_timeout_ms / 1000)}
             min={5}
@@ -175,6 +188,26 @@ export function SettingsPage() {
         </SettingRow>
       </Card>
 
+      <Card className="ah-set-card">
+        <div className="ah-set-title">高级资源限制</div>
+        <div className="ah-set-desc">日志限额只影响保存副本；流重组超限将明确失败。整次时限涵盖准备、重试和等待。</div>
+        {([
+          ['request_max_duration_ms', '整次请求总时限（毫秒）', '默认 1800000（30分钟）；0 明确关闭'],
+          ['downstream_timeout_ms', '客户端写入等待（毫秒）', '默认 30000；背压等待不计入上游空闲'],
+          ['log_response_max_bytes', '每字段日志上限（字节）', '默认 4194304（4MiB）；超限标记截断'],
+          ['stream_buffer_max_bytes', '流重组与非流式响应上限（字节）', '默认 16777216（16MiB）'],
+          ['image_max_bytes', '单张图片上限（字节）', '默认 20971520（20MiB）'],
+          ['image_total_max_bytes', '图片总下载上限（字节）', '默认 41943040（40MiB）'],
+          ['image_max_count', '图片引用数量上限', '默认 20，重复引用也计数'],
+          ['image_download_concurrency', '单请求图片下载并发', '默认 4；进程总并发最多 8'],
+        ] as const).map(([key, label, desc]) => <SettingRow key={key} label={label} desc={desc}>
+          <Input aria-label={label} type="number" min="0" step="1" value={s[key]} onChange={e => set(key, Number(e.target.value))} />
+        </SettingRow>)}
+        <SettingRow label="可信图片白名单" desc="每行一个精确主机、IP 或 CIDR。默认拒绝内网和保留地址；仅添加可信图片服务。元数据和链路本地地址始终拒绝。">
+          <Textarea aria-label="可信图片白名单" value={s.image_allowed_hosts.join('\n')} onChange={e => set('image_allowed_hosts', e.target.value.split('\n'))} onBlur={() => set('image_allowed_hosts', s.image_allowed_hosts.map(host => host.trim()).filter(Boolean))} placeholder="例如：192.168.1.20" />
+        </SettingRow>
+      </Card>
+      </fieldset>
       <div className="ah-mini ah-faint" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
         <IconSettings size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
         AggHub · 轻量内网渠道聚合网关
@@ -203,9 +236,9 @@ function EndpointRow({ label, url }: { label: string; url: string }) {
       <code className="ah-endpoint-url ah-truncate">{url}</code>
       <IconButton
         title="复制"
-        onClick={() => {
-          navigator.clipboard?.writeText(url)
-          toast('ok', '地址已复制')
+        onClick={async () => {
+          if (await copyText(url)) toast('ok', '地址已复制')
+          else toast('err', '复制失败，请选择左侧地址手动复制')
         }}
       >
         <IconCopy size={16} />

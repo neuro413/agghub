@@ -32,22 +32,22 @@ statsRouter.get('/', (req, res) => {
          SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success,
          COALESCE(SUM(total_tokens), 0) AS tokens,
          COALESCE(AVG(latency_ms), 0) AS avg_latency
-       FROM request_logs WHERE created_at >= ? AND is_retry = 0`,
+       FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0`,
     )
-    .get(since) as { total: number; success: number; tokens: number; avg_latency: number }
+    .get(since, now) as { total: number; success: number; tokens: number; avg_latency: number }
 
   const total = overview.total || 0
   const success = overview.success || 0
 
   const trendRows = db
     .prepare(
-      `SELECT (created_at / ?) * ? AS bucket,
+      `SELECT CAST(created_at / ? AS INTEGER) * ? AS bucket,
               COUNT(*) AS requests,
               COALESCE(SUM(total_tokens), 0) AS tokens
-       FROM request_logs WHERE created_at >= ? AND is_retry = 0
+       FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0
        GROUP BY bucket ORDER BY bucket ASC`,
     )
-    .all(bucketMs, bucketMs, since) as { bucket: number; requests: number; tokens: number }[]
+    .all(bucketMs, bucketMs, since, now) as { bucket: number; requests: number; tokens: number }[]
 
   // 补齐零值桶：查询仅返回有数据的桶，按真实时间轴铺满空桶，避免折线图等距绘制时时间失真
   const trendMap = new Map(trendRows.map((r) => [r.bucket, r]))
@@ -64,18 +64,18 @@ statsRouter.get('/', (req, res) => {
       `SELECT channel_id, channel_name,
               COUNT(*) AS count,
               SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success
-       FROM request_logs WHERE created_at >= ? AND is_retry = 0
+       FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0
        GROUP BY channel_id ORDER BY count DESC`,
     )
-    .all(since) as { channel_id: number; channel_name: string; count: number; success: number }[]
+    .all(since, now) as { channel_id: number; channel_name: string; count: number; success: number }[]
 
   const byModel = db
     .prepare(
       `SELECT model, COUNT(*) AS count
-       FROM request_logs WHERE created_at >= ? AND is_retry = 0
+       FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0
        GROUP BY model ORDER BY count DESC LIMIT 20`,
     )
-    .all(since) as { model: string; count: number }[]
+    .all(since, now) as { model: string; count: number }[]
 
   res.json({
     range,
