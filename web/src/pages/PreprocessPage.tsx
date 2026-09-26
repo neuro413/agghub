@@ -14,7 +14,7 @@ import { ThinkingStoreModal } from './ThinkingStoreModal'
 import { ParamRuleEditor, newParamRule } from './ParamRuleEditor'
 import { FORMAT_OPTIONS, LogPickerModal, MultiChips, fmtLabel } from './preprocessShared'
 import type { Opt } from './preprocessShared'
-import { newId, uniqueIds } from '../lib/id'
+import { newId } from '../lib/id'
 
 const ROLE_OPTIONS: Opt[] = [
   { value: 'system', label: 'system' },
@@ -164,23 +164,8 @@ export function PreprocessPage() {
       try {
         const parsed = JSON.parse(String(reader.result))
         if (!Array.isArray(parsed)) throw new Error('格式应为规则数组')
-        const imported = parsed.map((r: any) =>
-          newRule({
-            id: typeof r.id === 'string' ? r.id : newId(),
-            name: r.name,
-            source: r.source === 'visual' ? 'visual' : 'regex',
-            pattern: String(r.pattern ?? ''),
-            flags: String(r.flags ?? 'g'),
-            replacement: String(r.replacement ?? ''),
-            enabled: r.enabled !== false,
-            roles: Array.isArray(r.roles) ? r.roles : undefined,
-            channelIds: Array.isArray(r.channelIds) ? r.channelIds : undefined,
-            formats: Array.isArray(r.formats) ? r.formats : undefined,
-            models: Array.isArray(r.models) ? r.models : undefined,
-            depth: typeof r.depth === 'number' ? r.depth : undefined,
-          }),
-        )
-        setS(current => current ? { ...current, preprocess_rules: [...current.preprocess_rules, ...uniqueIds(imported, current.preprocess_rules.map(rule => rule.id))] } : current)
+        const imported = parsed.map((r: any) => newRule({ ...r, id: newId() }))
+        setS(current => current ? { ...current, preprocess_rules: [...current.preprocess_rules, ...imported] } : current)
         setDirty(true)
         toast('ok', `已导入 ${imported.length} 条规则`)
       } catch (e: any) {

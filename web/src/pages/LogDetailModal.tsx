@@ -6,7 +6,7 @@ import { IconCopy, IconEye, IconEyeOff, IconSearch, IconTrash } from '../compone
 
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
-import { contentToText, paramsOf, parseConversation, roleClass } from '../lib/requestBody'
+import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
 import type { LogDetail } from '../types'
 import { copyText } from '../lib/clipboard'

@@ -1,3 +1,4 @@
+import { fmtNum, fmtTime } from '../lib/format'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { DonutChart } from '../charts/DonutChart'
@@ -17,17 +18,6 @@ const RANGES: { k: string; label: string }[] = [
   { k: '30d', label: '30 天' },
 ]
 
-function fmtNum(n?: number): string {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
-  return String(n)
-}
-function fmtTime(ts: number): string {
-  const d = new Date(ts)
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
 
 export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   const [range, setRange] = useState('24h')

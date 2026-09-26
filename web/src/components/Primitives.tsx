@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react'
 import type { ChannelType } from '../types'
 
 const TYPE_LABEL: Record<ChannelType, string> = {
@@ -20,12 +19,4 @@ export function StatusDot({ status }: { status: number }) {
 
 export function statusText(status: number): string {
   return status === 1 ? '在线' : status === 2 ? '已熔断' : '已停用'
-}
-
-export function Tag({ children }: { children: ReactNode }) {
-  return <span className="ah-tag">{children}</span>
-}
-
-export function Chip({ children }: { children: ReactNode }) {
-  return <span className="ah-chip">{children}</span>
 }

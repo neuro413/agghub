@@ -139,9 +139,6 @@ p {
 .ah-fade-up {
   animation: ah-fade-up var(--dur) var(--ease-out) both;
 }
-.ah-pop {
-  animation: ah-pop var(--dur) var(--ease-soft) both;
-}
 
 /* 入场 stagger（卡片网格逐个浮现）*/
 .ah-stagger > * {

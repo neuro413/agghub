@@ -5,7 +5,6 @@ type Variant = 'primary' | 'ghost' | 'soft' | 'danger' | 'default'
 interface BtnProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
   size?: 'sm' | 'md'
-  block?: boolean
   loading?: boolean
   icon?: ReactNode
 }
@@ -13,7 +12,6 @@ interface BtnProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 export function Button({
   variant = 'default',
   size = 'md',
-  block,
   loading,
   icon,
   children,
@@ -25,7 +23,6 @@ export function Button({
     'ah-btn',
     variant !== 'default' && `is-${variant}`,
     size === 'sm' && 'is-sm',
-    block && 'is-block',
     className,
   ]
     .filter(Boolean)

@@ -15,7 +15,7 @@ import type {
 const BASE = '/api'
 const TOKEN_KEY = 'agghub_token'
 
-export function getStoredToken(): string {
+function getStoredToken(): string {
   return localStorage.getItem(TOKEN_KEY) || ''
 }
 

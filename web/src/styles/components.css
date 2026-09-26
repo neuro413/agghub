@@ -152,9 +152,6 @@
   padding: 8px 14px;
   font-size: var(--fs-sm);
 }
-.ah-btn.is-block {
-  width: 100%;
-}
 .ah-btn.is-primary {
   color: #fff;
   background: var(--grad-warm);
@@ -586,18 +583,6 @@
 }
 
 /* ── Chip / Tag ── */
-.ah-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 11px;
-  border-radius: var(--r-pill);
-  background: var(--orange-50);
-  border: 1px solid var(--line);
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--ink-soft);
-}
 .ah-tag {
   display: inline-flex;
   padding: 3px 9px;

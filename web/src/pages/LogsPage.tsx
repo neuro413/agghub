@@ -1,3 +1,4 @@
+import { fmtNum, fmtTime } from '../lib/format'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
@@ -20,17 +21,6 @@ import { clampOffset, useLatestRequest } from '../lib/useLatestRequest'
 
 const PAGE_SIZE = 50
 
-function fmtNum(n?: number): string {
-  if (!n) return '0'
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M'
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k'
-  return String(n)
-}
-function fmtTime(ts: number): string {
-  const d = new Date(ts)
-  const p = (x: number) => String(x).padStart(2, '0')
-  return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
-}
 
 interface Filters {
   q: string
@@ -249,7 +239,7 @@ export function LogsPage() {
         ) : (
           items.map((l) => (
             <div key={l.id} className="ah-logt-row" onClick={() => setOpenId(l.id)}>
-              <span className="c-time ah-mini ah-faint ah-num">{fmtTime(l.created_at)}</span>
+              <span className="c-time ah-mini ah-faint ah-num">{fmtTime(l.created_at, true)}</span>
               <span className="c-status">
                 <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
                   {l.status === 'success' ? l.status_code || 200 : l.status_code || 'ERR'}
