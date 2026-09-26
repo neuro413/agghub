@@ -4,8 +4,6 @@ import type { ParamRule, WireFormat } from '../types'
 
 export const preprocessRouter = Router()
 
-const WIRES: WireFormat[] = ['openai', 'anthropic', 'gemini', 'responses']
-
 /** 按请求体形状猜测上游格式（仅影响受保护字段的判定）*/
 function inferWire(body: any): WireFormat {
   if (Array.isArray(body?.contents)) return 'gemini'
@@ -16,7 +14,7 @@ function inferWire(body: any): WireFormat {
 
 // 参数修改规则试运行：把一条规则应用到粘贴的请求体上并返回结果（不发请求、不落库）
 preprocessRouter.post('/param-test', (req, res) => {
-  const { rule, body, wireFormat } = (req.body || {}) as { rule?: ParamRule; body?: any; wireFormat?: WireFormat }
+  const { rule, body } = (req.body || {}) as { rule?: ParamRule; body?: any }
   if (!rule || !Array.isArray(rule.ops)) return res.status(400).json({ error: 'rule.ops 必填' })
 
   let parsed: any = body
@@ -31,7 +29,7 @@ preprocessRouter.post('/param-test', (req, res) => {
     return res.status(400).json({ error: '请求体应为 JSON 对象' })
   }
 
-  const wire = wireFormat && WIRES.includes(wireFormat) ? wireFormat : inferWire(parsed)
+  const wire = inferWire(parsed)
   const result = applyParamRulesToObject(parsed, wire, [{ ...rule, enabled: true }])
   res.json({ wireFormat: wire, changed: result.changed, body: result.body, errors: result.errors })
 })

@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
 import { getProxyAgent } from '../core/proxy'
-import { readBodyText } from '../core/bodyReader'
+import { trimSlash, withV1 } from '../adapters/base'
 import type { ChannelRow, ChannelType } from '../types'
 
 export const channelsRouter = Router()
@@ -58,12 +58,6 @@ channelsRouter.get('/', (_req, res) => {
     return { ...ch, today_requests: s.total || 0, today_success: s.ok || 0 }
   })
   res.json(list)
-})
-
-channelsRouter.get('/:id', (req, res) => {
-  const ch = getChannelById(Number(req.params.id))
-  if (!ch) return res.status(404).json({ error: 'not found' })
-  res.json(ch)
 })
 
 channelsRouter.post('/', (req, res) => {
@@ -170,8 +164,8 @@ channelsRouter.post('/test', async (req, res) => {
   }
 })
 
-function trimSlash(s: string): string {
-  return s.replace(/\/+$/, '')
+async function failure(r: Response): Promise<{ ok: false; message: string }> {
+  return { ok: false, message: `HTTP ${r.status}: ${(await r.text()).slice(0, 200)}` }
 }
 
 async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string): Promise<{ ok: boolean; message: string; models?: string[] }> {
@@ -179,76 +173,45 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
   const base = input.base_url?.trim() ? trimSlash(input.base_url.trim()) : ''
   const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
 
-  // responses 渠道与 openai 同源：同用 GET /v1/models + Bearer 探测
-  if (input.type === 'openai' || input.type === 'responses') {
-    const root = base || 'https://api.openai.com'
-    const url = (/\/v1$/.test(root) ? root : root + '/v1') + '/models'
-    const r = await fetch(url, { headers: { Authorization: `Bearer ${key}` }, signal, dispatcher } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
-    const text = await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
-    let data: any = {}
-    try { data = JSON.parse(text) } catch {}
+  // openai / responses / anthropic：GET /v1/models
+  if (input.type !== 'vertex') {
+    const anthropic = input.type === 'anthropic'
+    const root = base || (anthropic ? 'https://api.anthropic.com' : 'https://api.openai.com')
+    const headers = anthropic ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : { Authorization: `Bearer ${key}` }
+    const r = await fetch(withV1(root) + '/models', { headers, signal, dispatcher } as any)
+    if (!r.ok) return failure(r)
+    const data: any = await r.json().catch(() => ({}))
     const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined
     return { ok: true, message: '连接成功', models }
   }
 
-  if (input.type === 'anthropic') {
-    const root = base || 'https://api.anthropic.com'
-    const url = (/\/v1$/.test(root) ? root : root + '/v1') + '/models'
-    const r = await fetch(url, { headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' }, signal, dispatcher } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
-    const text = await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
-    let data: any = {}
-    try { data = JSON.parse(text) } catch {}
-    const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined
-    return { ok: true, message: '连接成功', models }
-  }
-
-  // vertex
+  // vertex：发一个 1 token 的生成请求
   const { parseCredentials, getAccessToken } = await import('../adapters/vertex-auth')
   const creds = parseCredentials(key)
   const region = input.region?.trim() || 'global'
   const host = region === 'global' ? 'aiplatform.googleapis.com' : `${region}-aiplatform.googleapis.com`
-  const root = base || `https://${host}`
+  const v1 = withV1(base || `https://${host}`)
   const model = normalizeModels(input.models)[0] || 'gemini-2.0-flash'
-  const v1 = /\/v1$/.test(root) ? root : root + '/v1'
   const isClaude = model.startsWith('claude')
   const geminiBody = JSON.stringify({ contents: [{ role: 'user', parts: [{ text: 'hi' }] }], generationConfig: { maxOutputTokens: 1 } })
   const claudeBody = JSON.stringify({ anthropic_version: 'vertex-2023-10-16', max_tokens: 1, messages: [{ role: 'user', content: 'hi' }] })
-
+  const headers: Record<string, string> = { 'content-type': 'application/json' }
+  let url: string
   if (creds) {
-    let token: string
     try {
-      token = await getAccessToken(creds, proxyUrl || undefined, signal)
-      signal.throwIfAborted()
+      headers.authorization = `Bearer ${await getAccessToken(creds, proxyUrl, signal)}`
     } catch (e: any) {
       return { ok: false, message: `获取 access_token 失败: ${e.message?.slice(0, 200)}` }
     }
-    const url = isClaude
+    url = isClaude
       ? `${v1}/projects/${creds.project_id}/locations/${region}/publishers/anthropic/models/${model}:rawPredict`
       : `${v1}/projects/${creds.project_id}/locations/${region}/publishers/google/models/${model}:generateContent`
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-      body: isClaude ? claudeBody : geminiBody,
-      signal,
-      dispatcher,
-    } as any)
-    if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
-    await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
-    return { ok: true, message: '连接成功（JSON 凭证）' }
+  } else {
+    // API Key 模式（仅 Gemini 支持）
+    url = `${v1}/publishers/google/models/${model}:generateContent?key=${encodeURIComponent(key)}`
   }
-
-  // API Key 模式（仅 Gemini 支持）
-  const url = `${v1}/publishers/google/models/${model}:generateContent?key=${encodeURIComponent(key)}`
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: geminiBody,
-    signal,
-    dispatcher,
-  } as any)
-  if (!r.ok) return { ok: false, message: `HTTP ${r.status}: ${await readBodyText(r.body, { signal, maxBytes: 200, truncate: true })}` }
-  await readBodyText(r.body, { signal, maxBytes: 1024 * 1024 })
-  return { ok: true, message: '连接成功' }
+  const r = await fetch(url, { method: 'POST', headers, body: creds && isClaude ? claudeBody : geminiBody, signal, dispatcher } as any)
+  if (!r.ok) return failure(r)
+  await r.body?.cancel()
+  return { ok: true, message: creds ? '连接成功（JSON 凭证）' : '连接成功' }
 }

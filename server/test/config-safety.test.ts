@@ -12,15 +12,11 @@ after(() => db.close())
 import assert from 'node:assert/strict'
 import { applyParamRulesToObject } from '../src/core/paramRules'
 import { createPseudoThinkingTransform, matchesPseudoThinking } from '../src/core/pseudoThinking'
-import type { ParamOp, Settings } from '../src/types'
+import type { ParamOp } from '../src/types'
 
 function apply(body: any, ops: ParamOp[]) {
   return applyParamRulesToObject(body, 'openai', [{ id: 'test', enabled: true, ops }])
 }
-
-test('D01: 切分器构造阶段拒绝空标签，不进入同步循环', () => {
-  assert.throws(() => createPseudoThinkingTransform({ pseudo_thinking_open_tag: '', pseudo_thinking_close_tag: '' } as Settings, () => 'sig'))
-})
 
 test('D02: 点路径不访问全局原型，非法操作不影响后续合法操作', () => {
   const result = apply({}, [

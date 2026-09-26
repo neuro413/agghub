@@ -23,15 +23,12 @@ const PROTECTED_KEYS: Record<WireFormat, string[]> = {
   responses: ['input', 'instructions', 'stream'],
 }
 
-export function protectedKeysFor(wire: WireFormat): Set<string> {
-  return new Set(PROTECTED_KEYS[wire] || PROTECTED_KEYS.openai)
-}
 
 /** 命中本次请求的启用规则（按配置顺序）*/
 export function matchParamRules(settings: Settings, meta: ScopeMeta): ParamRule[] {
   const out: ParamRule[] = []
-  for (const rule of settings.param_rules || []) {
-    if (!rule?.enabled || !Array.isArray(rule.ops) || !rule.ops.length) continue
+  for (const rule of settings.param_rules) {
+    if (!rule.enabled || !rule.ops.length) continue
     if (!ruleMatchesMeta(rule, meta)) continue
     out.push(rule)
   }
@@ -39,7 +36,7 @@ export function matchParamRules(settings: Settings, meta: ScopeMeta): ParamRule[
 }
 
 /** 值文本 → JSON 值：能解析就用解析结果（数字 / 布尔 / null / 对象 / 数组），否则按字符串 */
-export function parseValue(text: string | undefined): any {
+function parseValue(text: string | undefined): any {
   const t = (text ?? '').trim()
   if (!t) return ''
   try {
@@ -57,7 +54,7 @@ function checkArrayKey(obj: any, key: string): void {
   if (Array.isArray(obj) && !isArrayIndex(key)) throw new Error('数组仅允许通过合法整数下标访问')
 }
 
-/** 只读取自身属性；同时预检整条已有路径，写入前即可发现非法数组访问。 */
+/** 只读取自身属性；同时预检整条已有路径，写入前即可发现非法数组访问。危险路径段已由 parseSafePath 拒绝。 */
 function getPath(obj: any, segs: string[]): any {
   let cur = obj
   for (const seg of segs) {
@@ -73,12 +70,10 @@ function setPath(obj: any, segs: string[], value: any): void {
   getPath(obj, segs)
   let cur = obj
   for (const seg of segs.slice(0, -1)) {
-    if (!Object.hasOwn(cur, seg) || !isContainer(cur[seg])) {
-      Object.defineProperty(cur, seg, { value: Object.create(null), writable: true, enumerable: true, configurable: true })
-    }
+    if (!Object.hasOwn(cur, seg) || !isContainer(cur[seg])) cur[seg] = {}
     cur = cur[seg]
   }
-  Object.defineProperty(cur, segs[segs.length - 1], { value, writable: true, enumerable: true, configurable: true })
+  cur[segs[segs.length - 1]] = value
 }
 
 function deletePath(obj: any, segs: string[]): boolean {
@@ -103,13 +98,12 @@ export interface ParamApplyResult {
 export function applyParamRulesToObject(body: any, wire: WireFormat, rules: ParamRule[]): ParamApplyResult {
   const errors: string[] = []
   if (!body || typeof body !== 'object' || Array.isArray(body)) return { body, changed: false, errors }
-  const protectedKeys = protectedKeysFor(wire)
+  const protectedKeys = new Set(PROTECTED_KEYS[wire])
   const before = JSON.stringify(body)
 
   for (const rule of rules) {
     const label = rule.name || rule.id
-    for (const op of rule.ops || []) {
-      if (!op) continue
+    for (const op of rule.ops) {
       try {
         if (op.type === 'regex') {
           applyRegexOp(body, op, protectedKeys, errors, label)
@@ -176,9 +170,7 @@ function applyRegexOp(body: any, op: ParamOp, protectedKeys: Set<string>, errors
     return
   }
   for (const k of Object.keys(body)) if (!protectedKeys.has(k)) delete body[k]
-  for (const [key, value] of Object.entries(parsed)) {
-    Object.defineProperty(body, key, { value, writable: true, enumerable: true, configurable: true })
-  }
+  Object.assign(body, parsed)
 }
 
 /**

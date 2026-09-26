@@ -9,6 +9,7 @@ export interface PreprocessMeta {
 }
 
 const THINKING_TYPES = new Set(['thinking', 'redacted_thinking'])
+const REDACTED_TYPES = new Set(['redacted_thinking'])
 // 可做文本替换的内容块类型：Chat/Claude 的 text，Responses 的 input_text / output_text
 const TEXT_PART_TYPES = new Set(['text', 'input_text', 'output_text'])
 
@@ -28,60 +29,20 @@ function transformContentText(content: any, fn: (s: string) => string): any {
   return content
 }
 
-function isThinkingBlock(b: any): boolean {
-  return b && typeof b === 'object' && THINKING_TYPES.has(b.type)
-}
-
-/**
- * 丢弃 thinking / redacted_thinking 块（仅对 anthropic 直通请求生效）。
- * keepLast > 0 时保留最后 N 个 thinking 块（按消息顺序从后往前计）。
- */
-function dropThinking(target: any, keepLast: number): void {
-  if (!target || !Array.isArray(target.messages)) return
-
-  if (keepLast <= 0) {
-    for (const msg of target.messages) {
-      if (!msg || !Array.isArray(msg.content)) continue
-      const filtered = msg.content.filter((b: any) => !isThinkingBlock(b))
-      if (filtered.length !== msg.content.length) {
-        msg.content = filtered.length ? filtered : [{ type: 'text', text: '...' }]
-      }
-    }
-    return
-  }
-
-  // 收集所有 thinking 块的位置 [msgIndex, blockIndex]
-  const positions: [number, number][] = []
-  for (let mi = 0; mi < target.messages.length; mi++) {
-    const msg = target.messages[mi]
-    if (!msg || !Array.isArray(msg.content)) continue
-    for (let bi = 0; bi < msg.content.length; bi++) {
-      if (isThinkingBlock(msg.content[bi])) positions.push([mi, bi])
-    }
-  }
-  if (positions.length <= keepLast) return
-
-  const toRemove = new Set(positions.slice(0, positions.length - keepLast).map(([mi, bi]) => `${mi}:${bi}`))
-  for (let mi = 0; mi < target.messages.length; mi++) {
-    const msg = target.messages[mi]
-    if (!msg || !Array.isArray(msg.content)) continue
-    const filtered = msg.content.filter((_: any, bi: number) => !toRemove.has(`${mi}:${bi}`))
-    if (filtered.length !== msg.content.length) {
-      msg.content = filtered.length ? filtered : [{ type: 'text', text: '...' }]
-    }
+/** 过滤 Claude 消息的内容块；被清空的消息补占位文本，避免上游拒绝空 content */
+function filterBlocks(target: any, keep: (block: any) => boolean): void {
+  for (const msg of target.messages || []) {
+    if (!Array.isArray(msg?.content)) continue
+    const filtered = msg.content.filter(keep)
+    if (filtered.length !== msg.content.length) msg.content = filtered.length ? filtered : [{ type: 'text', text: '...' }]
   }
 }
 
-/** 单独去除 redacted_thinking 块 */
-function dropRedactedThinking(target: any): void {
-  if (!target || !Array.isArray(target.messages)) return
-  for (const msg of target.messages) {
-    if (!msg || !Array.isArray(msg.content)) continue
-    const filtered = msg.content.filter((b: any) => !(b && typeof b === 'object' && b.type === 'redacted_thinking'))
-    if (filtered.length !== msg.content.length) {
-      msg.content = filtered.length ? filtered : [{ type: 'text', text: '...' }]
-    }
-  }
+/** 丢弃指定类型的思考块（仅对 anthropic 直通请求生效）；keepLast > 0 时保留最后 N 个 */
+function dropThinking(target: any, types: Set<string>, keepLast = 0): void {
+  const blocks = (target.messages || []).flatMap((msg: any) => Array.isArray(msg?.content) ? msg.content : [])
+  let remove = blocks.filter((b: any) => types.has(b?.type)).length - keepLast
+  filterBlocks(target, b => !(types.has(b?.type) && remove-- > 0))
 }
 
 /** 规则通用限定范围（渠道 / 入口格式 / 模型），PreprocessRule / ToolFilterRule / ParamRule 共用 */
@@ -100,13 +61,8 @@ export function ruleMatchesMeta(rule: RuleScope, meta: Pick<PreprocessMeta, 'ent
 }
 
 function applyRule(target: any, rule: PreprocessRule): void {
-  let re: RegExp
-  try {
-    re = new RegExp(rule.pattern, rule.flags || 'g')
-  } catch {
-    return // 非法正则跳过，不影响请求
-  }
-  const replacement = rule.replacement ?? ''
+  const re = new RegExp(rule.pattern, rule.flags || 'g')
+  const replacement = rule.replacement
   const roles = rule.roles?.length ? new Set(rule.roles) : null
   const apply = (s: string): string => {
     re.lastIndex = 0
@@ -157,8 +113,8 @@ function applyRule(target: any, rule: PreprocessRule): void {
 /** 收集所有命中的工具过滤规则，合并为一个黑名单集合 */
 function collectBlockedTools(meta: PreprocessMeta, settings: Settings): Set<string> {
   const blocked = new Set<string>()
-  for (const rule of settings.tool_filter_rules || []) {
-    if (!rule?.enabled || !rule.tools?.length) continue
+  for (const rule of settings.tool_filter_rules) {
+    if (!rule.enabled || !rule.tools.length) continue
     if (!ruleMatchesMeta(rule, meta)) continue
     for (const t of rule.tools) blocked.add(t)
   }
@@ -193,26 +149,14 @@ function filterToolsAnthropic(target: any, blocked: Set<string>): void {
   }
 
   // 3. 清理消息中的 tool_use / tool_result
-  if (!Array.isArray(target.messages)) return
   const blockedIds = new Set<string>()
-  for (const msg of target.messages) {
+  for (const msg of target.messages || []) {
     if (!Array.isArray(msg?.content)) continue
     for (const b of msg.content) {
       if (b?.type === 'tool_use' && blocked.has(b.name)) blockedIds.add(b.id)
     }
   }
-  if (blockedIds.size === 0) return
-  for (const msg of target.messages) {
-    if (!Array.isArray(msg?.content)) continue
-    const filtered = msg.content.filter((b: any) => {
-      if (b?.type === 'tool_use' && blockedIds.has(b.id)) return false
-      if (b?.type === 'tool_result' && blockedIds.has(b.tool_use_id)) return false
-      return true
-    })
-    if (filtered.length !== msg.content.length) {
-      msg.content = filtered.length ? filtered : [{ type: 'text', text: '...' }]
-    }
-  }
+  if (blockedIds.size) filterBlocks(target, b => !(b?.type === 'tool_use' && blockedIds.has(b.id)) && !(b?.type === 'tool_result' && blockedIds.has(b.tool_use_id)))
 }
 
 /** 从 OpenAI / IR 格式请求体中移除被屏蔽的工具 */
@@ -298,13 +242,9 @@ function applyToolFilter(target: any, meta: PreprocessMeta, settings: Settings):
   if (hadTools && !target.tools?.length && !target.hosted_tools?.length) delete target.tool_choice
 }
 
-/** 丢弃 thinking 的渠道/模型限定是否命中本次请求（空 = 全部） */
-export function matchesDropThinking(channelId: number, model: string, settings: Settings): boolean {
-  const cIds = settings.drop_thinking_channel_ids
-  if (cIds?.length && !cIds.includes(channelId)) return false
-  const models = settings.drop_thinking_models
-  if (models?.length && !models.includes(model)) return false
-  return true
+/** 丢弃 thinking 的渠道/模型限定（空 = 全部），伪思考同样依赖它 */
+export function dropThinkingScope(settings: Settings): RuleScope {
+  return { channelIds: settings.drop_thinking_channel_ids, models: settings.drop_thinking_models }
 }
 
 /**
@@ -313,21 +253,14 @@ export function matchesDropThinking(channelId: number, model: string, settings: 
  * 调用方须传入克隆体以保留请求日志中的客户端原始请求体。
  */
 export function applyPreprocess(target: any, meta: PreprocessMeta, settings: Settings): void {
-  if (!target) return
-  if (settings.strip_top_p) {
-    delete target.top_p
-  }
+  if (settings.strip_top_p) delete target.top_p
   if (meta.passthrough && meta.entryFormat === 'anthropic') {
-    if (settings.drop_thinking && matchesDropThinking(meta.channelId, meta.model, settings)) {
-      dropThinking(target, settings.drop_thinking_keep_last)
-    }
-    if (settings.drop_redacted_thinking) {
-      dropRedactedThinking(target)
-    }
+    if (settings.drop_thinking && ruleMatchesMeta(dropThinkingScope(settings), meta)) dropThinking(target, THINKING_TYPES, settings.drop_thinking_keep_last)
+    if (settings.drop_redacted_thinking) dropThinking(target, REDACTED_TYPES)
   }
   applyToolFilter(target, meta, settings)
-  for (const rule of settings.preprocess_rules || []) {
-    if (!rule || !rule.enabled || !rule.pattern) continue
+  for (const rule of settings.preprocess_rules) {
+    if (!rule.enabled || !rule.pattern) continue
     if (!ruleMatchesMeta(rule, meta)) continue
     applyRule(target, rule)
   }

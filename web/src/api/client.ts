@@ -116,6 +116,6 @@ export const api = {
     req<{ ok: boolean; deleted: number }>('/thinking', { method: 'DELETE', body: JSON.stringify({ signatures: sigs }) }),
 
   // ── 参数修改规则试运行 ──
-  testParamRule: (data: { rule: ParamRule; body: string; wireFormat?: string }) =>
+  testParamRule: (data: { rule: ParamRule; body: string }) =>
     req<ParamTestResult>('/preprocess/param-test', { method: 'POST', body: JSON.stringify(data) }),
 }

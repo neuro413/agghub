@@ -1,8 +1,6 @@
 import type { Settings } from '../types'
-import { matchesDropThinking } from './preprocess'
+import { dropThinkingScope, ruleMatchesMeta } from './preprocess'
 import { validateThinkingTags } from './settingsValidation'
-
-let lastInvalidTagWarning = -Infinity
 
 // ── 命中判断 ──────────────────────────────────────────────
 
@@ -14,22 +12,13 @@ export function matchesPseudoThinking(
   settings: Settings,
 ): boolean {
   if (entryFormat !== 'anthropic' || wireFormat !== 'anthropic') return false
-  if (!settings.pseudo_thinking_enabled || !settings.drop_thinking) return false
-  try { validateThinkingTags(settings.pseudo_thinking_open_tag, settings.pseudo_thinking_close_tag) } catch {
-    if (Date.now() - lastInvalidTagWarning > 60_000) {
-      lastInvalidTagWarning = Date.now()
-      console.warn('[agghub] 伪思考标签配置无效，本次跳过伪思考；请在预处理页修正标签')
-    }
-    return false
-  }
-  if (settings.drop_thinking_keep_last > 0) return false
+  if (!settings.pseudo_thinking_enabled || !settings.drop_thinking || settings.drop_thinking_keep_last > 0) return false
+  // 标签在保存时已校验；这里是切分器唯一的运行时防线（空标签会让切分死循环）
+  try { validateThinkingTags(settings.pseudo_thinking_open_tag, settings.pseudo_thinking_close_tag) } catch { return false }
+  const meta = { entryFormat: 'anthropic' as const, channelId, model }
   // 伪思考依赖丢弃 thinking：本请求未命中丢弃范围（渠道/模型限定）时不得附加伪思考
-  if (!matchesDropThinking(channelId, model, settings)) return false
-  const cIds = settings.pseudo_thinking_channel_ids
-  if (cIds.length && !cIds.includes(channelId)) return false
-  const models = settings.pseudo_thinking_models
-  if (models.length && !models.includes(model)) return false
-  return true
+  return ruleMatchesMeta(dropThinkingScope(settings), meta)
+    && ruleMatchesMeta({ channelIds: settings.pseudo_thinking_channel_ids, models: settings.pseudo_thinking_models }, meta)
 }
 
 // ── 出向：请求体改写（在 dropThinking 之前调用）──────────
@@ -190,7 +179,6 @@ class ThinkingTextSplitter {
   private thinkParts: string[] = []
 
   constructor(open: string, close: string, onClose: (thinking: string) => string) {
-    validateThinkingTags(open, close)
     this.open = open
     this.close = close
     this.onClose = onClose
@@ -200,10 +188,7 @@ class ThinkingTextSplitter {
     if (!text) return []
     this.buf += text
     const out: any[] = []
-    let previousLength = this.buf.length + 1
     for (;;) {
-      if (this.buf.length >= previousLength) throw new Error('伪思考切分器未推进')
-      previousLength = this.buf.length
       if (this.inThink) {
         const idx = this.buf.indexOf(this.close)
         if (idx >= 0) {
