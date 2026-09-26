@@ -5,7 +5,7 @@ import { IconTrash } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import type { ThinkingDetail, ThinkingEntry } from '../types'
-import { clampOffset, useLatestRequest } from '../lib/useLatestRequest'
+import { clampOffset } from '../lib/format'
 
 const PAGE_SIZE = 30
 
@@ -18,38 +18,30 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
   const [detail, setDetail] = useState<ThinkingDetail | null>(null)
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const requests = useLatestRequest()
-  const detailRequests = useLatestRequest()
   const [loadError, setLoadError] = useState('')
-  const load = useCallback(async () => {
-    const request = requests.begin()
+  const load = useCallback(async (signal: AbortSignal) => {
     setLoadError('')
     try {
-      const r = await api.listThinking({ limit: PAGE_SIZE, offset }, request.signal)
-      if (!request.current()) return
+      const r = await api.listThinking({ limit: PAGE_SIZE, offset }, signal)
+      if (signal.aborted) return
       setTotal(r.total)
       const valid = clampOffset(offset, r.total, PAGE_SIZE)
       if (valid !== offset) { setOffset(valid); return }
       setItems(r.items)
       setSelected(prev => new Set([...prev].filter(sig => r.items.some(item => item.signature === sig))))
     } catch (e: any) {
-      if (request.current()) { setLoadError(e.message); toast('err', e.message) }
+      if (!signal.aborted) { setLoadError(e.message); toast('err', e.message) }
     }
-  }, [offset, toast, requests])
+  }, [offset, toast])
 
   useEffect(() => {
-    load()
-    return () => requests.cancel()
-  }, [load, requests, refresh])
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load, refresh])
 
-  const viewFull = async (sig: string) => {
-    const request = detailRequests.begin()
-    try {
-      const d = await api.getThinking(sig, request.signal)
-      if (request.current()) setDetail(d)
-    } catch (e: any) {
-      if (request.current()) toast('err', e.message)
-    }
+  const viewFull = (sig: string) => {
+    api.getThinking(sig).then(setDetail).catch((e) => toast('err', e.message))
   }
 
   const deleteSel = async () => {
@@ -58,7 +50,6 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
       const r = await api.deleteThinking([...selected])
       toast('ok', `已删除 ${r.deleted} 条`)
       setSelected(new Set())
-      detailRequests.cancel()
       setDetail(null)
       setRefresh(value => value + 1)
     } catch (e: any) {
@@ -93,7 +84,7 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
             {detail.thinking}
           </pre>
         </div>
-      ) : loadError ? <div role="alert">加载失败：{loadError}<Button onClick={load}>重试</Button></div> : !items ? (
+      ) : loadError ? <div role="alert">加载失败：{loadError}<Button onClick={() => setRefresh(value => value + 1)}>重试</Button></div> : !items ? (
         <div className="ah-logt-empty">
           <span className="ah-spin ah-spin-orange" /> 加载中&hellip;
         </div>
@@ -141,7 +132,6 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
                       .deleteThinking([e.signature])
                       .then(() => {
                         toast('ok', '已删除')
-                        detailRequests.cancel()
                         setDetail(null)
                         setRefresh(value => value + 1)
                       })

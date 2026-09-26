@@ -10,7 +10,6 @@ import { Card } from '../components/Card'
 import { IconBolt, IconCheck, IconChevronRight, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
 import { useToast } from '../components/Toast'
 import type { LogItem, Stats } from '../types'
-import { useLatestRequest } from '../lib/useLatestRequest'
 
 const RANGES: { k: string; label: string }[] = [
   { k: '24h', label: '24 小时' },
@@ -23,25 +22,25 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   const [range, setRange] = useState('24h')
   const [stats, setStats] = useState<Stats | null>(null)
   const [logs, setLogs] = useState<LogItem[]>([])
+  const [refresh, setRefresh] = useState(0)
   const toast = useToast()
 
-  const requests = useLatestRequest()
-  const load = useCallback(async () => {
-    const request = requests.begin()
+  const load = useCallback(async (signal: AbortSignal) => {
     try {
-      const [s, l] = await Promise.all([api.getStats(range, request.signal), api.listLogs({ limit: 5 }, request.signal)])
-      if (!request.current()) return
+      const [s, l] = await Promise.all([api.getStats(range, signal), api.listLogs({ limit: 5 }, signal)])
+      if (signal.aborted) return
       setStats(s)
       setLogs(l.items)
     } catch (e: any) {
-      if (request.current()) toast('err', e.message)
+      if (!signal.aborted) toast('err', e.message)
     }
-  }, [range, toast, requests])
+  }, [range, toast])
 
   useEffect(() => {
-    load()
-    return () => requests.cancel()
-  }, [load, requests])
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load, refresh])
 
   const ov = stats?.overview
   const rate = Math.round((ov?.success_rate ?? 1) * 100)
@@ -61,7 +60,7 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
               </button>
             ))}
           </div>
-          <IconButton title="刷新" onClick={load}>
+          <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
             <IconRefresh size={18} />
           </IconButton>
         </div>

@@ -19,3 +19,8 @@ export function prettyJson(s: string | null): string {
     return s
   }
 }
+
+/** 删除 / 清空后当前页可能越界：退回最后一个合法页 */
+export function clampOffset(offset: number, total: number, size: number): number {
+  return Math.min(Math.max(0, offset), total > 0 ? Math.floor((total - 1) / size) * size : 0)
+}

@@ -1,5 +1,5 @@
-import { fmtNum, fmtTime } from '../lib/format'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { clampOffset, fmtNum, fmtTime } from '../lib/format'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
@@ -17,7 +17,6 @@ import { useToast } from '../components/Toast'
 import type { LogFacets, LogItem } from '../types'
 import { LogDetailModal } from './LogDetailModal'
 import { fmtShort } from './preprocessShared'
-import { clampOffset, useLatestRequest } from '../lib/useLatestRequest'
 
 const PAGE_SIZE = 50
 
@@ -46,23 +45,18 @@ export function LogsPage() {
   const toast = useToast()
 
   // 关键词防抖
-  const debTimer = useRef<number | null>(null)
   useEffect(() => {
     if (qInput === filters.q) return
-    if (debTimer.current) window.clearTimeout(debTimer.current)
-    debTimer.current = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setFilters((f) => ({ ...f, q: qInput }))
       setOffset(0)
     }, 300)
-    return () => {
-      if (debTimer.current) window.clearTimeout(debTimer.current)
-    }
+    return () => window.clearTimeout(timer)
   }, [qInput, filters.q])
 
-  const requests = useLatestRequest()
+  // 筛选 / 翻页 / 刷新都会重跑 effect，清理时中止旧请求，旧响应不会覆盖新结果
   const [loadError, setLoadError] = useState('')
-  const load = useCallback(async () => {
-    const request = requests.begin()
+  const load = useCallback(async (signal: AbortSignal) => {
     setLoading(true)
     setLoadError('')
     try {
@@ -75,23 +69,24 @@ export function LogsPage() {
         channel_id: filters.channel_id ? Number(filters.channel_id) : undefined,
         model: filters.model || undefined,
         q: filters.q || undefined,
-      }, request.signal)
-      if (!request.current()) return
+      }, signal)
+      if (signal.aborted) return
       setTotal(r.total)
       const valid = clampOffset(offset, r.total, PAGE_SIZE)
       if (valid !== offset) { setOffset(valid); return }
       setItems(r.items)
     } catch (e: any) {
-      if (request.current()) { setLoadError(e.message); toast('err', e.message) }
+      if (!signal.aborted) { setLoadError(e.message); toast('err', e.message) }
     } finally {
-      if (request.current()) setLoading(false)
+      if (!signal.aborted) setLoading(false)
     }
-  }, [offset, filters, toast, requests])
+  }, [offset, filters, toast])
 
   useEffect(() => {
-    load()
-    return () => requests.cancel()
-  }, [load, requests, refresh])
+    const controller = new AbortController()
+    load(controller.signal)
+    return () => controller.abort()
+  }, [load, refresh])
 
   useEffect(() => {
     api.getLogFacets().then(setFacets).catch(() => {})
@@ -146,7 +141,7 @@ export function LogsPage() {
           <div className="ah-page-sub">共 {total} 条记录 · 可视化对话 / 请求头 / 原始报文</div>
         </div>
         <div className="ah-row">
-          <IconButton title="刷新" onClick={load}>
+          <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
             <IconRefresh size={18} />
           </IconButton>
           <Button variant="danger" size="sm" icon={<IconTrash size={16} />} onClick={clearAll}>
