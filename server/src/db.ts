@@ -121,7 +121,6 @@ export function getSettings(): Settings {
     retry_interval_ms: Number(r.retry_interval_ms ?? 0),
     request_timeout_ms: Number(r.request_timeout_ms ?? 120000),
     request_max_duration_ms: Number(r.request_max_duration_ms ?? DEFAULT_SETTINGS.request_max_duration_ms),
-    downstream_timeout_ms: Number(r.downstream_timeout_ms ?? DEFAULT_SETTINGS.downstream_timeout_ms),
     log_response_max_bytes: Number(r.log_response_max_bytes ?? DEFAULT_SETTINGS.log_response_max_bytes),
     stream_buffer_max_bytes: Number(r.stream_buffer_max_bytes ?? DEFAULT_SETTINGS.stream_buffer_max_bytes),
     image_max_bytes: Number(r.image_max_bytes ?? DEFAULT_SETTINGS.image_max_bytes),

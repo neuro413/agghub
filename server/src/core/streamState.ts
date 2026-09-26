@@ -15,16 +15,11 @@ export class StreamState {
   content = false
   failed: string | null = null
   private explicitEnd = false
-  private choices = new Map<number, boolean>()
-  constructor(readonly wire: WireFormat, private expectedChoices = 1) {}
-  private noteChoice(index: number, finished: boolean): void {
-    if (!Number.isSafeInteger(index) || index < 0) throw new UpstreamError(502, '上游候选 index 无效')
-    this.choices.set(index, this.choices.get(index) === true || finished)
-  }
+  /** OpenAI / Gemini 以 finish_reason 为终态（部分兼容上游不发 [DONE]） */
+  private finished = false
+  constructor(readonly wire: WireFormat) {}
   get terminal(): boolean {
-    if (this.failed) return true
-    if (this.explicitEnd) return true
-    return (this.wire === 'openai' || this.wire === 'gemini') && this.choices.size >= this.expectedChoices && [...this.choices.values()].every(Boolean)
+    return this.failed !== null || this.explicitEnd || this.finished
   }
   get closed(): boolean { return this.explicitEnd || this.failed !== null }
 
@@ -43,9 +38,8 @@ export class StreamState {
       return data
     }
     if (this.wire === 'openai') {
-      for (const [index, choice] of (data?.choices || []).entries()) {
-        const key = Number.isInteger(choice.index) ? choice.index : index
-        this.noteChoice(key, !!choice.finish_reason)
+      for (const choice of data?.choices || []) {
+        this.finished ||= !!choice.finish_reason
         this.content ||= meaningfulDelta(choice.delta)
       }
     } else if (this.wire === 'anthropic') {
@@ -67,9 +61,8 @@ export class StreamState {
       }
       this.content ||= streamEventHasContent(data) || !!data.item?.encrypted_content || !!data.response?.output?.some((item: any) => item.type === 'reasoning' && item.encrypted_content)
     } else {
-      for (const [index, candidate] of (data?.candidates || []).entries()) {
-        const key = Number.isInteger(candidate.index) ? candidate.index : index
-        this.noteChoice(key, !!candidate.finishReason)
+      for (const candidate of data?.candidates || []) {
+        this.finished ||= !!candidate.finishReason
         this.content ||= !!candidate.content?.parts?.some((part: any) => part.text || part.functionCall || part.inlineData || part.executableCode || part.codeExecutionResult)
       }
     }

@@ -2,11 +2,11 @@ import './isolated'
 import { EventEmitter } from 'node:events'
 import { db, setSettings } from '../../src/db'
 import { DEFAULT_SETTINGS } from '../../src/config'
-import { handleRelay, type EntryFormat } from '../../src/core/relay'
+import { handleRelay } from '../../src/core/relay'
 import { hydrateLogRow } from '../../src/stats/recorder'
 import * as anthropic from '../../src/convert/anthropic'
 import * as responses from '../../src/convert/responses'
-import type { ChannelType } from '../../src/types'
+import type { ChannelType, EntryFormat } from '../../src/types'
 
 export class FakeResponse extends EventEmitter {
   headersSent = false
@@ -22,6 +22,8 @@ export class FakeResponse extends EventEmitter {
   flushHeaders() { this.headersSent = true }
   write(text: string) { if (this.destroyed) throw new Error('写入已关闭响应'); this.headersSent = true; this.chunks.push(text); return this.writeResult }
   json(value: any) { this.jsonBody = value; this.headersSent = true; this.end(); return this }
+  type(_value: string) { return this }
+  send(text: string) { return this.json(JSON.parse(text)) }
   end() { this.writableEnded = true; this.emit('close'); return this }
   disconnect() { this.destroyed = true; this.emit('close') }
 }

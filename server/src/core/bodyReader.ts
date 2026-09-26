@@ -1,4 +1,4 @@
-import { abortable, settleCleanup } from './requestLifecycle'
+import { abortable } from './requestLifecycle'
 import { BoundedCapture } from './capture'
 
 export interface ReadOptions {
@@ -15,14 +15,13 @@ export async function* readBytes(body: ReadableStream<Uint8Array>, options: Read
       options.signal?.throwIfAborted()
       const pending = reader.read()
       const { done, value } = options.signal ? await abortable(pending, options.signal) : await pending
-      options.signal?.throwIfAborted()
       if (done) { complete = true; break }
       if (!value.byteLength) continue
       options.onBytes?.(value)
       yield value
     }
   } finally {
-    if (!complete) await settleCleanup(reader.cancel().catch(() => {}))
+    if (!complete) await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }

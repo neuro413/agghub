@@ -63,14 +63,11 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 })
 
 // ── 定时清理过期日志 ──
-try {
-  cleanupOldLogs()
-} catch {}
-setInterval(() => {
-  try {
-    cleanupOldLogs()
-  } catch {}
-}, 6 * 3600 * 1000)
+const cleanup = () => {
+  try { cleanupOldLogs() } catch (error) { console.warn('[agghub] 清理过期日志失败:', error) }
+}
+cleanup()
+setInterval(cleanup, 6 * 3600 * 1000)
 
 app.listen(PORT, () => {
   console.log(`🍊 AggHub 网关已启动: http://localhost:${PORT}`)

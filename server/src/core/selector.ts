@@ -23,10 +23,9 @@ export function candidatesForModel(model: string): Channel[] {
 }
 
 /**
- * 选一个满足条件的渠道（参考 new-api channel_cache.go 的优先级分层 + 平滑加权随机）。
+ * 选一个满足条件的渠道（参考 new-api 的优先级分层 + 加权随机）。
  * 采用「现存候选里最高优先级层」策略：excludeIds 排除已试渠道，
  * 当高优先级层被试光后，下一层自然成为最高 → 实现按优先级降级的故障转移。
- * candidates 为本次请求开始时的候选快照（由调用方一次性查出复用，避免每轮重试都查库）。
  */
 export function selectChannel(candidates: Channel[], excludeIds: Set<number>): Channel | null {
   const avail = candidates.filter((c) => !excludeIds.has(c.id))
@@ -37,21 +36,13 @@ export function selectChannel(candidates: Channel[], excludeIds: Set<number>): C
   const layer = avail.filter((c) => c.priority === maxPriority)
   if (layer.length === 1) return layer[0]
 
-  // 平滑加权随机
-  let sumWeight = layer.reduce((s, c) => s + c.weight, 0)
-  let smoothingFactor = 1
-  let smoothingAdjust = 0
-  if (sumWeight === 0) {
-    sumWeight = layer.length * 100
-    smoothingAdjust = 100
-  } else if (sumWeight / layer.length < 10) {
-    smoothingFactor = 100
-  }
-  const total = sumWeight * smoothingFactor
-  let r = Math.floor(Math.random() * total)
+  // 加权随机；权重全为 0 时均匀随机
+  const total = layer.reduce((s, c) => s + c.weight, 0)
+  if (total <= 0) return layer[Math.floor(Math.random() * layer.length)]
+  let r = Math.random() * total
   for (const c of layer) {
-    r -= c.weight * smoothingFactor + smoothingAdjust
+    r -= c.weight
     if (r < 0) return c
   }
-  return layer[0]
+  return layer[layer.length - 1]
 }

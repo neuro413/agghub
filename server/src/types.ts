@@ -93,7 +93,6 @@ export interface Settings {
   retry_interval_ms: number
   request_timeout_ms: number
   request_max_duration_ms: number
-  downstream_timeout_ms: number
   log_response_max_bytes: number
   stream_buffer_max_bytes: number
   image_max_bytes: number

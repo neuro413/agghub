@@ -33,7 +33,6 @@ export function SettingsPage() {
         retry_interval_ms: s.retry_interval_ms,
         request_timeout_ms: s.request_timeout_ms,
         request_max_duration_ms: s.request_max_duration_ms,
-        downstream_timeout_ms: s.downstream_timeout_ms,
         log_response_max_bytes: s.log_response_max_bytes,
         stream_buffer_max_bytes: s.stream_buffer_max_bytes,
         image_max_bytes: s.image_max_bytes,
@@ -189,7 +188,6 @@ export function SettingsPage() {
         <div className="ah-set-desc">日志限额只影响保存副本；流重组超限将明确失败。整次时限涵盖准备、重试和等待。</div>
         {([
           ['request_max_duration_ms', '整次请求总时限（毫秒）', '默认 1800000（30分钟）；0 明确关闭'],
-          ['downstream_timeout_ms', '客户端写入等待（毫秒）', '默认 30000；背压等待不计入上游空闲'],
           ['log_response_max_bytes', '每字段日志上限（字节）', '默认 4194304（4MiB）；超限标记截断'],
           ['stream_buffer_max_bytes', '流重组与非流式响应上限（字节）', '默认 16777216（16MiB）'],
           ['image_max_bytes', '单张图片上限（字节）', '默认 20971520（20MiB）；仅 Gemini 上游下载远程图片时使用'],

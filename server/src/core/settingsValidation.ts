@@ -28,7 +28,7 @@ export function normalizeAccessToken(value: unknown): string {
 
 const integerRanges: Record<string, [number, number]> = {
   single_retry_times: [0, 20], channel_retry_times: [0, 100], retry_interval_ms: [0, 300_000],
-  request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000], downstream_timeout_ms: [1, 300_000],
+  request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000],
   log_retention_days: [0, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
   image_max_bytes: [1, 100 * 1024 * 1024],

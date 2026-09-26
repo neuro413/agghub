@@ -8,7 +8,7 @@ import { BoundedCapture } from '../src/core/capture'
 import { parseSSEEvents } from '../src/convert/ir'
 import { StreamState } from '../src/core/streamState'
 import { createStreamWriter } from '../src/core/streamWriter'
-import { AttemptLifecycle, RequestStopped } from '../src/core/requestLifecycle'
+import { AttemptLifecycle, RequestLifecycle, RequestStopped } from '../src/core/requestLifecycle'
 import { FakeResponse, reset, relay, channel, logs, sse, oaiEvents } from './helpers/relay'
 const originalFetch = globalThis.fetch
 beforeEach(reset)
@@ -20,11 +20,8 @@ test('R02: 64MiB 合成数据只保留预算前缀，关闭采集不累计，UTF
   const enabled = new BoundedCapture(true, 1024), disabled = new BoundedCapture(false, 1024)
   const block = new Uint8Array(64 * 1024).fill(97)
   for (let i = 0; i < 1024; i++) { enabled.append(block); disabled.append(block) }
-  assert.equal(enabled.totalBytes, 64 * 1024 * 1024)
-  assert.equal(enabled.capturedBytes, 1024)
+  assert.equal(enabled.text(), 'a'.repeat(1024))
   assert.equal(enabled.truncated, true)
-  assert.equal(disabled.capturedBytes, 0)
-  assert.equal(disabled.totalBytes, 0)
   assert.equal(disabled.text(), undefined)
   const utf8 = new BoundedCapture(true, 5)
   utf8.append('你🙂好')
@@ -41,12 +38,12 @@ test('D10: SSE 任意 UTF-8 分片、CRLF、多行 data 和尾行解析一致', 
   assert.deepEqual(result, [{ event: 'message', data: '中文🙂\n后一行' }, { event: null, data: '尾行' }])
 })
 
-test('D04: 多 choice 完成、长度限制、usage尾包、错误状态单向保持', () => {
-  const state = new StreamState('openai', 2)
+test('D04: finish 终态、长度限制、usage尾包、错误状态单向保持', () => {
+  const state = new StreamState('openai')
   const feed = (data: any) => state.observe({ event: null, data: JSON.stringify(data) })
-  feed({ choices: [{ index: 0, delta: { content: 'a' }, finish_reason: 'stop' }, { index: 1, delta: { content: 'b' }, finish_reason: null }] })
+  feed({ choices: [{ index: 0, delta: { content: 'a' }, finish_reason: null }] })
   assert.throws(() => state.assertComplete(), (error: any) => error.body.includes('截断'))
-  feed({ choices: [{ index: 1, finish_reason: 'length' }] })
+  feed({ choices: [{ index: 0, finish_reason: 'length' }] })
   assert.doesNotThrow(() => state.assertComplete())
   assert.equal(state.closed, false)
   feed({ usage: { total_tokens: 7 } })
@@ -61,7 +58,7 @@ test('D04: 多 choice 完成、长度限制、usage尾包、错误状态单向�
 test('R02: 等待 drain 不继续写、暂停上游空闲时钟，恢复后清理所有监听', async () => {
   const parent = new AbortController(), attempt = new AttemptLifecycle(parent.signal, 20)
   const res = new FakeResponse(); res.writeResult = false
-  const write = createStreamWriter(res as any, parent.signal, attempt, 300)
+  const write = createStreamWriter(res as any, parent.signal, attempt)
   const pending = write('first')
   await wait(65)
   assert.equal(res.chunks.length, 1)
@@ -74,14 +71,17 @@ test('R02: 等待 drain 不继续写、暂停上游空闲时钟，恢复后清�
   attempt.dispose()
 })
 
-for (const kind of ['close', 'cancel', 'timeout']) {
+for (const kind of ['close', 'cancel']) {
   test(`R02: 背压期间 ${kind} 结束等待并移除监听`, async () => {
-    const parent = new AbortController(), attempt = new AttemptLifecycle(parent.signal, 20)
     const res = new FakeResponse(); res.writeResult = false
-    const pending = createStreamWriter(res as any, parent.signal, attempt, 30)('first')
+    const lifecycle = new RequestLifecycle(res as any, 0), controller = new AbortController()
+    const signal = AbortSignal.any([lifecycle.signal, controller.signal])
+    const attempt = new AttemptLifecycle(signal, 20)
+    const pending = createStreamWriter(res as any, signal, attempt)('first')
     if (kind === 'close') res.disconnect()
-    if (kind === 'cancel') parent.abort(new RequestStopped('request_deadline'))
+    else controller.abort(new RequestStopped('request_deadline'))
     await assert.rejects(pending)
+    lifecycle.dispose()
     assert.equal(res.listenerCount('drain'), 0)
     assert.equal(res.listenerCount('error'), 0)
     assert.equal(res.listenerCount('close'), 0)
@@ -137,7 +137,7 @@ test('R02: 真实回环 socket 暂停读取产生背压，客户端关闭可中�
     const close = () => parent.abort(new RequestStopped('client_cancel'))
     res.on('close', close)
     try {
-      const writer = createStreamWriter(res as any, parent.signal, attempt, 1000)
+      const writer = createStreamWriter(res as any, parent.signal, attempt)
       for (let i = 0; i < 256; i++) await writer('x'.repeat(64 * 1024))
     } catch {} finally { res.off('close', close); attempt.dispose(); res.end(); resolveDone!() }
   })

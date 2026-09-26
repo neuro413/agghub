@@ -41,7 +41,6 @@ export const vertexAdaptor: Adaptor = {
   resolveWireFormat: model => isClaudeModel(model) ? 'anthropic' : 'gemini',
 
   async prepareChannel(channel: Channel, proxyUrl?: string, signal?: AbortSignal) {
-    signal?.throwIfAborted()
     const creds = parseCredentials(channel.api_key)
     if (!creds) return
     await getAccessToken(creds, proxyUrl, signal)

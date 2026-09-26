@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Response } from 'express'
-import { getChannelById, getSettings, setChannelStatus } from '../db'
+import { getSettings, setChannelStatus } from '../db'
 import { getAdaptor } from '../adapters'
 import type { Adaptor, UpstreamRequest } from '../adapters'
 import type { UpstreamContext } from '../adapters/base'
@@ -20,15 +20,12 @@ import { applyParamRules, matchParamRules } from './paramRules'
 import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinkingTransform, splitIRResponse } from './pseudoThinking'
 import type { ChunkTransform, ThinkingInjectEntry } from './pseudoThinking'
 import * as thinkingStore from './thinkingStore'
-import { AttemptLifecycle, RequestLifecycle, RequestStopped, abortable, settleCleanup, sleep } from './requestLifecycle'
+import { AttemptLifecycle, RequestLifecycle, RequestStopped, sleep } from './requestLifecycle'
 import { BoundedCapture } from './capture'
 import { readBodyText } from './bodyReader'
 import { createStreamWriter } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
 import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthroughUsage, streamDeltaText } from './responseSemantics'
-
-export type { EntryFormat }
-export { getProxyAgent } from './proxy'
 
 respConv.setReasoningStore({
   save: rec => thinkingStore.saveReasoning(rec, getSettings().reasoning_store_max),
@@ -42,11 +39,6 @@ export interface RelayContext {
   readonly rawBody: any
   rawHeaders?: Record<string, any>
   res: Response
-  preprocessedBody?: string
-  pseudoThinking?: boolean
-  thinkingInject?: ThinkingInjectEntry[]
-  upstreamRaw?: string
-  isClientGone?: () => boolean
 }
 
 interface AttemptState extends UpstreamContext {
@@ -97,28 +89,20 @@ function applyUserAgent(headers: Record<string, string>, channel: Channel, rawHe
 
 async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: Settings): Promise<UpstreamRequest> {
   const { channel, adaptor, upstreamModel, upstreamWire, lifecycle } = state
-  lifecycle.signal.throwIfAborted()
-  if (adaptor.prepareChannel) await abortable(adaptor.prepareChannel(channel, settings.proxy_url || undefined, lifecycle.signal), lifecycle.signal)
-  lifecycle.signal.throwIfAborted()
-  lifecycle.touch()
+  if (adaptor.prepareChannel) {
+    await adaptor.prepareChannel(channel, settings.proxy_url || undefined, lifecycle.signal)
+    lifecycle.touch()
+  }
   const meta = { entryFormat: ctx.entryFormat, channelId: channel.id, model: state.requestedModel, passthrough: state.passthrough }
   const source = state.passthrough ? ctx.rawBody : ctx.ir
   // 每次尝试独立复制；预处理与图片下载均不能回写原始请求或其他候选的输入。
   const body = structuredClone(source)
-  let before: string | undefined
   const preprocess = settings.strip_top_p || settings.drop_thinking || settings.drop_redacted_thinking || settings.preprocess_rules.length || settings.tool_filter_rules.length || state.pseudo
-  if (preprocess) {
-    before = JSON.stringify(body)
-    if (state.pseudo) state.thinkingInject = applyPseudoThinkingRequest(body, settings, thinkingStore.lookup)
-    applyPreprocess(body, meta, settings)
-  }
-  let changed = before !== undefined && JSON.stringify(body) !== before
-  if (!state.passthrough && upstreamWire === 'gemini') {
-    const original = JSON.stringify(body)
-    await resolveImageUrls(body, settings, lifecycle.signal)
-    lifecycle.signal.throwIfAborted()
-    changed ||= JSON.stringify(body) !== original
-  }
+  if (state.pseudo) state.thinkingInject = applyPseudoThinkingRequest(body, settings, thinkingStore.lookup)
+  if (preprocess) applyPreprocess(body, meta, settings)
+  const images = !state.passthrough && upstreamWire === 'gemini'
+  if (images) await resolveImageUrls(body, settings, lifecycle.signal)
+  let changed = (!!preprocess || images) && JSON.stringify(body) !== JSON.stringify(source)
   const request = state.passthrough
     ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, ctx.stream, ctx.rawHeaders)
     : adaptor.buildRequest(channel, body, upstreamModel, ctx.stream, { autoAdjust: settings.reasoning_auto_adjust })
@@ -131,7 +115,6 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   state.preprocessed = changed
   if (changed && settings.store_request_body) state.preprocessedBody = request.body
   applyUserAgent(request.headers, channel, ctx.rawHeaders)
-  lifecycle.signal.throwIfAborted()
   return request
 }
 
@@ -148,7 +131,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   let attemptMs: number | null = null
   let rawJson: string | undefined
   let headersJson: string | undefined
-  ctx.isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
+  const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
   const record = (outcome: Outcome, intermediate: boolean): void => {
     safeRecordLog((): LogEntry => {
@@ -186,13 +169,15 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     const candidates = modelCandidates.filter(channel => !blocker || descriptions.get(channel.id)!.passthrough)
     if (!candidates.length) throw new LocalRequestError(blocker || '没有兼容请求能力的渠道')
     const tried = new Set<number>()
+    // 本次请求中被熔断的渠道；候选快照在请求开始时确定，不再逐轮查库
+    const banned = new Set<number>()
+    const available = () => candidates.filter(c => !banned.has(c.id))
     for (let round = 0; round <= settings.channel_retry_times; round++) {
-      const channel = selectChannel(candidates.filter(c => getChannelById(c.id)?.status === 1), tried)
+      const channel = selectChannel(available(), tried)
       if (!channel) break
       const description = descriptions.get(channel.id)!
       for (let index = 0; index <= settings.single_retry_times; index++) {
         lifecycle.signal.throwIfAborted()
-        if (getChannelById(channel.id)?.status !== 1) break
         const attempt = new AttemptLifecycle(lifecycle.signal, channel.timeout_ms || settings.request_timeout_ms)
         const state: AttemptState = {
           ...description, requestedModel: model, channel, lifecycle: attempt,
@@ -207,12 +192,10 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         let retrySame = false
         try {
           const request = await prepareRequest(ctx, state, settings)
-          attempt.signal.throwIfAborted()
           attempt.touch()
           const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
           if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
-          response = await abortable(fetch(request.url, options), attempt.signal, late => { void late.body?.cancel().catch(() => {}) })
-          attempt.signal.throwIfAborted()
+          response = await fetch(request.url, options)
           if (!response.ok) {
             const text = await readBodyText(response.body, {
               signal: attempt.signal, maxBytes: 64 * 1024, truncate: true,
@@ -229,23 +212,22 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
           const error = attempt.signal.aborted ? attempt.signal.reason : caught
           final = { ...errorOutcome(error), usage: state.usage }
           attemptMs = attempt.elapsed
-          let banned = false
           if (!lifecycle.signal.aborted && settings.auto_ban && shouldDisable(error, autoBanCodes)) {
-            banned = true
-            try { setChannelStatus(channel.id, 2) } catch { console.warn('[agghub] 渠道熔断状态写入失败，保留本次上游错误') }
+            banned.add(channel.id)
+            setChannelStatus(channel.id, 2)
           }
           const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !isRequestError(error)
-          retrySame = canContinue && !banned && shouldRetry(error) && index < settings.single_retry_times
-          const nextChannel = canContinue && round < settings.channel_retry_times && candidates.some(c => c.id !== channel.id && !tried.has(c.id) && getChannelById(c.id)?.status === 1)
+          retrySame = canContinue && !banned.has(channel.id) && shouldRetry(error) && index < settings.single_retry_times
+          const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
           if (!retrySame && !nextChannel) {
-            if (!ctx.isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
+            if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
             return
           }
           record(final, true)
         } finally {
           attemptMs = attempt.elapsed
           attempt.dispose()
-          if (response?.body && !response.body.locked) await settleCleanup(response.body.cancel().catch(() => {}))
+          if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {})
         }
         if (settings.retry_interval_ms > 0) await sleep(settings.retry_interval_ms, lifecycle.signal)
         if (!retrySame) break
@@ -256,7 +238,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
   } catch (error) {
     final = errorOutcome(lifecycle.signal.aborted ? lifecycle.signal.reason : error)
-    if (!ctx.isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
+    if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
   } finally {
     record(final, false)
     lifecycle.dispose()
@@ -285,12 +267,10 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
     state.usage = ir.usage || emptyUsage()
     output = entryBuildResponse(ctx.entryFormat, ir, ctx.ir)
   }
-  // 日志采集也可能遇到序列化异常，独立于客户端业务响应。
-  if (settings.store_response_body) {
-    try { state.response.append(JSON.stringify(output)) } catch { console.warn('[agghub] 响应日志采集失败') }
-  }
+  const text = JSON.stringify(output)
+  state.response.append(text)
   state.lifecycle.signal.throwIfAborted()
-  ctx.res.json(output)
+  ctx.res.type('json').send(text)
   return { status: 'success', code: 200, usage: state.usage }
 }
 
@@ -301,8 +281,8 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   const encoder = entryEncoder(ctx.entryFormat, ctx.ir)
   const transform: ChunkTransform | undefined = state.pseudo
     ? createPseudoThinkingTransform(settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max)) : undefined
-  const observer = new StreamState(state.upstreamWire, state.upstreamWire === 'openai' && Number.isInteger(ctx.rawBody.n) && ctx.rawBody.n > 0 ? ctx.rawBody.n : 1)
-  const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle, settings.downstream_timeout_ms)
+  const observer = new StreamState(state.upstreamWire)
+  const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle)
   let pending: string[] = []
   let opened = false
   let errorForwarded = false
@@ -367,7 +347,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     return { status: 'success', code: 200, usage: state.usage }
   } catch (caught) {
     const error = state.lifecycle.signal.aborted ? state.lifecycle.signal.reason : caught
-    if (opened && !errorForwarded && !requestSignal.aborted && !(error instanceof RequestStopped && error.reason === 'downstream_timeout')) {
+    if (opened && !errorForwarded && !requestSignal.aborted) {
       try { await write(encoder.fail(errorOutcome(error).error!)) } catch {}
     }
     throw error

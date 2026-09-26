@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
 import { getProxyAgent } from '../core/proxy'
-import { abortable } from '../core/requestLifecycle'
 import { readBodyText } from '../core/bodyReader'
 import type { ChannelRow, ChannelType } from '../types'
 
@@ -160,8 +159,7 @@ channelsRouter.post('/test', async (req, res) => {
   res.on('close', close)
   try {
     const proxyUrl = getSettings().proxy_url || undefined
-    const result = await abortable(probe(input, ac.signal, proxyUrl), ac.signal)
-    ac.signal.throwIfAborted()
+    const result = await probe(input, ac.signal, proxyUrl)
     if (!res.destroyed) res.json({ ...result, latency_ms: Date.now() - started })
   } catch (e: any) {
     if (!res.destroyed) res.json({ ok: false, message: e?.name === 'AbortError' ? '请求超时' : String(e?.message || e), latency_ms: Date.now() - started })

@@ -26,7 +26,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   retry_interval_ms: '0',
   request_timeout_ms: '120000',
   request_max_duration_ms: '1800000',
-  downstream_timeout_ms: '30000',
   log_response_max_bytes: '4194304',
   stream_buffer_max_bytes: '16777216',
   image_max_bytes: '20971520',

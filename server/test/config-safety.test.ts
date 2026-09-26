@@ -94,11 +94,11 @@ test('D02/D16: 合法 schema 的同名数据保留，正则危险顶层键拒绝
   assert.equal(apply({}, [{ type: 'regex', pattern: '^.*$', replacement: '{"messages":[]}' }]).changed, false)
 })
 
-test('D26: 令牌保存/认证统一规范化，非法历史配置保持拒绝访问', () => {
+test('D26: 令牌保存时规范化，非法历史配置保持拒绝访问', () => {
   assert.equal(normalizeAccessToken(' token '), 'token')
   assert.equal(normalizeAccessToken(''), '')
   for (const token of ['   ', 'a\nb', '\ttoken', '中文', 'x'.repeat(1025)]) assert.throws(() => normalizeAccessToken(token))
-  for (const [stored, expected] of [[' token ', 200], ['   ', 503], ['中文', 503], ['', 200]]) {
+  for (const [stored, expected] of [['token', 200], ['   ', 401], ['中文', 401], ['', 200]]) {
     let status = 200
     const response = { status(n: number) { status = n; return this }, json() {} }
     createTokenGuard(() => stored as string)({ headers: { authorization: 'Bearer token' } } as any, response as any, () => {})

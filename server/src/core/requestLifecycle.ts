@@ -1,46 +1,29 @@
 import type { Response } from 'express'
 
-export type StopReason = 'client_cancel' | 'request_deadline' | 'upstream_idle' | 'downstream_timeout'
+export type StopReason = 'client_cancel' | 'request_deadline' | 'upstream_idle'
 export class RequestStopped extends Error {
   constructor(readonly reason: StopReason) {
-    super({ client_cancel: '客户端中断了请求', request_deadline: '整次请求超过总时限', upstream_idle: '上游无数据超时', downstream_timeout: '等待客户端接收数据超时' }[reason])
+    super({ client_cancel: '客户端中断了请求', request_deadline: '整次请求超过总时限', upstream_idle: '上游无数据超时' }[reason])
     this.name = 'RequestStopped'
   }
 }
 
-/** 不依赖被等待任务自行处理 signal；迟到的响应交给调用者释放。 */
-export function abortable<T>(promise: Promise<T>, signal: AbortSignal, onLate?: (value: T) => void): Promise<T> {
+/** 给不响应 signal 的等待（如自定义 body 流的 read）加上取消能力。 */
+export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
-    let settled = false
-    const stop = () => {
-      if (settled) return
-      settled = true
-      signal.removeEventListener('abort', stop)
-      reject(signal.reason ?? new DOMException('请求已取消', 'AbortError'))
-    }
+    const stop = () => reject(signal.reason)
+    if (signal.aborted) return stop()
     signal.addEventListener('abort', stop, { once: true })
-    if (signal.aborted) stop()
-    promise.then(value => {
-      if (settled) { onLate?.(value); return }
-      settled = true
-      signal.removeEventListener('abort', stop)
-      resolve(value)
-    }, error => {
-      if (settled) return
-      settled = true
-      signal.removeEventListener('abort', stop)
-      reject(error)
-    })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', stop))
   })
 }
 
 export function sleep(ms: number, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
-    const stop = () => { clearTimeout(timer); signal.removeEventListener('abort', stop); reject(signal.reason) }
+    const stop = () => { clearTimeout(timer); reject(signal.reason) }
     const timer = setTimeout(() => { signal.removeEventListener('abort', stop); resolve() }, ms)
     signal.addEventListener('abort', stop, { once: true })
-    if (signal.aborted) stop()
   })
 }
 
@@ -63,12 +46,11 @@ export class RequestLifecycle {
   }
 }
 
-/** 尝试空闲计时从 OAuth/图片准备前开始；背压等待暂时暂停该计时。 */
+/** 单次尝试的上游空闲计时：收到字节即 touch 重置；等待客户端背压时暂停。 */
 export class AttemptLifecycle {
   private controller = new AbortController()
   private timer?: ReturnType<typeof setTimeout>
   private paused = false
-  private disposed = false
   readonly signal = this.controller.signal
   readonly started = performance.now()
   private stop = () => this.controller.abort(this.parent.reason)
@@ -81,24 +63,13 @@ export class AttemptLifecycle {
   get elapsed(): number { return Math.round(performance.now() - this.started) }
   touch = (): void => {
     clearTimeout(this.timer)
-    if (!this.paused && !this.disposed && !this.signal.aborted) this.timer = setTimeout(() => this.controller.abort(new RequestStopped('upstream_idle')), this.idleMs)
+    if (!this.paused && !this.signal.aborted) this.timer = setTimeout(() => this.controller.abort(new RequestStopped('upstream_idle')), this.idleMs)
   }
   pause(): void { this.paused = true; clearTimeout(this.timer) }
   resume(): void { this.paused = false; this.touch() }
-  abort(reason?: unknown): void { this.controller.abort(reason); clearTimeout(this.timer) }
   dispose(): void {
-    if (this.disposed) return
-    this.disposed = true
     clearTimeout(this.timer)
     this.parent.removeEventListener('abort', this.stop)
     this.controller.abort()
   }
-}
-
-/** 流关闭回调属于外部实现，给清理等待设上限，避免清理本身挂起请求。 */
-export async function settleCleanup(promise: Promise<unknown>): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  try {
-    await Promise.race([promise.catch(() => {}), new Promise<void>(resolve => { timer = setTimeout(resolve, 100) })])
-  } finally { clearTimeout(timer) }
 }
