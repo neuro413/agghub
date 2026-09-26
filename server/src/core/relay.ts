@@ -21,7 +21,7 @@ import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinking
 import type { ChunkTransform, ThinkingInjectEntry } from './pseudoThinking'
 import * as thinkingStore from './thinkingStore'
 import { AttemptLifecycle, RequestLifecycle, RequestStopped, abortable, settleCleanup, sleep } from './requestLifecycle'
-import { BoundedCapture, BufferBudget } from './capture'
+import { BoundedCapture } from './capture'
 import { readBodyText } from './bodyReader'
 import { createStreamWriter } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
@@ -54,7 +54,6 @@ interface AttemptState extends UpstreamContext {
   adaptor: Adaptor
   passthrough: boolean
   lifecycle: AttemptLifecycle
-  budget: BufferBudget
   upstream: BoundedCapture
   response: BoundedCapture
   usage: IRUsage
@@ -85,9 +84,9 @@ function entryBuildResponse(format: EntryFormat, response: any, ir: any): any {
   return oaiConv.buildResponse(response)
 }
 
-function entryEncoder(format: EntryFormat, ir: any, budget?: BufferBudget) {
-  if (format === 'anthropic') return anthConv.createStreamEncoder({ estimatePromptTokens: estimatePromptTokens(ir), budget })
-  if (format === 'responses') return respConv.createStreamEncoder({ model: ir?.model, customToolNames: ir?.custom_tool_names, budget })
+function entryEncoder(format: EntryFormat, ir: any) {
+  if (format === 'anthropic') return anthConv.createStreamEncoder({ estimatePromptTokens: estimatePromptTokens(ir) })
+  if (format === 'responses') return respConv.createStreamEncoder({ model: ir?.model, customToolNames: ir?.custom_tool_names })
   return oaiConv.createStreamEncoder()
 }
 
@@ -197,7 +196,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const attempt = new AttemptLifecycle(lifecycle.signal, channel.timeout_ms || settings.request_timeout_ms)
         const state: AttemptState = {
           ...description, requestedModel: model, channel, lifecycle: attempt,
-          budget: new BufferBudget(settings.stream_buffer_max_bytes), usage: emptyUsage(),
+          usage: emptyUsage(),
           upstream: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
           response: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
           pseudo: description.passthrough && matchesPseudoThinking(ctx.entryFormat, description.upstreamWire, channel.id, model, settings),
@@ -299,14 +298,12 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   if (!response.body) throw new UpstreamError(502, 'no response body from upstream')
   const passthrough = state.passthrough && !state.pseudo
   const decoder = passthrough ? null : state.adaptor.createStreamDecoder(state)
-  const encoder = entryEncoder(ctx.entryFormat, ctx.ir, state.budget)
+  const encoder = entryEncoder(ctx.entryFormat, ctx.ir)
   const transform: ChunkTransform | undefined = state.pseudo
-    ? createPseudoThinkingTransform(settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max), state.budget) : undefined
-  const observer = new StreamState(state.upstreamWire, state.upstreamWire === 'openai' && Number.isInteger(ctx.rawBody.n) && ctx.rawBody.n > 0 ? ctx.rawBody.n : 1, state.budget)
+    ? createPseudoThinkingTransform(settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max)) : undefined
+  const observer = new StreamState(state.upstreamWire, state.upstreamWire === 'openai' && Number.isInteger(ctx.rawBody.n) && ctx.rawBody.n > 0 ? ctx.rawBody.n : 1)
   const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle, settings.downstream_timeout_ms)
-  const pendingKey = Symbol('pending-frames')
   let pending: string[] = []
-  let pendingBytes = 0
   let opened = false
   let errorForwarded = false
   const open = async (): Promise<void> => {
@@ -320,17 +317,11 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     opened = true
     for (const frame of pending) await write(frame)
     pending = []
-    pendingBytes = 0
-    state.budget.release(pendingKey)
   }
   const emit = async (frame: string): Promise<void> => {
     if (!frame) return
     if (opened) await write(frame)
-    else {
-      pendingBytes += Buffer.byteLength(frame) + 32
-      state.budget.hold(pendingKey, pendingBytes)
-      pending.push(frame)
-    }
+    else pending.push(frame)
   }
   const emitChunk = async (chunk: any): Promise<void> => {
     if (chunk.usage) state.usage = chunk.usage
@@ -345,7 +336,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   }
   try {
     for await (const event of parseSSEEvents(response.body, undefined, {
-      signal: state.lifecycle.signal, budget: state.budget,
+      signal: state.lifecycle.signal,
       onBytes: bytes => { state.lifecycle.touch(); state.upstream.append(bytes) },
     })) {
       const data = observer.observe(event)
@@ -381,11 +372,6 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     }
     throw error
   } finally {
-    observer.dispose()
-    decoder?.dispose?.()
-    encoder.dispose?.()
-    transform?.dispose?.()
-    state.budget.release(pendingKey)
     if (opened && !ctx.res.writableEnded) ctx.res.end()
   }
 }

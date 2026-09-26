@@ -2,7 +2,6 @@ import crypto from 'node:crypto'
 import type { IRUsage } from '../types'
 import { emptyUsage as _emptyUsage } from './usage'
 import { readBytes, type ReadOptions } from '../core/bodyReader'
-import { BufferBudget } from '../core/capture'
 
 /** OpenAI 对 safety_identifier / prompt_cache_key 的官方长度上限 */
 export const MAX_IDENTIFIER_LEN = 64
@@ -99,28 +98,22 @@ export function estimatePromptTokens(ir: any): number {
   return chars > 0 ? Math.ceil(chars / 4) : 0
 }
 
+/** 单行上限：防止异常上游一直不发换行导致缓冲无限增长 */
+const MAX_SSE_LINE_CHARS = 64 * 1024 * 1024
+
 /** 字节活动在 readBytes 层通知；UTF-8 半字符与 SSE 半行均保留到下次读取。 */
 export async function* parseSSELines(body: ReadableStream<Uint8Array>, options: ReadOptions = {}): AsyncGenerator<string> {
   const decoder = new TextDecoder()
-  const budget = options.budget ?? new BufferBudget(16 * 1024 * 1024)
-  const key = Symbol('sse-line')
   let buffer = ''
-  try {
-    for await (const value of readBytes(body, options)) {
-      buffer += decoder.decode(value, { stream: true })
-      budget.hold(key, Buffer.byteLength(buffer))
-      let index: number
-      while ((index = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, index).replace(/\r$/, '')
-        buffer = buffer.slice(index + 1)
-        budget.hold(key, Buffer.byteLength(buffer))
-        yield line
-      }
-    }
-    buffer += decoder.decode()
-    budget.hold(key, Buffer.byteLength(buffer))
-    if (buffer) yield buffer.replace(/\r$/, '')
-  } finally { budget.release(key) }
+  for await (const value of readBytes(body, options)) {
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop()!
+    for (const line of lines) yield line.replace(/\r$/, '')
+    if (buffer.length > MAX_SSE_LINE_CHARS) throw new Error('上游 SSE 单行超过 64M 字符限制')
+  }
+  buffer += decoder.decode()
+  if (buffer) yield buffer.replace(/\r$/, '')
 }
 
 export async function* parseSSEEvents(
@@ -131,25 +124,20 @@ export async function* parseSSEEvents(
   let event: string | null = null
   let data = ''
   let hasData = false
-  const budget = options.budget ?? new BufferBudget(16 * 1024 * 1024)
-  const key = Symbol('sse-event')
-  try {
-    for await (const line of parseSSELines(body, { ...options, budget })) {
-      onLine?.(line)
-      if (line === '') {
-        if (hasData) yield { event, data }
-        event = null
-        data = ''
-        hasData = false
-      } else if (line.startsWith('event:')) event = line.slice(6).trim()
-      else if (line.startsWith('data:')) {
-        data += (hasData ? '\n' : '') + line.slice(5).replace(/^ /, '')
-        hasData = true
-      }
-      budget.hold(key, Buffer.byteLength(data) + Buffer.byteLength(event || ''))
+  for await (const line of parseSSELines(body, options)) {
+    onLine?.(line)
+    if (line === '') {
+      if (hasData) yield { event, data }
+      event = null
+      data = ''
+      hasData = false
+    } else if (line.startsWith('event:')) event = line.slice(6).trim()
+    else if (line.startsWith('data:')) {
+      data += (hasData ? '\n' : '') + line.slice(5).replace(/^ /, '')
+      hasData = true
     }
-    if (hasData) yield { event, data }
-  } finally { budget.release(key) }
+  }
+  if (hasData) yield { event, data }
 }
 
 export type StreamDecoder = {
@@ -157,8 +145,6 @@ export type StreamDecoder = {
   push(ev: { event: string | null; data: string }): any[]
   /** 流结束时补发（如最后的 usage chunk）*/
   flush(): any[]
-  /** 请求结束时释放转换器保留的预算与状态。 */
-  dispose?(): void
 }
 
 export type StreamEncoder = {
@@ -168,5 +154,4 @@ export type StreamEncoder = {
   finalize(): string
   /** 流中途失败：发协议原生的终态错误事件（不再伪装成正常结束）*/
   fail(message: string): string
-  dispose?(): void
 }

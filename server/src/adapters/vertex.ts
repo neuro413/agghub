@@ -114,7 +114,7 @@ export const vertexAdaptor: Adaptor = {
   },
 
   createStreamDecoder(context) {
-    if (context.upstreamWire === 'anthropic') return anth.createStreamDecoder(context.requestedModel, context.budget)
+    if (context.upstreamWire === 'anthropic') return anth.createStreamDecoder(context.requestedModel)
     return gem.createStreamDecoder(context.requestedModel)
   },
 }

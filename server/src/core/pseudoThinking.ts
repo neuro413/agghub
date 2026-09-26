@@ -1,7 +1,6 @@
 import type { Settings } from '../types'
 import { matchesDropThinking } from './preprocess'
 import { validateThinkingTags } from './settingsValidation'
-import { BufferBudget } from './capture'
 
 let lastInvalidTagWarning = -Infinity
 
@@ -131,19 +130,16 @@ export function splitIRResponse(
 export interface ChunkTransform {
   transform(chunk: any): any[]
   flush(): any[]
-  dispose?(): void
 }
 
 export function createPseudoThinkingTransform(
   settings: Settings,
   storeSave: (text: string) => string,
-  budget?: BufferBudget,
 ): ChunkTransform {
   const splitter = new ThinkingTextSplitter(
     settings.pseudo_thinking_open_tag,
     settings.pseudo_thinking_close_tag,
     storeSave,
-    budget,
   )
   let shell: any = null
 
@@ -163,7 +159,6 @@ export function createPseudoThinkingTransform(
     flush() {
       return splitter.flush().map((d) => wrapDelta(shell || {}, d))
     },
-    dispose() { splitter.dispose(); shell = null },
   }
 }
 
@@ -193,10 +188,8 @@ class ThinkingTextSplitter {
   private lstripThink = false
   private lstripText = true
   private thinkParts: string[] = []
-  private thinkBytes = 0
-  private budgetKey = Symbol('pseudo-thinking')
 
-  constructor(open: string, close: string, onClose: (thinking: string) => string, private budget = new BufferBudget(16 * 1024 * 1024)) {
+  constructor(open: string, close: string, onClose: (thinking: string) => string) {
     validateThinkingTags(open, close)
     this.open = open
     this.close = close
@@ -274,24 +267,13 @@ class ThinkingTextSplitter {
       if (!t) return
       this.lstripThink = false
     }
-    this.thinkBytes += Buffer.byteLength(t) + 32
-    this.budget.hold(this.budgetKey, this.thinkBytes + 512)
     this.thinkParts.push(t)
     out.push({ reasoning_content: t })
-  }
-
-  dispose(): void {
-    this.buf = ''
-    this.thinkParts = []
-    this.thinkBytes = 0
-    this.budget.release(this.budgetKey)
   }
 
   private emitSignature(out: any[]): void {
     const full = this.thinkParts.join('')
     this.thinkParts = []
-    this.thinkBytes = 0
-    this.budget.release(this.budgetKey)
     if (!full) return
     const sig = this.onClose(full)
     if (sig) out.push({ reasoning_signature: sig })

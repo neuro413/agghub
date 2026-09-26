@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as anthropic from '../src/convert/anthropic'
 import * as responses from '../src/convert/responses'
-import { BufferBudget } from '../src/core/capture'
 
 const chunk = (delta: any, finish: string | null = null) => ({ id: 'synthetic', model: 'alias', choices: [{ index: 0, delta, finish_reason: finish }] })
 const events = (text: string): any[] => text.split('\n').filter(line => line.startsWith('data: {')).map(line => JSON.parse(line.slice(6)))
@@ -116,7 +115,6 @@ test('D22: Responses→Anthropic→Responses 实际 custom 往返的四种表示
       ]
       const output = source.flatMap(e => decoder.push({ event: e.type, data: JSON.stringify(e) })).map(c => encoder.encode(c)).join('') + encoder.finalize()
       assertCustom(output, input)
-      decoder.dispose?.()
     }
   }
 })
@@ -137,19 +135,4 @@ test('D22: 包装输入非法时明确失败，不能先发包装 delta 或成�
     assert.throws(() => encoder.finalize(), /custom/)
     assert.match(encoder.fail('包装失败'), /response.failed/)
   }
-})
-
-test('R02: 工具、Responses 输出和解码器缓存共享有界预算，dispose 释放占用', () => {
-  for (const format of ['anthropic', 'responses']) {
-    const budget = new BufferBudget(1024)
-    const encoder = format === 'anthropic' ? anthropic.createStreamEncoder({ budget }) : responses.createStreamEncoder({ budget })
-    assert.throws(() => encoder.encode(chunk({ tool_calls: [{ index: 0, id: 'call', function: { name: 'run', arguments: 'x'.repeat(2048) } }] })), /缓冲/)
-    encoder.dispose?.()
-    assert.equal(budget.used, 0)
-  }
-  const budget = new BufferBudget(1024)
-  const decoder = responses.createStreamDecoder('alias', budget)
-  assert.throws(() => decoder.push({ event: null, data: JSON.stringify({ type: 'response.function_call_arguments.delta', output_index: 0, delta: 'x'.repeat(2048) }) }), /缓冲/)
-  decoder.dispose?.()
-  assert.equal(budget.used, 0)
 })

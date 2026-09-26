@@ -5,7 +5,6 @@ import { finishToResponsesStatus, responsesStatusToFinish } from './reasonmap'
 import { decodeReasoningItem, encodeReasoningItem, reasoningFromResponses, reasoningItemsText, stableReasoningId } from './reasoning'
 import { usageFromResponses, usageToResponses } from './usage'
 import type { IRReasoningItem } from '../types'
-import { BufferBudget } from '../core/capture'
 
 // OpenAI Responses API：既可作上游渠道（POST /v1/responses），也可作对外入口（/v1/responses）。
 // IR 仍以 OpenAI Chat 结构为枢纽，本模块负责 Responses ↔ IR 的双向转换。
@@ -648,8 +647,7 @@ export function parseResponse(resp: any, model: string): any {
 }
 
 // ═══════════ 上游方向：Responses SSE 事件 → IR(OpenAI Chat) chunks ═══════════
-export function createStreamDecoder(model: string, budget = new BufferBudget(16 * 1024 * 1024)): StreamDecoder {
-  const budgetKey = Symbol('responses-decoder')
+export function createStreamDecoder(model: string): StreamDecoder {
   const id = genId()
   const created = nowSec()
   let started = false
@@ -956,16 +954,11 @@ export function createStreamDecoder(model: string, budget = new BufferBudget(16 
         default:
           break
       }
-      const toolBytes = [...new Set(tools.values())].reduce((n, tool) => n + 128 + Buffer.byteLength(tool.args) + Buffer.byteLength(tool.name) + Buffer.byteLength(tool.callId), 0)
-      const reasonBytes = [...new Set(reasons.values())].reduce((n, reason) => n + 64 + Buffer.byteLength(reason.text), 0)
-      const groupBytes = [...new Set([group, closedGroup])].reduce((n, item) => n + (item ? Buffer.byteLength(item.text) + item.items.reduce((sum, part) => sum + Buffer.byteLength(part.encrypted) + 64, 0) : 0), 0)
-      budget.hold(budgetKey, toolBytes + reasonBytes + groupBytes + followerKeys.size * 64)
       return out
     },
     flush() {
       return []
     },
-    dispose() { tools.clear(); reasons.clear(); followerKeys.clear(); group = null; closedGroup = null; budget.release(budgetKey) },
   }
 }
 
@@ -1260,7 +1253,6 @@ function reasoningItemToOutput(it: IRReasoningItem, status: string): any {
 
 export interface ResponsesEncodeOptions {
   model?: string
-  budget?: BufferBudget
   /** 请求侧声明的 custom 工具名，用于把同名 tool_call 还原为 custom_tool_call */
   customToolNames?: string[]
 }
@@ -1375,10 +1367,6 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
   let curMsg: Item | null = null
   let curReason: Item | null = null
   const tools = new Map<number, Item>()
-  const budget = opts?.budget ?? new BufferBudget(16 * 1024 * 1024)
-  const budgetKey = Symbol('responses-output')
-  const updateBudget = () => budget.hold(budgetKey, order.reduce((n, item) => n + 256 + Buffer.byteLength(item.text) + Buffer.byteLength(item.refusal) + Buffer.byteLength(item.encrypted || '') + Buffer.byteLength(item.name || '') + Buffer.byteLength(item.callId || ''), 0))
-  const clear = () => { order.length = 0; tools.clear(); curMsg = null; curReason = null; budget.release(budgetKey) }
 
   const ev = (type: string, data: any): string => `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: seq++, ...data })}\n\n`
 
@@ -1577,7 +1565,6 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
         }
       }
       if (fr) finishReason = fr
-      updateBudget()
       return out
     },
     finalize() {
@@ -1594,7 +1581,6 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       resp.usage = usageToResponses(usage)
       out += ev(status === 'incomplete' ? 'response.incomplete' : 'response.completed', { response: resp })
       finalized = true
-      clear()
       return out
     },
     fail(message) {
@@ -1606,10 +1592,8 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       resp.output = order.map((it) => (it.kind === 'message' ? messageItem(it, 'incomplete') : it.kind === 'reasoning' ? reasoningItem(it, 'incomplete') : toolItem(it, 'incomplete')))
       resp.usage = usageToResponses(usage)
       out += ev('response.failed', { response: resp })
-      clear()
       return out
     },
-    dispose() { finalized = true; clear() },
   }
 }
 

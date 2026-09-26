@@ -1,7 +1,6 @@
 import type { WireFormat } from '../types'
 import { extractUpstreamMessage, UpstreamError } from './failover'
 import { streamEventError, streamEventHasContent } from '../convert/responses'
-import { BufferBudget } from './capture'
 
 export interface SSEEvent { event: string | null; data: string }
 
@@ -17,14 +16,11 @@ export class StreamState {
   failed: string | null = null
   private explicitEnd = false
   private choices = new Map<number, boolean>()
-  private budgetKey = Symbol('stream-choices')
-  constructor(readonly wire: WireFormat, private expectedChoices = 1, private budget = new BufferBudget(16 * 1024 * 1024)) {}
+  constructor(readonly wire: WireFormat, private expectedChoices = 1) {}
   private noteChoice(index: number, finished: boolean): void {
     if (!Number.isSafeInteger(index) || index < 0) throw new UpstreamError(502, '上游候选 index 无效')
-    if (!this.choices.has(index)) this.budget.hold(this.budgetKey, (this.choices.size + 1) * 64)
     this.choices.set(index, this.choices.get(index) === true || finished)
   }
-  dispose(): void { this.choices.clear(); this.budget.release(this.budgetKey) }
   get terminal(): boolean {
     if (this.failed) return true
     if (this.explicitEnd) return true

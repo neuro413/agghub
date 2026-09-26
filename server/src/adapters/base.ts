@@ -1,6 +1,5 @@
 import type { Channel, WireFormat } from '../types'
 import type { StreamDecoder } from '../convert/ir'
-import type { BufferBudget } from '../core/capture'
 
 export interface UpstreamRequest {
   url: string
@@ -17,7 +16,6 @@ export interface UpstreamContext {
   requestedModel: string
   upstreamModel: string
   upstreamWire: WireFormat
-  budget?: BufferBudget
 }
 
 export interface Adaptor {

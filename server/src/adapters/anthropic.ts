@@ -20,7 +20,7 @@ export const anthropicAdaptor: Adaptor = {
     }
   },
   parseResponse: (json, context) => anth.parseResponse(json, context.requestedModel),
-  createStreamDecoder: context => anth.createStreamDecoder(context.requestedModel, context.budget),
+  createStreamDecoder: context => anth.createStreamDecoder(context.requestedModel),
   buildPassthroughRequest(channel, rawBody, upstreamModel, stream, rawHeaders) {
     const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.anthropic.com'
     const url = withV1(root) + '/messages'

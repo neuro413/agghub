@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import net from 'node:net'
 import { db, setSettings } from '../src/db'
-import { BoundedCapture, BufferBudget } from '../src/core/capture'
+import { BoundedCapture } from '../src/core/capture'
 import { parseSSEEvents } from '../src/convert/ir'
 import { StreamState } from '../src/core/streamState'
 import { createStreamWriter } from '../src/core/streamWriter'
@@ -31,7 +31,7 @@ test('R02: 64MiB 合成数据只保留预算前缀，关闭采集不累计，UTF
   assert.equal(utf8.text(), '你')
 })
 
-test('D10/R02: SSE 任意 UTF-8 分片、CRLF、多行 data 和尾行解析一致，超大事件取消', async () => {
+test('D10: SSE 任意 UTF-8 分片、CRLF、多行 data 和尾行解析一致', async () => {
   const bytes = new TextEncoder().encode(': 心跳\r\nevent: message\r\ndata: 中文🙂\r\ndata: 后一行\r\n\r\ndata: 尾行')
   let calls = 0
   const body = new ReadableStream<Uint8Array>({ start(controller) { for (const byte of bytes) controller.enqueue(Uint8Array.of(byte)); controller.close() } })
@@ -39,12 +39,6 @@ test('D10/R02: SSE 任意 UTF-8 分片、CRLF、多行 data 和尾行解析一�
   for await (const event of parseSSEEvents(body, undefined, { onBytes() { calls++ } })) result.push(event)
   assert.equal(calls, bytes.length)
   assert.deepEqual(result, [{ event: 'message', data: '中文🙂\n后一行' }, { event: null, data: '尾行' }])
-  let cancelled = false
-  const oversized = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: ' + 'x'.repeat(3000))) }, cancel() { cancelled = true } })
-  const budget = new BufferBudget(1024)
-  await assert.rejects(async () => { for await (const _event of parseSSEEvents(oversized, undefined, { budget })) {} }, /缓冲/)
-  assert.equal(cancelled, true)
-  assert.equal(budget.used, 0)
 })
 
 test('D04: 多 choice 完成、长度限制、usage尾包、错误状态单向保持', () => {

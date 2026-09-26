@@ -1,10 +1,9 @@
 import { abortable, settleCleanup } from './requestLifecycle'
-import { BoundedCapture, type BufferBudget } from './capture'
+import { BoundedCapture } from './capture'
 
 export interface ReadOptions {
   signal?: AbortSignal
   onBytes?: (bytes: Uint8Array) => void
-  budget?: BufferBudget
 }
 
 /** 自然 EOF 释放锁；取消、错误和提前退出同时取消底层 body。 */

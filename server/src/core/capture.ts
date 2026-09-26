@@ -38,22 +38,3 @@ export class BoundedCapture {
     return this.truncated ? text : text + decoder.decode()
   }
 }
-
-/** parser、待开流帧及转换器队列共用尝试级预算。 */
-export class BufferBudget {
-  private holds = new Map<symbol, number>()
-  used = 0
-  peak = 0
-  constructor(readonly limit: number) {}
-  hold(key: symbol, bytes: number): void {
-    const next = this.used - (this.holds.get(key) || 0) + bytes
-    if (next > this.limit) throw new Error(`流重组缓冲超过 ${this.limit} 字节限制`)
-    this.holds.set(key, bytes)
-    this.used = next
-    this.peak = Math.max(this.peak, next)
-  }
-  release(key: symbol): void {
-    this.used -= this.holds.get(key) || 0
-    this.holds.delete(key)
-  }
-}
