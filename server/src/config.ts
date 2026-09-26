@@ -14,8 +14,6 @@ if (process.env.AGGHUB_TESTING === '1' && DATA_DIR.toLowerCase() === path.join(P
 }
 /** 数据库文件 */
 export const DB_PATH = path.join(DATA_DIR, 'agghub.db')
-/** 迁移前一致性备份目录 */
-export const BACKUP_DIR = path.resolve(process.env.AGGHUB_BACKUP_DIR || path.join(DATA_DIR, 'backups'))
 /** 前端构建产物（生产托管）*/
 export const WEB_DIST = path.resolve(PROJECT_ROOT, 'web', 'dist')
 /** 网关端口（默认 3210，避开常见代理端口）*/

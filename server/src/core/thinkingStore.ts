@@ -11,19 +11,11 @@ db.exec(`
 CREATE TABLE IF NOT EXISTS thinking_store (
   signature  TEXT PRIMARY KEY,
   thinking   TEXT NOT NULL,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'text',
+  payload    TEXT
 );
 `)
-for (const sql of [
-  "ALTER TABLE thinking_store ADD COLUMN kind TEXT NOT NULL DEFAULT 'text'",
-  'ALTER TABLE thinking_store ADD COLUMN payload TEXT',
-]) {
-  try {
-    db.exec(sql)
-  } catch {
-    // 列已存在
-  }
-}
 
 const SIG_MAGIC = Buffer.from([0x12, 0xaf, 0x03, 0x0a, 0x63])
 const SIG_TOTAL_BYTES = 280

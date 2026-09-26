@@ -1,7 +1,6 @@
 import { Router } from 'express'
 import { db } from '../db'
 import { clearAllLogs, hydrateLogRow } from '../stats/recorder'
-import { blobStats } from '../stats/blobstore'
 
 export const logsRouter = Router()
 
@@ -71,13 +70,6 @@ logsRouter.get('/facets', (_req, res) => {
     )
     .all() as { channel_id: number; channel_name: string; n: number }[]
   res.json({ models, channels })
-})
-
-// 存储占用概览（块数 / 原文字节 / 落盘字节 / 数据库文件页数）
-logsRouter.get('/storage', (_req, res) => {
-  const pageSize = db.pragma('page_size', { simple: true }) as number
-  const pageCount = db.pragma('page_count', { simple: true }) as number
-  res.json({ ...blobStats(), db_bytes: pageSize * pageCount })
 })
 
 // 单条详情（含 request/response 正文 + 请求头；正文从块存储还原）

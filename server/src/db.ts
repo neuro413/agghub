@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
-import { BACKUP_DIR, DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
-import { migrateLogs } from './migrations/logs'
+import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
 import type { Channel, ChannelRow, ChannelStatus, ParamRule, PreprocessRule, Settings, ToolFilterRule } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
@@ -10,10 +9,6 @@ export const db = new Database(DB_PATH)
 db.pragma('journal_mode = WAL')
 db.pragma('busy_timeout = 5000')
 
-// 日志结构变更先创建包含 WAL 的一致性备份；失败时停止启动，旧日志不会被丢弃。
-const logMigration = migrateLogs(db, BACKUP_DIR)
-if (logMigration.backupPath) console.warn(`[agghub] 日志迁移前备份：${logMigration.backupPath}`)
-if (logMigration.legacyTable) console.warn(`[agghub] 旧日志保留于 ${logMigration.legacyTable}，请验收后再安排归档清理`)
 // 增量自动回收：删日志后能逐步归还空闲页而不用整库 VACUUM。修改该 pragma 需要 VACUUM 一次才生效。
 if (db.pragma('auto_vacuum', { simple: true }) !== 2) {
   db.pragma('auto_vacuum = INCREMENTAL')
@@ -45,21 +40,61 @@ CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
-`)
 
-// 旧库补列（CREATE TABLE IF NOT EXISTS 不会给已存在的表加列）
-{
-  const cols = db.prepare('PRAGMA table_info(channels)').all() as { name: string }[]
-  if (!cols.some((c) => c.name === 'ua_override')) {
-    db.exec('ALTER TABLE channels ADD COLUMN ua_override INTEGER NOT NULL DEFAULT 0')
-  }
-  if (!cols.some((c) => c.name === 'ua_value')) {
-    db.exec('ALTER TABLE channels ADD COLUMN ua_value TEXT')
-  }
-  if (!cols.some((c) => c.name === 'strip_headers')) {
-    db.exec('ALTER TABLE channels ADD COLUMN strip_headers INTEGER NOT NULL DEFAULT 0')
-  }
-}
+-- 日志行只存元数据，正文以 *_ref 引用 blobs 中的内容寻址块（见 stats/blobstore）
+CREATE TABLE IF NOT EXISTS request_logs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at INTEGER NOT NULL,
+  channel_id INTEGER,
+  channel_name TEXT,
+  entry_format TEXT NOT NULL DEFAULT 'openai',
+  model TEXT,
+  upstream_model TEXT,
+  status TEXT NOT NULL,
+  status_code INTEGER,
+  latency_ms INTEGER,
+  prompt_tokens INTEGER DEFAULT 0,
+  completion_tokens INTEGER DEFAULT 0,
+  total_tokens INTEGER DEFAULT 0,
+  cache_read_tokens INTEGER DEFAULT 0,
+  cache_write_tokens INTEGER DEFAULT 0,
+  retry_count INTEGER DEFAULT 0,
+  is_stream INTEGER DEFAULT 0,
+  is_retry INTEGER DEFAULT 0,
+  error_message TEXT,
+  preprocessed INTEGER DEFAULT 0,
+  pseudo_thinking INTEGER DEFAULT 0,
+  request_headers_ref BLOB,
+  request_body_ref BLOB,
+  response_body_ref BLOB,
+  preprocessed_body_ref BLOB,
+  thinking_inject_ref BLOB,
+  upstream_response_body_ref BLOB,
+  request_id TEXT,
+  attempt_latency_ms INTEGER,
+  response_body_truncated INTEGER NOT NULL DEFAULT 0,
+  upstream_response_body_truncated INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_logs_created ON request_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_logs_channel ON request_logs(channel_id);
+CREATE INDEX IF NOT EXISTS idx_logs_model ON request_logs(model);
+CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_request_final ON request_logs(request_id) WHERE request_id IS NOT NULL AND is_retry = 0;
+
+CREATE TABLE IF NOT EXISTS blobs (
+  hash BLOB PRIMARY KEY,
+  raw_size INTEGER NOT NULL,
+  codec INTEGER NOT NULL,
+  data BLOB NOT NULL,
+  created_at INTEGER NOT NULL
+) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS blob_edges (
+  parent BLOB NOT NULL,
+  child BLOB NOT NULL,
+  PRIMARY KEY (parent, child)
+) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS idx_blob_edges_child ON blob_edges(child);
+`)
 
 // 注入默认设置（已存在的 key 不覆盖）
 {

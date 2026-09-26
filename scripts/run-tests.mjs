@@ -31,7 +31,7 @@ for (const [index, file] of files.entries()) {
   if (actual === production || actual.startsWith(production + path.sep)) throw new Error('测试目录不得位于实际 data 内')
   const result = await new Promise(resolve => {
     const child = spawn(process.execPath, ['--import', loader, '--test', '--test-concurrency=1', file], {
-      cwd: root, env: { ...process.env, TEMP: data, TMP: data, TMPDIR: data, TSX_DISABLE_CACHE: '1', AGGHUB_TESTING: '1', AGGHUB_DATA_DIR: data, AGGHUB_BACKUP_DIR: path.join(data, 'backups') },
+      cwd: root, env: { ...process.env, TEMP: data, TMP: data, TMPDIR: data, TSX_DISABLE_CACHE: '1', AGGHUB_TESTING: '1', AGGHUB_DATA_DIR: data },
       stdio: ['ignore', 'pipe', 'pipe'],
     })
     let output = '', timedOut = false
