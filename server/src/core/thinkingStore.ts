@@ -1,11 +1,10 @@
 import crypto from 'node:crypto'
 import { db } from '../db'
-import { reasoningRecordSeed } from '../convert/responses'
-import type { ReasoningStoreRecord } from '../convert/responses'
+import type { ReasoningStoreItem } from '../convert/responses'
 
 // 两类记录共用一张表：
 //   kind='text'       伪思考：签名 ↔ 思维链正文（thinking 列）
-//   kind='responses'  Responses 上游推理项：签名 ↔ payload JSON { id, encrypted, summary }
+//   kind='responses'  Responses 上游推理组：签名 ↔ payload JSON { items: [{ id, encrypted, followers }] }
 //                     供 Anthropic 客户端把 thinking 块签名回传后还原成 reasoning 项
 db.exec(`
 CREATE TABLE IF NOT EXISTS thinking_store (
@@ -75,8 +74,6 @@ export function lookup(signature: string): string | null {
 
 // ── Responses 推理项暂存 ─────────────────────────────────
 
-export type ReasoningRecord = ReasoningStoreRecord
-
 const upsertStmt = db.prepare(
   'INSERT INTO thinking_store (signature, thinking, created_at, kind, payload) VALUES (?, ?, ?, ?, ?) ' +
     'ON CONFLICT(signature) DO UPDATE SET thinking = excluded.thinking, payload = excluded.payload',
@@ -86,24 +83,17 @@ const upsertStmt = db.prepare(
  * 存一条 Responses 推理组（可含多个 reasoning 项），返回可放进 Claude thinking 块的合成签名。
  * 签名只由密文决定，同一组重复 save 会覆盖 payload（流式时 followers 计数是事后补写的）。
  */
-export function saveReasoning(rec: ReasoningRecord, maxEntries: number): string {
-  const seed = reasoningRecordSeed(rec)
-  if (!seed) return ''
-  const sig = makeSignature('responses:' + seed)
-  upsertStmt.run(sig, rec.summary || '', Date.now(), 'responses', JSON.stringify(rec))
+export function saveReasoning(items: ReasoningStoreItem[], maxEntries: number): string {
+  const sig = makeSignature('responses:' + items.map((it) => it.encrypted).join('\n'))
+  upsertStmt.run(sig, '', Date.now(), 'responses', JSON.stringify({ items }))
   evict('responses', maxEntries)
   return sig
 }
 
-export function lookupReasoning(signature: string): ReasoningRecord | null {
-  if (!signature) return null
+export function lookupReasoning(signature: string): ReasoningStoreItem[] | null {
   const row = lookupStmt.get(signature) as { kind: string; payload: string | null } | undefined
-  if (!row || row.kind !== 'responses' || !row.payload) return null
-  try {
-    return JSON.parse(row.payload) as ReasoningRecord
-  } catch {
-    return null
-  }
+  if (row?.kind !== 'responses' || !row.payload) return null
+  return JSON.parse(row.payload).items ?? null
 }
 
 export function count(): number {

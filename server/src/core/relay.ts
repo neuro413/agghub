@@ -28,7 +28,7 @@ import { StreamState, meaningfulDelta } from './streamState'
 import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthroughUsage, streamDeltaText } from './responseSemantics'
 
 respConv.setReasoningStore({
-  save: rec => thinkingStore.saveReasoning(rec, getSettings().reasoning_store_max),
+  save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
   lookup: sig => thinkingStore.lookupReasoning(sig),
 })
 

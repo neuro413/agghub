@@ -59,7 +59,7 @@ export class StreamState {
         this.explicitEnd = true
         if (data.response?.status === 'failed') this.failed = data.response.error?.message || 'response.failed'
       }
-      this.content ||= streamEventHasContent(data) || !!data.item?.encrypted_content || !!data.response?.output?.some((item: any) => item.type === 'reasoning' && item.encrypted_content)
+      this.content ||= streamEventHasContent(data)
     } else {
       for (const candidate of data?.candidates || []) {
         this.finished ||= !!candidate.finishReason

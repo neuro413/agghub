@@ -77,51 +77,13 @@ export interface ReasoningStoreItem {
   followers: number
 }
 
-export interface ReasoningStoreRecord {
-  /** 旧版单项记录字段（保留以兼容库里已有的记录）*/
-  id?: string
-  encrypted?: string
-  summary?: string
-  /** 合并组内的推理项，按上游原始顺序 */
-  items?: ReasoningStoreItem[]
-}
-
+/** 推理组暂存（按上游原始顺序的 items）：save 返回合成签名，同一组密文签名不变，可重复 save 补写 followers */
 export interface ReasoningStore {
-  save(rec: ReasoningStoreRecord): string
-  lookup(signature: string): ReasoningStoreRecord | null
+  save(items: ReasoningStoreItem[]): string
+  lookup(signature: string): ReasoningStoreItem[] | null
 }
 
-/** 签名派生种子：只由密文决定，同一组多次 save 得到同一个签名（followers 可以事后补写）*/
-export function reasoningRecordSeed(rec: ReasoningStoreRecord): string {
-  if (Array.isArray(rec.items) && rec.items.length) return rec.items.map((it) => it.encrypted).join('\n')
-  return rec.encrypted || rec.id || rec.summary || ''
-}
-
-/** 把记录展开成 { id, encrypted, followers } 列表（兼容旧版单项记录）*/
-function recordItems(rec: ReasoningStoreRecord): ReasoningStoreItem[] {
-  if (Array.isArray(rec.items) && rec.items.length) return rec.items
-  if (rec.encrypted) return [{ id: rec.id, encrypted: rec.encrypted, followers: Number.POSITIVE_INFINITY }]
-  return []
-}
-
-function memoryStore(max = 500): ReasoningStore {
-  const map = new Map<string, ReasoningStoreRecord>()
-  return {
-    save(rec) {
-      const seed = reasoningRecordSeed(rec)
-      if (!seed) return ''
-      const sig = 'agghub-mem:' + crypto.createHash('sha256').update(seed, 'utf8').digest('base64')
-      map.set(sig, rec)
-      if (map.size > max) map.delete(map.keys().next().value as string)
-      return sig
-    },
-    lookup(sig) {
-      return map.get(sig) || null
-    },
-  }
-}
-
-let reasoningStore: ReasoningStore = memoryStore()
+let reasoningStore: ReasoningStore = { save: () => '', lookup: () => null }
 
 export function setReasoningStore(store: ReasoningStore): void {
   reasoningStore = store
@@ -136,12 +98,7 @@ function rid(prefix: string): string {
 
 function argsToString(v: any): string {
   if (v == null) return ''
-  if (typeof v === 'string') return v
-  try {
-    return JSON.stringify(v)
-  } catch {
-    return String(v)
-  }
+  return typeof v === 'string' ? v : JSON.stringify(v)
 }
 
 function imageUrlOf(v: any): string {
@@ -222,9 +179,6 @@ function chatPartsToInput(content: any, role: string): any {
         parts.push(part)
         break
       }
-      case 'input_image':
-        parts.push(p)
-        break
       case 'file': {
         const f = p.file || {}
         const part: any = { type: 'input_file' }
@@ -235,14 +189,11 @@ function chatPartsToInput(content: any, role: string): any {
         parts.push(part)
         break
       }
-      case 'input_file':
-        parts.push(p)
-        break
       case 'refusal':
         parts.push({ type: textType, text: p.refusal || '' })
         break
       default:
-        // input_audio 等：保持原样交给上游
+        // 已是 Responses 形状（input_image / input_file）或 input_audio 等：原样交给上游
         parts.push(p)
     }
   }
@@ -302,8 +253,7 @@ function reasoningItemsToInput(items: IRReasoningItem[] | undefined): { item: an
     else {
       // 来自 Anthropic 客户端：签名 / redacted data 是本网关暂存的键，一条记录可展开成多个推理项
       const key = it.signature || it.redacted
-      const rec = key ? reasoningStore.lookup(key) : null
-      if (rec) expanded = recordItems(rec)
+      expanded = (key && reasoningStore.lookup(key)) || []
     }
     if (!expanded.length) {
       if (it.text || it.signature || it.redacted) warn('assistant 历史推理块没有可回传的 encrypted_content，已丢弃')
@@ -495,7 +445,6 @@ export function buildRequest(ir: any, upstreamModel: string, opts?: ResponsesBui
 type ParsedOutput = {
   content: string | null
   reasoning_content?: string
-  reasoning_signature?: string
   reasoning_items?: IRReasoningItem[]
   tool_calls?: any[]
   annotations?: any[]
@@ -555,22 +504,14 @@ function groupReasoning(output: any[]): ReasoningGroup[] {
   return groups
 }
 
-/** 一组 reasoning 项 → 一个 IR 推理块（合并文本，暂存密文，返回合成签名）*/
+/** 一组 reasoning 项 → 一个 IR 推理块（合并文本，暂存密文，返回合成签名）；有密文的项必带占位文本 */
 function groupToItem(g: ReasoningGroup): IRReasoningItem | null {
-  const it: IRReasoningItem = {}
   const text = joinReasoningTexts(g.texts)
-  if (text) it.text = text
-  if (g.items.length) {
-    const sig = reasoningStore.save({ items: g.items, summary: text })
-    if (sig) it.signature = sig
-    if (g.items.length === 1 && g.items[0].id) it.id = g.items[0].id
-  }
-  if (!it.text && !it.signature) return null
-  // 没有任何可读文本但有密文：以 redacted 块承载签名，Claude 客户端会原样回传 data
-  if (!it.text && it.signature) {
-    it.redacted = it.signature
-    delete it.signature
-  }
+  if (!text) return null
+  const it: IRReasoningItem = { text }
+  const sig = g.items.length ? reasoningStore.save(g.items) : ''
+  if (sig) it.signature = sig
+  if (g.items.length === 1 && g.items[0].id) it.id = g.items[0].id
   return it
 }
 
@@ -614,10 +555,7 @@ function outputToMessage(output: any[]): ParsedOutput {
   const msg: ParsedOutput = { content: texts.length ? joinSeparated(texts) : null }
   if (items.length) {
     msg.reasoning_items = items
-    const rc = reasoningItemsText(items)
-    if (rc) msg.reasoning_content = rc
-    const sig = items.find((x) => x.signature)?.signature
-    if (sig) msg.reasoning_signature = sig
+    msg.reasoning_content = reasoningItemsText(items)
   }
   if (toolCalls.length) msg.tool_calls = toolCalls
   if (annotations.length) msg.annotations = annotations
@@ -629,13 +567,7 @@ function outputToMessage(output: any[]): ParsedOutput {
 export function parseResponse(resp: any, model: string): any {
   if (resp?.status === 'failed') throw new Error(resp.error?.message || '上游返回 status=failed')
   const m = outputToMessage(resp?.output || [])
-  const message: any = { role: 'assistant', content: m.content }
-  if (m.reasoning_items) message.reasoning_items = m.reasoning_items
-  if (m.reasoning_content) message.reasoning_content = m.reasoning_content
-  if (m.reasoning_signature) message.reasoning_signature = m.reasoning_signature
-  if (m.tool_calls) message.tool_calls = m.tool_calls
-  if (m.annotations) message.annotations = m.annotations
-  if (m.refusal) message.refusal = m.refusal
+  const message = { role: 'assistant', ...m }
   return {
     id: resp?.id || genId(),
     object: 'chat.completion',
@@ -651,9 +583,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
   const id = genId()
   const created = nowSec()
   let started = false
-  let hasToolCall = false
-  let textSeen = false
-  let refusalSeen = false
+  const seen = { content: false, refusal: false }
   let reasoningSeen = false
   let nextToolIndex = 0
 
@@ -713,7 +643,6 @@ export function createStreamDecoder(model: string): StreamDecoder {
   const emitTool = (out: any[], t: Tool, argsDelta: string): void => {
     if (!argsDelta && t.nameSent) return
     start(out)
-    hasToolCall = true
     const tc: any = { index: t.index }
     if (t.kind === 'custom') tc.custom = { input: argsDelta }
     else tc.function = { arguments: argsDelta }
@@ -728,18 +657,16 @@ export function createStreamDecoder(model: string): StreamDecoder {
     out.push(mk({ tool_calls: [tc] }))
   }
 
-  const emitText = (out: any[], s: string): void => {
-    if (!s) return
-    textSeen = true
-    start(out)
-    out.push(mk({ content: s }))
+  /** 用完整参数补发尚未流出的部分（上游可能不发 arguments.delta，只在 added / done 里给全文）*/
+  const syncTool = (out: any[], t: Tool, full: string): void => {
+    emitTool(out, t, full.length > t.args.length && full.startsWith(t.args) ? full.slice(t.args.length) : '')
   }
 
-  const emitRefusal = (out: any[], s: string): void => {
+  const emitField = (out: any[], key: 'content' | 'refusal', s: string): void => {
     if (!s) return
-    refusalSeen = true
+    seen[key] = true
     start(out)
-    out.push(mk({ refusal: s }))
+    out.push(mk({ [key]: s }))
   }
 
   // 相邻的多个 reasoning 项合并成一个 thinking 块：文本连续流出，签名等到第一个非推理输出项
@@ -784,18 +711,20 @@ export function createStreamDecoder(model: string): StreamDecoder {
     }
   }
 
-  /** 结算当前合并组：暂存整组密文，产出一个签名（无正文时用 redacted 承载）*/
-  const flushGroup = (out: any[]): void => {
-    if (!group) return
-    const g = group
-    group = null
-    closedGroup = g
-    if (!g.items.length) return
-    const sig = reasoningStore.save({ items: g.items, summary: g.text })
+  /** 暂存整组密文并发出合成签名（有密文的推理项必带正文或占位文本）*/
+  const emitSignature = (out: any[], items: ReasoningStoreItem[]): void => {
+    const sig = items.length ? reasoningStore.save(items) : ''
     if (!sig) return
     start(out)
-    if (g.text) out.push(mk({ reasoning_signature: sig }))
-    else out.push(mk({ reasoning_redacted: sig }))
+    out.push(mk({ reasoning_signature: sig }))
+  }
+
+  /** 结算当前合并组 */
+  const flushGroup = (out: any[]): void => {
+    if (!group) return
+    closedGroup = group
+    group = null
+    emitSignature(out, closedGroup.items)
   }
 
   /** 见到一个可转换的非推理输出项：先结算推理组，再给上一组末项的 followers 计数并补写记录 */
@@ -806,7 +735,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
     const g = closedGroup
     if (g?.lastItem) {
       g.lastItem.followers++
-      reasoningStore.save({ items: g.items, summary: g.text })
+      reasoningStore.save(g.items)
     }
   }
 
@@ -827,12 +756,9 @@ export function createStreamDecoder(model: string): StreamDecoder {
           start(out)
           break
         case 'response.output_text.delta':
-          noteFollower(out, keyOf(d))
-          emitText(out, d.delta || '')
-          break
         case 'response.refusal.delta':
           noteFollower(out, keyOf(d))
-          emitRefusal(out, d.delta || '')
+          emitField(out, type === 'response.refusal.delta' ? 'refusal' : 'content', d.delta || '')
           break
         case 'response.reasoning_summary_text.delta':
         case 'response.reasoning_text.delta': {
@@ -850,7 +776,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
         case 'response.reasoning_text.done': {
           const r = ensureReason(d)
           const full = typeof d.text === 'string' ? d.text : ''
-          if (full && !r.text.endsWith(full) && !r.text) emitReasoningText(out, r, full)
+          if (full && !r.text) emitReasoningText(out, r, full)
           r.parts++
           break
         }
@@ -860,30 +786,16 @@ export function createStreamDecoder(model: string): StreamDecoder {
             out.push(mk({ annotations: [annotationToChat(d.annotation)] }))
           }
           break
-        case 'response.output_item.added': {
-          const item = d.item
-          if (isFollowerItem(item)) noteFollower(out, keyOf(d))
-          if (item?.type === 'function_call' || item?.type === 'custom_tool_call') {
-            const t = ensureTool(d, item, item.type === 'custom_tool_call' ? 'custom' : 'function')
-            const full = argsToString(item.type === 'custom_tool_call' ? item.input : item.arguments)
-            const rest = full.length > t.args.length && full.startsWith(t.args) ? full.slice(t.args.length) : ''
-            emitTool(out, t, rest)
-          } else if (item?.type === 'reasoning') {
-            ensureReason(d)
-          }
-          break
-        }
+        case 'response.output_item.added':
         case 'response.output_item.done': {
           const item = d.item
           if (isFollowerItem(item)) noteFollower(out, keyOf(d))
           if (item?.type === 'function_call' || item?.type === 'custom_tool_call') {
-            const t = ensureTool(d, item, item.type === 'custom_tool_call' ? 'custom' : 'function')
-            const full = argsToString(item.type === 'custom_tool_call' ? item.input : item.arguments)
-            // done 事件带完整参数：补发尚未流出的部分（上游可能不发 arguments.delta）
-            const rest = full.length > t.args.length && full.startsWith(t.args) ? full.slice(t.args.length) : ''
-            emitTool(out, t, rest)
+            const custom = item.type === 'custom_tool_call'
+            syncTool(out, ensureTool(d, item, custom ? 'custom' : 'function'), argsToString(custom ? item.input : item.arguments))
           } else if (item?.type === 'reasoning') {
-            closeReason(out, ensureReason(d), item)
+            const r = ensureReason(d)
+            if (type === 'response.output_item.done') closeReason(out, r, item)
           }
           break
         }
@@ -901,10 +813,8 @@ export function createStreamDecoder(model: string): StreamDecoder {
           const kind = type === 'response.custom_tool_call_input.done' ? 'custom' : 'function'
           noteFollower(out, keyOf(d))
           const t = tools.get(keyOf(d)) || ensureTool(d, null, kind)
-          const full = argsToString(d.arguments ?? d.input)
-          const rest = full.length > t.args.length && full.startsWith(t.args) ? full.slice(t.args.length) : ''
           if (d.name && !t.name) t.name = d.name
-          emitTool(out, t, rest)
+          syncTool(out, t, argsToString(d.arguments ?? d.input))
           break
         }
         case 'response.completed':
@@ -921,17 +831,12 @@ export function createStreamDecoder(model: string): StreamDecoder {
                 start(out)
                 out.push(mk({ reasoning_content: text }))
               }
-              if (!g.items.length) continue
-              const sig = reasoningStore.save({ items: g.items, summary: text })
-              if (!sig) continue
-              start(out)
-              if (text) out.push(mk({ reasoning_signature: sig }))
-              else out.push(mk({ reasoning_redacted: sig }))
+              emitSignature(out, g.items)
             }
           } else flushGroup(out)
           const m = outputToMessage(output.filter((it: any) => it?.type !== 'reasoning'))
-          if (!textSeen && m.content) emitText(out, m.content)
-          if (!refusalSeen && m.refusal) emitRefusal(out, m.refusal)
+          if (!seen.content && m.content) emitField(out, 'content', m.content)
+          if (!seen.refusal && m.refusal) emitField(out, 'refusal', m.refusal)
           if (!tools.size && m.tool_calls?.length) {
             for (const tc of m.tool_calls) {
               const kind = tc.type === 'custom' ? 'custom' : 'function'
@@ -941,7 +846,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
             }
           }
           start(out)
-          const chunk = mk({}, responsesStatusToFinish(resp, hasToolCall))
+          const chunk = mk({}, responsesStatusToFinish(resp, tools.size > 0))
           chunk.usage = usageFromResponses(resp.usage)
           out.push(chunk)
           break
@@ -1161,10 +1066,7 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
   if (body.stop != null) ir.stop = body.stop
   if (body.stream) ir.stream_options = { include_usage: true }
   const reasoning = reasoningFromResponses(body)
-  if (reasoning) {
-    ir.reasoning = reasoning
-    if (reasoning.effort && reasoning.effort !== 'none') ir.reasoning_effort = reasoning.effort
-  }
+  if (reasoning) ir.reasoning = reasoning
 
   // text.format → response_format；verbosity 透传
   const fmt = body.text?.format
@@ -1369,6 +1271,8 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
   const tools = new Map<number, Item>()
 
   const ev = (type: string, data: any): string => `event: ${type}\ndata: ${JSON.stringify({ type, sequence_number: seq++, ...data })}\n\n`
+  const outputItems = (status: string): any[] =>
+    order.map((it) => (it.kind === 'message' ? messageItem(it, status) : it.kind === 'reasoning' ? reasoningItem(it, status) : toolItem(it, status)))
 
   const responseObj = (status: string): any => {
     const out = responseShell(respId, created, model)
@@ -1384,9 +1288,9 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
 
   const itemStatus = (): string => (finishReason === 'length' || finishReason === 'content_filter' ? 'incomplete' : 'completed')
 
+  // openMsg 总会先加 output_text part（content_index 0），refusal 固定在 content_index 1
   const messageItem = (it: Item, status: string): any => {
-    const content: any[] = []
-    if (it.text || !it.refusal) content.push({ type: 'output_text', text: it.text, annotations: [], logprobs: [] })
+    const content: any[] = [{ type: 'output_text', text: it.text, annotations: [], logprobs: [] }]
     if (it.refusal) content.push({ type: 'refusal', refusal: it.refusal })
     return { id: it.id, type: 'message', status, role: 'assistant', content }
   }
@@ -1406,17 +1310,13 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
     curMsg = null
     it.done = true
     const status = itemStatus()
-    let out = ''
-    if (it.text || !it.refusal) {
-      out +=
-        ev('response.output_text.done', { item_id: it.id, output_index: it.outputIndex, content_index: 0, text: it.text, logprobs: [] }) +
-        ev('response.content_part.done', { item_id: it.id, output_index: it.outputIndex, content_index: 0, part: { type: 'output_text', text: it.text, annotations: [], logprobs: [] } })
-    }
+    let out =
+      ev('response.output_text.done', { item_id: it.id, output_index: it.outputIndex, content_index: 0, text: it.text, logprobs: [] }) +
+      ev('response.content_part.done', { item_id: it.id, output_index: it.outputIndex, content_index: 0, part: { type: 'output_text', text: it.text, annotations: [], logprobs: [] } })
     if (it.refusal) {
-      const ci = it.text || !it.refusal ? 1 : 0
       out +=
-        ev('response.refusal.done', { item_id: it.id, output_index: it.outputIndex, content_index: ci, refusal: it.refusal }) +
-        ev('response.content_part.done', { item_id: it.id, output_index: it.outputIndex, content_index: ci, part: { type: 'refusal', refusal: it.refusal } })
+        ev('response.refusal.done', { item_id: it.id, output_index: it.outputIndex, content_index: 1, refusal: it.refusal }) +
+        ev('response.content_part.done', { item_id: it.id, output_index: it.outputIndex, content_index: 1, part: { type: 'refusal', refusal: it.refusal } })
     }
     out += ev('response.output_item.done', { output_index: it.outputIndex, item: messageItem(it, status) })
     return out
@@ -1531,16 +1431,14 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       if (typeof delta.refusal === 'string' && delta.refusal.length) {
         out += openMsg()
         const it = curMsg!
-        const ci = it.text || !it.refusal ? 1 : 0
-        if (!it.refusal) out += ev('response.content_part.added', { item_id: it.id, output_index: it.outputIndex, content_index: ci, part: { type: 'refusal', refusal: '' } })
+        if (!it.refusal) out += ev('response.content_part.added', { item_id: it.id, output_index: it.outputIndex, content_index: 1, part: { type: 'refusal', refusal: '' } })
         it.refusal += delta.refusal
-        out += ev('response.refusal.delta', { item_id: it.id, output_index: it.outputIndex, content_index: ci, delta: delta.refusal })
+        out += ev('response.refusal.delta', { item_id: it.id, output_index: it.outputIndex, content_index: 1, delta: delta.refusal })
       }
       if (Array.isArray(delta.tool_calls)) {
         for (const tc of delta.tool_calls) {
           if (!tc) continue
           const idx = tc.index ?? 0
-          if (!Number.isSafeInteger(idx) || idx < 0) throw new Error('工具调用 index 无效')
           let it = tools.get(idx)
           if (!it) {
             out += closeMsg() + closeReason()
@@ -1554,8 +1452,6 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
             order.push(it)
           }
           const name = tc.function?.name || tc.custom?.name
-          if (tc.id && it.callId && tc.id !== it.callId) throw new Error('同一工具调用的 ID 发生变化')
-          if (name && it.name && name !== it.name) throw new Error('同一工具调用的名称发生变化')
           if (tc.id) it.callId = tc.id
           if (name) it.name = name
           const args = it.sourceKind === 'custom' ? tc.custom?.input : tc.function?.arguments
@@ -1577,7 +1473,7 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       const resp = responseObj(status)
       resp.incomplete_details = incomplete_details
       const st = status === 'incomplete' ? 'incomplete' : 'completed'
-      resp.output = order.map((it) => (it.kind === 'message' ? messageItem(it, st) : it.kind === 'reasoning' ? reasoningItem(it, st) : toolItem(it, st)))
+      resp.output = outputItems(st)
       resp.usage = usageToResponses(usage)
       out += ev(status === 'incomplete' ? 'response.incomplete' : 'response.completed', { response: resp })
       finalized = true
@@ -1589,7 +1485,7 @@ export function createStreamEncoder(opts?: ResponsesEncodeOptions): StreamEncode
       let out = ensureStart()
       const resp = responseObj('failed')
       resp.error = { code: 'server_error', message }
-      resp.output = order.map((it) => (it.kind === 'message' ? messageItem(it, 'incomplete') : it.kind === 'reasoning' ? reasoningItem(it, 'incomplete') : toolItem(it, 'incomplete')))
+      resp.output = outputItems('incomplete')
       resp.usage = usageToResponses(usage)
       out += ev('response.failed', { response: resp })
       return out
@@ -1636,10 +1532,11 @@ export function streamEventHasContent(d: any): boolean {
     case 'response.output_item.added':
     case 'response.output_item.done': {
       const t = d.item?.type
-      return t === 'function_call' || t === 'custom_tool_call' || HOSTED_CALL_TYPES.has(t)
+      return t === 'function_call' || t === 'custom_tool_call' || HOSTED_CALL_TYPES.has(t) || !!d.item?.encrypted_content
     }
     case 'response.completed':
     case 'response.incomplete':
+    case 'response.done':
       return !isEmptyResponseBody(d.response)
     default:
       return false

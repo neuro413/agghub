@@ -136,3 +136,41 @@ test('D22: 包装输入非法时明确失败，不能先发包装 delta 或成�
     assert.match(encoder.fail('包装失败'), /response.failed/)
   }
 })
+
+test('Responses 编码：仅 refusal 时 output_text 固定 content_index 0，refusal 固定 1', () => {
+  const encoder = responses.createStreamEncoder()
+  const output = events([chunk({ refusal: '拒' }), chunk({ refusal: '绝' }), chunk({}, 'stop')].map(c => encoder.encode(c)).join('') + encoder.finalize())
+  for (const event of output.filter(e => e.type.startsWith('response.refusal') || e.content_index !== undefined)) {
+    assert.equal(event.content_index, event.type.includes('refusal') || event.part?.type === 'refusal' ? 1 : 0, event.type)
+  }
+  const final = output.find(e => e.type === 'response.completed').response.output[0]
+  assert.deepEqual(final.content.map((part: any) => part.type), ['output_text', 'refusal'])
+  assert.equal(final.content[1].refusal, '拒绝')
+})
+
+test('Responses 解码：空摘要密文写占位并签名，工具参数只在 done 给出时补发', () => {
+  const saved: any[][] = []
+  responses.setReasoningStore({ save: items => { saved.push(structuredClone(items)); return 'sig' }, lookup: () => null })
+  try {
+    const decoder = responses.createStreamDecoder('alias')
+    const source = [
+      { type: 'response.output_item.added', output_index: 0, item: { id: 'rs_1', type: 'reasoning', summary: [] } },
+      { type: 'response.output_item.done', output_index: 0, item: { id: 'rs_1', type: 'reasoning', summary: [], encrypted_content: 'enc' } },
+      { type: 'response.output_item.added', output_index: 1, item: { type: 'function_call', call_id: 'call', name: 'run', arguments: '' } },
+      { type: 'response.output_item.done', output_index: 1, item: { type: 'function_call', call_id: 'call', name: 'run', arguments: '{"a":1}' } },
+      { type: 'response.completed', response: { status: 'completed', output: [] } },
+    ]
+    const deltas = source.flatMap(e => decoder.push({ event: null, data: JSON.stringify(e) })).map(c => ({ delta: c.choices[0].delta, finish: c.choices[0].finish_reason }))
+    assert.equal(deltas.map(d => d.delta.reasoning_content || '').join(''), 'null')
+    assert.ok(deltas.some(d => d.delta.reasoning_signature === 'sig'))
+    assert.ok(!deltas.some(d => d.delta.reasoning_redacted))
+    const calls = deltas.flatMap(d => d.delta.tool_calls || [])
+    assert.equal(calls[0].id, 'call')
+    assert.equal(calls.map((c: any) => c.function.arguments).join(''), '{"a":1}')
+    assert.equal(deltas.at(-1)!.finish, 'tool_calls')
+    // 首次保存时 followers=0，见到后续 function_call 后补写为 1
+    assert.deepEqual(saved.at(-1), [{ id: 'rs_1', encrypted: 'enc', followers: 1 }])
+  } finally {
+    responses.setReasoningStore({ save: () => '', lookup: () => null })
+  }
+})
