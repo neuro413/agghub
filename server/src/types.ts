@@ -96,7 +96,6 @@ export interface Settings {
   log_response_max_bytes: number
   stream_buffer_max_bytes: number
   image_max_bytes: number
-  failover_strategy: 'priority_descend'
   auto_ban: boolean
   auto_ban_codes: string
   log_retention_days: number
@@ -127,8 +126,6 @@ export interface Settings {
   pseudo_thinking_store_max: number
   /** Responses 上游推理密文暂存条数上限（Anthropic 客户端思维链回传用） */
   reasoning_store_max: number
-  /** 跨格式转换时允许自动调整 max_tokens / 采样参数以满足 Claude thinking 约束 */
-  reasoning_auto_adjust: boolean
   proxy_url: string
 }
 

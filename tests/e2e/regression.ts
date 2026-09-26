@@ -4,8 +4,7 @@ import { expect, type Browser, type Page, type Route } from '@playwright/test'
 import { DEFAULT_SETTINGS } from '../../server/src/config'
 
 function settingsFixture(): any {
-  const booleans = new Set(['auto_ban', 'store_request_body', 'store_response_body', 'drop_thinking', 'drop_redacted_thinking', 'strip_top_p', 'pseudo_thinking_enabled', 'reasoning_auto_adjust'])
-  return Object.fromEntries(Object.entries(DEFAULT_SETTINGS).map(([key, value]) => [key, booleans.has(key) ? value === '1' : value.startsWith('[') ? JSON.parse(value) : /^\d+$/.test(value) ? Number(value) : value]))
+  return structuredClone(DEFAULT_SETTINGS)
 }
 const sampleLog = (id: number, model = 'synthetic') => ({ id, model, created_at: Date.now(), status: 'success', status_code: 200, channel_name: 'mock', entry_format: 'openai', total_tokens: 2, latency_ms: 12, request_body: '{"messages":[]}' })
 const origin = 'http://agghub-fix.test'

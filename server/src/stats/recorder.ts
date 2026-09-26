@@ -136,8 +136,7 @@ export function hydrateLogRow(row: any): any {
 /** 清理超过保留期的日志，随后回收无引用的块并归还空闲页 */
 export function cleanupOldLogs(): void {
   const s = getSettings()
-  const days = Math.max(1, s.log_retention_days || 30) // 兜底：0/负数会把全部日志删光
-  const cutoff = Date.now() - days * 86_400_000
+  const cutoff = Date.now() - s.log_retention_days * 86_400_000
   const r = db.prepare('DELETE FROM request_logs WHERE created_at < ?').run(cutoff)
   const freed = gcBlobs()
   if (r.changes || freed) {

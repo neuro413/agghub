@@ -46,13 +46,13 @@ export const vertexAdaptor: Adaptor = {
     await getAccessToken(creds, proxyUrl, signal)
   },
 
-  buildRequest(channel, ir, upstreamModel, stream, opts) {
+  buildRequest(channel, ir, upstreamModel, stream) {
     const region = channel.region?.trim() || 'global'
     const creds = parseCredentials(channel.api_key)
     const claude = isClaudeModel(upstreamModel)
 
     if (claude) {
-      const body = anth.buildRequest(ir, upstreamModel, { autoAdjust: opts?.autoAdjust })
+      const body = anth.buildRequest(ir, upstreamModel)
       delete body.model
       body.anthropic_version = 'vertex-2023-10-16'
       body.stream = stream

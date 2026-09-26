@@ -79,14 +79,8 @@ function hostedToolToClaude(t: any): any | null {
   return out
 }
 
-export interface BuildOptions {
-  /** 允许自动调整 max_tokens / 采样参数以满足 thinking 约束（默认 true）*/
-  autoAdjust?: boolean
-}
-
 // ═══════════ 上游方向：IR(OpenAI) → Claude 请求 ═══════════
-export function buildRequest(ir: any, upstreamModel: string, opts?: BuildOptions): any {
-  const autoAdjust = opts?.autoAdjust !== false
+export function buildRequest(ir: any, upstreamModel: string): any {
   const systemParts: string[] = []
   const messages: any[] = []
   const customNames = new Set<string>(Array.isArray(ir.custom_tool_names) ? ir.custom_tool_names : [])
@@ -269,12 +263,12 @@ export function buildRequest(ir: any, upstreamModel: string, opts?: BuildOptions
   }
   if (toolChoice) out.tool_choice = toolChoice
 
-  applyReasoning(out, ir, upstreamModel, autoAdjust)
+  applyReasoning(out, ir, upstreamModel)
   return out
 }
 
-/** 按模型能力把 IR reasoning 写成 Claude 的 thinking / output_config.effort */
-function applyReasoning(out: any, ir: any, model: string, autoAdjust: boolean): void {
+/** 按模型能力把 IR reasoning 写成 Claude 的 thinking / output_config.effort，并调整参数满足 thinking 约束 */
+function applyReasoning(out: any, ir: any, model: string): void {
   const r = ir.reasoning
   if (!r || typeof r !== 'object') return
   const mode = claudeThinkingMode(model)
@@ -290,7 +284,7 @@ function applyReasoning(out: any, ir: any, model: string, autoAdjust: boolean): 
     if (mode === 'adaptive') {
       // 4.7+ 默认不返回思考正文，客户端要看思维链必须显式打开
       thinking.display = 'summarized'
-      if (autoAdjust && (out.temperature != null || out.top_p != null || out.top_k != null)) {
+      if (out.temperature != null || out.top_p != null || out.top_k != null) {
         warn(`模型 ${model} 不接受采样参数，已移除 temperature / top_p / top_k`)
         delete out.temperature
         delete out.top_p
@@ -308,31 +302,25 @@ function applyReasoning(out: any, ir: any, model: string, autoAdjust: boolean): 
   if (budget == null) return
   if (budget < MIN_THINKING_BUDGET) budget = MIN_THINKING_BUDGET
   if (out.max_tokens <= budget) {
-    if (!autoAdjust) {
-      warn(`max_tokens(${out.max_tokens}) 不大于 thinking 预算(${budget})，上游可能拒绝；已关闭自动调整`)
-    } else {
-      const raised = budget + 1024
-      warn(`max_tokens 从 ${out.max_tokens} 抬高到 ${raised} 以容纳 thinking 预算`)
-      out.max_tokens = raised
-    }
+    const raised = budget + 1024
+    warn(`max_tokens 从 ${out.max_tokens} 抬高到 ${raised} 以容纳 thinking 预算`)
+    out.max_tokens = raised
   }
   out.thinking = { type: 'enabled', budget_tokens: budget }
-  if (autoAdjust) {
-    const removed: string[] = []
-    if (out.temperature != null) {
-      delete out.temperature
-      removed.push('temperature')
-    }
-    if (out.top_k != null) {
-      delete out.top_k
-      removed.push('top_k')
-    }
-    if (out.top_p != null && (out.top_p < 0.95 || out.top_p > 1)) {
-      delete out.top_p
-      removed.push('top_p')
-    }
-    if (removed.length) warn(`开启手动 thinking 后移除了 ${removed.join(' / ')}`)
+  const removed: string[] = []
+  if (out.temperature != null) {
+    delete out.temperature
+    removed.push('temperature')
   }
+  if (out.top_k != null) {
+    delete out.top_k
+    removed.push('top_k')
+  }
+  if (out.top_p != null && (out.top_p < 0.95 || out.top_p > 1)) {
+    delete out.top_p
+    removed.push('top_p')
+  }
+  if (removed.length) warn(`开启手动 thinking 后移除了 ${removed.join(' / ')}`)
 }
 
 // ═══════════ 上游方向：Claude 响应 → IR(OpenAI) ═══════════

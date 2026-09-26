@@ -18,4 +18,4 @@ export function getAdaptor(type: ChannelType): Adaptor {
   }
 }
 
-export type { Adaptor, UpstreamRequest, BuildRequestOptions } from './base'
+export type { Adaptor, UpstreamRequest } from './base'

@@ -33,7 +33,6 @@ export interface Settings {
   log_response_max_bytes: number
   stream_buffer_max_bytes: number
   image_max_bytes: number
-  failover_strategy: string
   auto_ban: boolean
   auto_ban_codes: string
   log_retention_days: number
@@ -57,7 +56,6 @@ export interface Settings {
   pseudo_thinking_prompt: string
   pseudo_thinking_store_max: number
   reasoning_store_max: number
-  reasoning_auto_adjust: boolean
   proxy_url: string
 }
 

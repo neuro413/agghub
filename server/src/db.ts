@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
 import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
-import type { Channel, ChannelRow, ChannelStatus, ParamRule, PreprocessRule, Settings, ToolFilterRule } from './types'
+import type { Channel, ChannelRow, ChannelStatus, Settings } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
@@ -96,75 +96,41 @@ CREATE TABLE IF NOT EXISTS blob_edges (
 CREATE INDEX IF NOT EXISTS idx_blob_edges_child ON blob_edges(child);
 `)
 
+function encodeSetting(value: unknown): string {
+  return typeof value === 'boolean' ? (value ? '1' : '0') : typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
+
+function decodeSetting(raw: string, fallback: unknown): unknown {
+  if (typeof fallback === 'number') return Number(raw)
+  if (typeof fallback === 'boolean') return raw === '1'
+  if (Array.isArray(fallback)) {
+    try { const value = JSON.parse(raw); return Array.isArray(value) ? value : fallback } catch { return fallback }
+  }
+  return raw
+}
+
 // 注入默认设置（已存在的 key 不覆盖）
 {
   const ins = db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)')
-  const tx = db.transaction(() => {
-    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) ins.run(k, v)
-  })
-  tx()
+  db.transaction(() => {
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) ins.run(k, encodeSetting(v))
+  })()
 }
 
 // ── settings 读写 ───────────────────────────────────────
-export function getSettingsRaw(): Record<string, string> {
-  const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]
-  const o: Record<string, string> = Object.create(null)
-  for (const r of rows) o[r.key] = r.value
-  return o
-}
-
 export function getSettings(): Settings {
-  const r = getSettingsRaw()
-  return {
-    single_retry_times: Number(r.single_retry_times ?? 1),
-    channel_retry_times: Number(r.channel_retry_times ?? 2),
-    retry_interval_ms: Number(r.retry_interval_ms ?? 0),
-    request_timeout_ms: Number(r.request_timeout_ms ?? 120000),
-    request_max_duration_ms: Number(r.request_max_duration_ms ?? DEFAULT_SETTINGS.request_max_duration_ms),
-    log_response_max_bytes: Number(r.log_response_max_bytes ?? DEFAULT_SETTINGS.log_response_max_bytes),
-    stream_buffer_max_bytes: Number(r.stream_buffer_max_bytes ?? DEFAULT_SETTINGS.stream_buffer_max_bytes),
-    image_max_bytes: Number(r.image_max_bytes ?? DEFAULT_SETTINGS.image_max_bytes),
-    failover_strategy: 'priority_descend',
-    auto_ban: r.auto_ban === '1',
-    auto_ban_codes: r.auto_ban_codes ?? '401,403',
-    log_retention_days: Number(r.log_retention_days ?? 30),
-    store_request_body: r.store_request_body === '1',
-    store_response_body: r.store_response_body === '1',
-    access_token: r.access_token ?? '',
-    drop_thinking: r.drop_thinking === '1',
-    drop_thinking_keep_last: Number(r.drop_thinking_keep_last ?? 0),
-    drop_thinking_channel_ids: safeArray(r.drop_thinking_channel_ids).map(Number).filter((n) => Number.isFinite(n)),
-    drop_thinking_models: safeArray(r.drop_thinking_models),
-    drop_redacted_thinking: r.drop_redacted_thinking === '1',
-    strip_top_p: r.strip_top_p === '1',
-    preprocess_rules: safeRules(r.preprocess_rules),
-    tool_filter_rules: safeToolFilterRules(r.tool_filter_rules),
-    param_rules: safeJsonArray<ParamRule>(r.param_rules),
-    pseudo_thinking_enabled: r.pseudo_thinking_enabled === '1',
-    pseudo_thinking_channel_ids: safeArray(r.pseudo_thinking_channel_ids).map(Number).filter((n) => Number.isFinite(n)),
-    pseudo_thinking_models: safeArray(r.pseudo_thinking_models),
-    pseudo_thinking_open_tag: r.pseudo_thinking_open_tag ?? '<thinking>',
-    pseudo_thinking_close_tag: r.pseudo_thinking_close_tag ?? '</thinking>',
-    pseudo_thinking_prompt: r.pseudo_thinking_prompt ?? '',
-    pseudo_thinking_store_max: Number(r.pseudo_thinking_store_max ?? 5000),
-    reasoning_store_max: Number(r.reasoning_store_max ?? 2000),
-    reasoning_auto_adjust: (r.reasoning_auto_adjust ?? '1') === '1',
-    proxy_url: r.proxy_url ?? '',
+  const settings: Record<string, unknown> = { ...DEFAULT_SETTINGS }
+  for (const { key, value } of db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[]) {
+    if (Object.hasOwn(DEFAULT_SETTINGS, key)) settings[key] = decodeSetting(value, DEFAULT_SETTINGS[key as keyof Settings])
   }
+  return settings as unknown as Settings
 }
 
-export function setSettings(patch: Record<string, string | number | boolean>): void {
-  const up = db.prepare(
-    'INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
-  )
-  const entries: [string, string][] = Object.entries(patch).map(([k, v]) => [
-    k,
-    typeof v === 'boolean' ? (v ? '1' : '0') : String(v),
-  ])
-  const tx = db.transaction(() => {
-    for (const [k, v] of entries) up.run(k, v)
-  })
-  tx()
+export function setSettings(patch: Record<string, unknown>): void {
+  const up = db.prepare('INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+  db.transaction(() => {
+    for (const [k, v] of Object.entries(patch)) up.run(k, encodeSetting(v))
+  })()
 }
 
 // ── 渠道行 ↔ 应用对象 ──────────────────────────────────
@@ -174,8 +140,7 @@ function safeArray(s: string | null | undefined): string[] {
     const v = JSON.parse(s)
     return Array.isArray(v) ? v.map(String) : []
   } catch {
-    // 兼容逗号分隔的历史写法
-    return s.split(',').map((x) => x.trim()).filter(Boolean)
+    return []
   }
 }
 
@@ -186,37 +151,6 @@ function safeObject(s: string | null | undefined): Record<string, string> | null
     return v && typeof v === 'object' && !Array.isArray(v) ? v : null
   } catch {
     return null
-  }
-}
-
-function safeRules(s: string | null | undefined): PreprocessRule[] {
-  if (!s) return []
-  try {
-    const v = JSON.parse(s)
-    return Array.isArray(v) ? (v as PreprocessRule[]) : []
-  } catch {
-    return []
-  }
-}
-
-function safeToolFilterRules(s: string | null | undefined): ToolFilterRule[] {
-  if (!s) return []
-  try {
-    const v = JSON.parse(s)
-    return Array.isArray(v) ? (v as ToolFilterRule[]) : []
-  } catch {
-    return []
-  }
-}
-
-/** 通用：JSON 数组字符串 → T[]，非法 / 非数组一律返回空数组 */
-function safeJsonArray<T>(s: string | null | undefined): T[] {
-  if (!s) return []
-  try {
-    const v = JSON.parse(s)
-    return Array.isArray(v) ? (v as T[]) : []
-  } catch {
-    return []
   }
 }
 

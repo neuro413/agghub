@@ -1,5 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type { Settings } from './types'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -19,43 +20,50 @@ export const WEB_DIST = path.resolve(PROJECT_ROOT, 'web', 'dist')
 /** 网关端口（默认 3210，避开常见代理端口）*/
 export const PORT = Number(process.env.PORT) || 3210
 
-/** settings 表的默认值（值统一以字符串存储）*/
-export const DEFAULT_SETTINGS: Record<string, string> = {
-  single_retry_times: '1',
-  channel_retry_times: '2',
-  retry_interval_ms: '0',
-  request_timeout_ms: '120000',
-  request_max_duration_ms: '1800000',
-  log_response_max_bytes: '4194304',
-  stream_buffer_max_bytes: '16777216',
-  image_max_bytes: '20971520',
-  failover_strategy: 'priority_descend',
-  auto_ban: '1',
+/** 设置默认值；库中以字符串存储，读取时按默认值的类型解析（数字 / 布尔 / JSON 数组 / 文本） */
+export const DEFAULT_SETTINGS: Settings = {
+  single_retry_times: 1,
+  channel_retry_times: 2,
+  retry_interval_ms: 0,
+  request_timeout_ms: 120000,
+  request_max_duration_ms: 1800000,
+  log_response_max_bytes: 4194304,
+  stream_buffer_max_bytes: 16777216,
+  image_max_bytes: 20971520,
+  auto_ban: true,
   auto_ban_codes: '401,403',
-  log_retention_days: '30',
-  store_request_body: '1',
-  store_response_body: '1',
+  log_retention_days: 30,
+  store_request_body: true,
+  store_response_body: true,
   access_token: '',
-  drop_thinking: '0',
-  drop_thinking_keep_last: '0',
-  drop_thinking_channel_ids: '[]',
-  drop_thinking_models: '[]',
-  drop_redacted_thinking: '0',
-  strip_top_p: '0',
-  preprocess_rules: '[]',
-  tool_filter_rules: '[]',
-  param_rules: '[]',
+  drop_thinking: false,
+  drop_thinking_keep_last: 0,
+  drop_thinking_channel_ids: [],
+  drop_thinking_models: [],
+  drop_redacted_thinking: false,
+  strip_top_p: false,
+  preprocess_rules: [],
+  tool_filter_rules: [],
+  param_rules: [],
   // 伪思考（伪原生思维链）：仅对 Anthropic 入口→Anthropic 上游直通生效，需 drop_thinking 先开启
-  pseudo_thinking_enabled: '0',
-  pseudo_thinking_channel_ids: '[]',
-  pseudo_thinking_models: '[]',
+  pseudo_thinking_enabled: false,
+  pseudo_thinking_channel_ids: [],
+  pseudo_thinking_models: [],
   pseudo_thinking_open_tag: '<thinking>',
   pseudo_thinking_close_tag: '</thinking>',
-  pseudo_thinking_prompt:
-    '在正式回复前，请先在 <thinking> 与 </thinking> 之间完整写出你的思考过程：使用简体中文，详尽自然，长度随问题复杂程度调整；思考结束后再给出正式回复。',
-  pseudo_thinking_store_max: '5000',
-  // 跨格式思维链往返：Responses 上游密文暂存上限；是否允许自动调整 max_tokens / 采样参数
-  reasoning_store_max: '2000',
-  reasoning_auto_adjust: '1',
+  /** 留空则按当前标签自动生成 */
+  pseudo_thinking_prompt: '',
+  pseudo_thinking_store_max: 5000,
+  /** 跨格式思维链往返：Responses 上游密文暂存上限 */
+  reasoning_store_max: 2000,
   proxy_url: '',
+}
+
+/** 整数设置的取值范围（保存时校验） */
+export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> = {
+  single_retry_times: [0, 20], channel_retry_times: [0, 100], retry_interval_ms: [0, 300_000],
+  request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000],
+  log_retention_days: [1, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
+  log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
+  image_max_bytes: [1, 100 * 1024 * 1024],
 }

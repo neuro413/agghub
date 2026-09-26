@@ -7,11 +7,6 @@ export interface UpstreamRequest {
   body: string
 }
 
-export interface BuildRequestOptions {
-  /** 允许跨格式转换时自动调整 max_tokens / 采样参数以满足上游约束 */
-  autoAdjust?: boolean
-}
-
 export interface UpstreamContext {
   requestedModel: string
   upstreamModel: string
@@ -23,7 +18,7 @@ export interface Adaptor {
   resolveWireFormat?(upstreamModel: string): WireFormat
   /** 预热属于当前尝试，必须接收取消/超时信号。 */
   prepareChannel?(channel: Channel, proxyUrl?: string, signal?: AbortSignal): Promise<void>
-  buildRequest(channel: Channel, ir: any, upstreamModel: string, stream: boolean, opts?: BuildRequestOptions): UpstreamRequest
+  buildRequest(channel: Channel, ir: any, upstreamModel: string, stream: boolean): UpstreamRequest
   /** 同格式透传：用客户端原始 body（仅替换 model），保留 cache_control 等全部特有字段 */
   buildPassthroughRequest?(
     channel: Channel,

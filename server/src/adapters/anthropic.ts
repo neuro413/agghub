@@ -4,10 +4,10 @@ import { trimSlash, withV1 } from './base'
 
 export const anthropicAdaptor: Adaptor = {
   wireFormat: 'anthropic',
-  buildRequest(channel, ir, upstreamModel, stream, opts) {
+  buildRequest(channel, ir, upstreamModel, stream) {
     const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.anthropic.com'
     const url = withV1(root) + '/messages'
-    const body = anth.buildRequest(ir, upstreamModel, { autoAdjust: opts?.autoAdjust })
+    const body = anth.buildRequest(ir, upstreamModel)
     body.stream = stream
     return {
       url,

@@ -105,7 +105,7 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   let changed = (!!preprocess || images) && JSON.stringify(body) !== JSON.stringify(source)
   const request = state.passthrough
     ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, ctx.stream, ctx.rawHeaders)
-    : adaptor.buildRequest(channel, body, upstreamModel, ctx.stream, { autoAdjust: settings.reasoning_auto_adjust })
+    : adaptor.buildRequest(channel, body, upstreamModel, ctx.stream)
   const rules = matchParamRules(settings, meta)
   if (rules.length) {
     const result = applyParamRules(request.body, upstreamWire, rules)

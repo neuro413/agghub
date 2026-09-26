@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
-import { Input, Select, Slider } from '../components/Form'
+import { Input, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
 import { IconBolt, IconCopy, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
@@ -36,7 +36,6 @@ export function SettingsPage() {
         log_response_max_bytes: s.log_response_max_bytes,
         stream_buffer_max_bytes: s.stream_buffer_max_bytes,
         image_max_bytes: s.image_max_bytes,
-        failover_strategy: s.failover_strategy,
         auto_ban: s.auto_ban,
         auto_ban_codes: s.auto_ban_codes,
         log_retention_days: s.log_retention_days,
@@ -139,11 +138,6 @@ export function SettingsPage() {
             suffix=" 秒"
           />
         </SettingRow>
-        <SettingRow label="故障转移策略" desc="优先级越高的渠道越先被选中，失败后自动降级">
-          <Select value={s.failover_strategy} onChange={(e) => set('failover_strategy', e.target.value as any)}>
-            <option value="priority_descend">优先级降级 + 同级加权随机</option>
-          </Select>
-        </SettingRow>
         <SettingRow label="自动熔断" desc="命中熔断状态码时自动停用该渠道（多为凭证失效）">
           <Toggle checked={s.auto_ban} onChange={(v) => set('auto_ban', v)} />
         </SettingRow>
@@ -185,11 +179,11 @@ export function SettingsPage() {
 
       <Card className="ah-set-card">
         <div className="ah-set-title">高级资源限制</div>
-        <div className="ah-set-desc">日志限额只影响保存副本；流重组超限将明确失败。整次时限涵盖准备、重试和等待。</div>
+        <div className="ah-set-desc">日志限额只影响保存副本；非流式响应超限将明确失败。整次时限涵盖准备、重试和等待。</div>
         {([
           ['request_max_duration_ms', '整次请求总时限（毫秒）', '默认 1800000（30分钟）；0 明确关闭'],
           ['log_response_max_bytes', '每字段日志上限（字节）', '默认 4194304（4MiB）；超限标记截断'],
-          ['stream_buffer_max_bytes', '流重组与非流式响应上限（字节）', '默认 16777216（16MiB）'],
+          ['stream_buffer_max_bytes', '非流式响应上限（字节）', '默认 16777216（16MiB）'],
           ['image_max_bytes', '单张图片上限（字节）', '默认 20971520（20MiB）；仅 Gemini 上游下载远程图片时使用'],
         ] as const).map(([key, label, desc]) => <SettingRow key={key} label={label} desc={desc}>
           <Input aria-label={label} type="number" min="0" step="1" value={s[key]} onChange={e => set(key, Number(e.target.value))} />
