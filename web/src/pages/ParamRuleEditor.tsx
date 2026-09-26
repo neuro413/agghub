@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import type { DragEvent } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Field, Input, Select, Textarea } from '../components/Form'
@@ -7,8 +6,9 @@ import { IconExternal, IconGrip, IconPlus, IconTrash } from '../components/Icons
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { ParamOp, ParamOpType, ParamRule, ParamTestResult } from '../types'
-import { FORMAT_OPTIONS, LogPickerModal, MultiChips } from './preprocessShared'
-import type { Opt } from './preprocessShared'
+import { LogPickerModal, ScopeFields, regexValid } from './preprocessShared'
+import type { RuleRowProps } from './preprocessShared'
+import { prettyJson } from '../lib/format'
 import { newId } from '../lib/id'
 
 // ── 参数修改规则编辑器：增删改上游请求体参数 / 对排除消息的请求体 JSON 做正则替换 ──
@@ -34,16 +34,6 @@ export function newParamRule(partial?: Partial<ParamRule>): ParamRule {
   return { id: newId(), enabled: true, ops: [newParamOp()], ...partial }
 }
 
-function regexValid(pattern: string | undefined, flags: string | undefined): boolean {
-  if (!pattern) return true
-  try {
-    new RegExp(pattern, flags || 'g')
-    return true
-  } catch {
-    return false
-  }
-}
-
 function opSummary(o: ParamOp): string {
   const k = o.key?.trim() || '?'
   switch (o.type) {
@@ -59,14 +49,6 @@ function opSummary(o: ParamOp): string {
       return `正则 /${o.pattern || ''}/${o.flags ?? 'g'}`
     default:
       return String((o as any).type)
-  }
-}
-
-function prettyJson(s: string): string {
-  try {
-    return JSON.stringify(JSON.parse(s), null, 2)
-  } catch {
-    return s
   }
 }
 
@@ -88,99 +70,14 @@ function previewBody(body: any): string {
   return JSON.stringify(out, null, 2)
 }
 
-export function ParamRuleEditor({
-  rules,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onUpdate,
-  onDelete,
-  onAdd,
-  dragIndex,
-  reorder,
-}: {
-  rules: ParamRule[]
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: Set<string>
-  onToggleExpand: (id: string) => void
-  onUpdate: (r: ParamRule) => void
-  onDelete: (id: string) => void
-  onAdd: () => void
-  dragIndex: { current: number | null }
-  reorder: (from: number, to: number) => void
-}) {
-  return (
-    <div className="ah-pp">
-      <div className="ah-pp-toolbar">
-        <Button variant="primary" size="sm" icon={<IconPlus size={16} />} onClick={onAdd}>
-          新增规则
-        </Button>
-        <span className="ah-mini ah-faint">规则按顺序执行，可拖拽排序</span>
-      </div>
-      {!rules.length ? (
-        <div className="ah-detail-empty">还没有规则，点「新增规则」开始</div>
-      ) : (
-        <div className="ah-pp-list">
-          {rules.map((r, i) => (
-            <ParamRuleRow
-              key={r.id}
-              rule={r}
-              channelOptions={channelOptions}
-              modelOptions={modelOptions}
-              expanded={expanded.has(r.id)}
-              onToggleExpand={() => onToggleExpand(r.id)}
-              onChange={onUpdate}
-              onDelete={() => onDelete(r.id)}
-              onDragStart={() => {
-                dragIndex.current = i
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                const from = dragIndex.current
-                if (from != null && from !== i) reorder(from, i)
-                dragIndex.current = null
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ParamRuleRow({
-  rule,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onChange,
-  onDelete,
-  onDragStart,
-  onDragOver,
-  onDrop,
-}: {
-  rule: ParamRule
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: boolean
-  onToggleExpand: () => void
-  onChange: (r: ParamRule) => void
-  onDelete: () => void
-  onDragStart: () => void
-  onDragOver: (e: DragEvent) => void
-  onDrop: (e: DragEvent) => void
-}) {
+export function ParamRuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<ParamRule>) {
   const toast = useToast()
   const [testInput, setTestInput] = useState('')
   const [testOut, setTestOut] = useState<ParamTestResult | null>(null)
   const [testing, setTesting] = useState(false)
   const [picking, setPicking] = useState(false)
 
-  const ops = rule.ops ?? []
+  const ops = rule.ops
   const up = (p: Partial<ParamRule>) => onChange({ ...rule, ...p })
   const updateOp = (i: number, op: ParamOp) => up({ ops: ops.map((o, j) => (j === i ? op : o)) })
   const removeOp = (i: number) => up({ ops: ops.filter((_, j) => j !== i) })
@@ -223,7 +120,7 @@ function ParamRuleRow({
   }
 
   return (
-    <div className="ah-pp-rule" draggable onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}>
+    <div className="ah-pp-rule" {...drag}>
       <div className="ah-pp-rule-head">
         <span className="ah-pp-grip" title="拖拽排序">
           <IconGrip size={16} />
@@ -276,29 +173,7 @@ function ParamRuleRow({
               </Button>
             </div>
           </Field>
-          <Field label="入口格式（不选 = 全部）">
-            <MultiChips
-              options={FORMAT_OPTIONS}
-              selected={rule.formats ?? []}
-              onChange={(v) => up({ formats: v.length ? (v as ParamRule['formats']) : undefined })}
-            />
-          </Field>
-          <Field label="限定渠道（不选 = 全部）">
-            <MultiChips
-              options={channelOptions}
-              selected={(rule.channelIds ?? []).map(String)}
-              onChange={(v) => up({ channelIds: v.length ? v.map(Number) : undefined })}
-              empty="暂无渠道"
-            />
-          </Field>
-          <Field label="限定模型（不选 = 全部）">
-            <MultiChips
-              options={modelOptions}
-              selected={rule.models ?? []}
-              onChange={(v) => up({ models: v.length ? v : undefined })}
-              empty="暂无模型（渠道未配置 models）"
-            />
-          </Field>
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
           <Field
             label="测试预览"
             hint="粘贴一份请求体 JSON 或从日志里选一条，查看本条规则应用后的参数部分。实际运行时规则作用于发往上游的最终请求体，同格式直通时与此一致"

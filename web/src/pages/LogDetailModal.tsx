@@ -8,6 +8,7 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
+import { prettyJson } from '../lib/format'
 import type { LogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
 
@@ -20,15 +21,6 @@ function maskValue(v: string): string {
   const body = m?.[2] || s
   if (body.length <= 8) return prefix + '••••'
   return prefix + body.slice(0, 4) + '••••' + body.slice(-4)
-}
-
-function pretty(s: string | null): string {
-  if (!s) return ''
-  try {
-    return JSON.stringify(JSON.parse(s), null, 2)
-  } catch {
-    return s
-  }
 }
 
 // 文本高亮（大小写不敏感）
@@ -154,7 +146,7 @@ export function LogDetailModal({
           {tab === 'headers' && <HeadersView detail={detail} onCopy={copy} />}
           {tab === 'params' && <JsonView text={JSON.stringify(paramsOf(activeBody) ?? {}, null, 2)} onCopy={copy} empty="（无额外参数）" />}
           {tab === 'response' && <ResponseView detail={detail} showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy} />}
-          {tab === 'raw' && <JsonView text={pretty(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
+          {tab === 'raw' && <JsonView text={prettyJson(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
           {tab === 'thinking' && detail && <ThinkingInjectView detail={detail} />}
         </>
       )}
@@ -384,7 +376,7 @@ function ResponseView({
   const hasUpstream = typeof detail.upstream_response_body === 'string' && detail.upstream_response_body.length > 0
   const upstream = hasUpstream && showUpstream
   // 上游原始回复：非流式 JSON 做格式化；流式 SSE 帧 / 非 JSON 错误体原样展示
-  const text = upstream ? pretty(detail.upstream_response_body ?? null) : pretty(detail.response_body)
+  const text = prettyJson(upstream ? detail.upstream_response_body ?? null : detail.response_body)
   const empty = upstream
     ? '（未存储上游原始回复）'
     : hasUpstream

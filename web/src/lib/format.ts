@@ -10,3 +10,12 @@ export function fmtTime(ts: number, seconds = false): string {
   const p = (x: number) => String(x).padStart(2, '0')
   return `${p(d.getMonth() + 1)}/${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}${seconds ? ':' + p(d.getSeconds()) : ''}`
 }
+
+export function prettyJson(s: string | null): string {
+  if (!s) return ''
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2)
+  } catch {
+    return s
+  }
+}

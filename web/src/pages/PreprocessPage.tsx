@@ -1,19 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { DragEvent } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Field, Input, Textarea } from '../components/Form'
-import { IconCheck, IconEdit, IconExternal, IconFilter, IconGrip, IconPlus, IconTrash, IconWand } from '../components/Icons'
+import { IconCheck, IconEdit, IconExternal, IconFilter, IconGrip, IconTrash, IconWand } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { parseConversation, parseTools, roleClass } from '../lib/requestBody'
-import type { Channel, LogDetail, LogItem, ParamRule, PreprocessRule, Settings, ToolFilterRule } from '../types'
+import type { ToolInfo } from '../lib/requestBody'
+import type { Channel, LogDetail, PreprocessRule, Settings, ToolFilterRule } from '../types'
 import { ThinkingStoreModal } from './ThinkingStoreModal'
-import { ParamRuleEditor, newParamRule } from './ParamRuleEditor'
-import { FORMAT_OPTIONS, LogPickerModal, MultiChips, fmtLabel } from './preprocessShared'
-import type { Opt } from './preprocessShared'
+import { ParamRuleRow, newParamRule } from './ParamRuleEditor'
+import { LogPickerModal, MultiChips, RuleList, ScopeFields, regexValid } from './preprocessShared'
+import type { Opt, RuleRowProps } from './preprocessShared'
 import { newId } from '../lib/id'
 
 const ROLE_OPTIONS: Opt[] = [
@@ -54,7 +54,6 @@ export function PreprocessPage() {
   }, [toast])
 
   const rules = s?.preprocess_rules ?? []
-  const toolFilterRules = s?.tool_filter_rules ?? []
   const modelOptions = useMemo<Opt[]>(() => {
     const set = new Set<string>()
     for (const c of channels) for (const m of [...(c.models || []), ...Object.keys(c.model_mapping || {})]) set.add(m)
@@ -70,41 +69,12 @@ export function PreprocessPage() {
     setS((p) => (p ? { ...p, [k]: v } : p))
     setDirty(true)
   }
-  const setRules = (next: PreprocessRule[]) => patch('preprocess_rules', next)
-  const updateRule = (r: PreprocessRule) => setRules(rules.map((x) => (x.id === r.id ? r : x)))
+  // 可视化编辑器生成的规则：追加并展开
   const addRule = (r: PreprocessRule) => {
-    setRules([...rules, r])
+    patch('preprocess_rules', [...rules, r])
     setExpanded((prev) => new Set(prev).add(r.id))
   }
-  const deleteRule = (id: string) => setRules(rules.filter((x) => x.id !== id))
-  const setToolRules = (next: ToolFilterRule[]) => patch('tool_filter_rules', next)
-  const updateToolRule = (r: ToolFilterRule) => setToolRules(toolFilterRules.map((x) => (x.id === r.id ? r : x)))
-  const addToolRule = (r: ToolFilterRule) => {
-    setToolRules([...toolFilterRules, r])
-    setExpanded((prev) => new Set(prev).add(r.id))
-  }
-  const deleteToolRule = (id: string) => setToolRules(toolFilterRules.filter((x) => x.id !== id))
-  const paramRules = s?.param_rules ?? []
-  const setParamRules = (next: ParamRule[]) => patch('param_rules', next)
-  const updateParamRule = (r: ParamRule) => setParamRules(paramRules.map((x) => (x.id === r.id ? r : x)))
-  const addParamRule = (r: ParamRule) => {
-    setParamRules([...paramRules, r])
-    setExpanded((prev) => new Set(prev).add(r.id))
-  }
-  const deleteParamRule = (id: string) => setParamRules(paramRules.filter((x) => x.id !== id))
-  const paramDragIndex = useRef<number | null>(null)
-  const reorderParamRules = (from: number, to: number) => {
-    const next = paramRules.slice()
-    const [m] = next.splice(from, 1)
-    next.splice(to, 0, m)
-    setParamRules(next)
-  }
-  const toggleExpand = (id: string) =>
-    setExpanded((prev) => {
-      const n = new Set(prev)
-      n.has(id) ? n.delete(id) : n.add(id)
-      return n
-    })
+  const lists = { expanded, setExpanded, channelOptions, modelOptions }
 
   const tagError = s && (!s.pseudo_thinking_open_tag.trim() || !s.pseudo_thinking_close_tag.trim() || s.pseudo_thinking_open_tag === s.pseudo_thinking_close_tag || s.pseudo_thinking_open_tag.length > 256 || s.pseudo_thinking_close_tag.length > 256)
     ? '伪思考开始/结束标签须非空、不同且各不超过 256 字符，请在高级设置中修正。' : ''
@@ -138,14 +108,6 @@ export function PreprocessPage() {
     } finally {
       setSaving(false)
     }
-  }
-
-  const dragIndex = useRef<number | null>(null)
-  const reorder = (from: number, to: number) => {
-    const next = rules.slice()
-    const [m] = next.splice(from, 1)
-    next.splice(to, 0, m)
-    setRules(next)
   }
 
   const exportRules = () => {
@@ -230,17 +192,14 @@ export function PreprocessPage() {
           对发往上游的最终请求体增删改参数（top_p / temperature / thinking …），或对排除消息后的请求体 JSON 做正则替换 · 可按渠道 / 入口格式 /
           模型限定 · 给兼容性欠佳的上游扫地
         </div>
-        <ParamRuleEditor
-          rules={paramRules}
-          channelOptions={channelOptions}
-          modelOptions={modelOptions}
-          expanded={expanded}
-          onToggleExpand={toggleExpand}
-          onUpdate={updateParamRule}
-          onDelete={deleteParamRule}
-          onAdd={() => addParamRule(newParamRule())}
-          dragIndex={paramDragIndex}
-          reorder={reorderParamRules}
+        <RuleList
+          {...lists}
+          rules={s.param_rules}
+          onChange={(next) => patch('param_rules', next)}
+          create={newParamRule}
+          Row={ParamRuleRow}
+          sortable
+          toolbar={<span className="ah-mini ah-faint">规则按顺序执行，可拖拽排序</span>}
         />
       </Card>
 
@@ -271,15 +230,15 @@ export function PreprocessPage() {
             <Field label="限定渠道（不选 = 全部 Anthropic 渠道）">
               <MultiChips
                 options={anthChannelOptions}
-                selected={(s.drop_thinking_channel_ids ?? []).map(String)}
-                onChange={(v) => patch('drop_thinking_channel_ids', v.length ? v.map(Number) : ([] as number[]))}
+                selected={s.drop_thinking_channel_ids.map(String)}
+                onChange={(v) => patch('drop_thinking_channel_ids', v.map(Number))}
                 empty="暂无 Anthropic 渠道"
               />
             </Field>
             <Field label="限定模型（不选 = 全部）">
               <MultiChips
                 options={modelOptions}
-                selected={s.drop_thinking_models ?? []}
+                selected={s.drop_thinking_models}
                 onChange={(v) => patch('drop_thinking_models', v)}
                 empty="暂无模型"
               />
@@ -361,15 +320,15 @@ export function PreprocessPage() {
             <Field label="限定渠道（不选 = 全部 Anthropic 渠道）">
               <MultiChips
                 options={anthChannelOptions}
-                selected={(s.pseudo_thinking_channel_ids ?? []).map(String)}
-                onChange={(v) => patch('pseudo_thinking_channel_ids', v.length ? v.map(Number) : ([] as number[]))}
+                selected={s.pseudo_thinking_channel_ids.map(String)}
+                onChange={(v) => patch('pseudo_thinking_channel_ids', v.map(Number))}
                 empty="暂无 Anthropic 渠道"
               />
             </Field>
             <Field label="限定模型（不选 = 全部）">
               <MultiChips
                 options={modelOptions}
-                selected={s.pseudo_thinking_models ?? []}
+                selected={s.pseudo_thinking_models}
                 onChange={(v) => patch('pseudo_thinking_models', v)}
                 empty="暂无模型"
               />
@@ -412,15 +371,12 @@ export function PreprocessPage() {
           <IconFilter size={18} /> 工具过滤
         </div>
         <div className="ah-set-desc">从请求中移除指定工具定义及关联的 tool_use / tool_result 消息 · 用于屏蔽客户端发送的不需要的工具</div>
-        <ToolFilterEditor
-          rules={toolFilterRules}
-          channelOptions={channelOptions}
-          modelOptions={modelOptions}
-          expanded={expanded}
-          onToggleExpand={toggleExpand}
-          onUpdate={updateToolRule}
-          onDelete={deleteToolRule}
-          onAdd={() => addToolRule(newToolFilterRule())}
+        <RuleList
+          {...lists}
+          rules={s.tool_filter_rules}
+          onChange={(next) => patch('tool_filter_rules', next)}
+          create={newToolFilterRule}
+          Row={ToolFilterRuleRow}
         />
       </Card>
 
@@ -440,19 +396,24 @@ export function PreprocessPage() {
         </div>
 
         {subtab === 'regex' && (
-          <RegexEditor
+          <RuleList
+            {...lists}
             rules={rules}
-            channelOptions={channelOptions}
-            modelOptions={modelOptions}
-            expanded={expanded}
-            onToggleExpand={toggleExpand}
-            onUpdate={updateRule}
-            onDelete={deleteRule}
-            onAdd={() => addRule(newRule())}
-            onExport={exportRules}
-            onImportClick={() => fileRef.current?.click()}
-            dragIndex={dragIndex}
-            reorder={reorder}
+            onChange={(next) => patch('preprocess_rules', next)}
+            create={newRule}
+            Row={RuleRow}
+            sortable
+            toolbar={
+              <>
+                <span style={{ flex: 1 }} />
+                <Button variant="ghost" size="sm" onClick={() => fileRef.current?.click()}>
+                  导入
+                </Button>
+                <Button variant="ghost" size="sm" onClick={exportRules} disabled={!rules.length}>
+                  导出
+                </Button>
+              </>
+            }
           />
         )}
         {subtab === 'visual' && (
@@ -481,126 +442,16 @@ export function PreprocessPage() {
   )
 }
 
-function RegexEditor({
-  rules,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onUpdate,
-  onDelete,
-  onAdd,
-  onExport,
-  onImportClick,
-  dragIndex,
-  reorder,
-}: {
-  rules: PreprocessRule[]
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: Set<string>
-  onToggleExpand: (id: string) => void
-  onUpdate: (r: PreprocessRule) => void
-  onDelete: (id: string) => void
-  onAdd: () => void
-  onExport: () => void
-  onImportClick: () => void
-  dragIndex: { current: number | null }
-  reorder: (from: number, to: number) => void
-}) {
-  return (
-    <div className="ah-pp">
-      <div className="ah-pp-toolbar">
-        <Button variant="primary" size="sm" icon={<IconPlus size={16} />} onClick={onAdd}>
-          新增规则
-        </Button>
-        <span style={{ flex: 1 }} />
-        <Button variant="ghost" size="sm" onClick={onImportClick}>
-          导入
-        </Button>
-        <Button variant="ghost" size="sm" onClick={onExport} disabled={!rules.length}>
-          导出
-        </Button>
-      </div>
-      {!rules.length ? (
-        <div className="ah-detail-empty">还没有规则，点「新增规则」开始</div>
-      ) : (
-        <div className="ah-pp-list">
-          {rules.map((r, i) => (
-            <RuleRow
-              key={r.id}
-              rule={r}
-              channelOptions={channelOptions}
-              modelOptions={modelOptions}
-              expanded={expanded.has(r.id)}
-              onToggleExpand={() => onToggleExpand(r.id)}
-              onChange={onUpdate}
-              onDelete={() => onDelete(r.id)}
-              onDragStart={() => {
-                dragIndex.current = i
-              }}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault()
-                const from = dragIndex.current
-                if (from != null && from !== i) reorder(from, i)
-                dragIndex.current = null
-              }}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function RuleRow({
-  rule,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onChange,
-  onDelete,
-  onDragStart,
-  onDragOver,
-  onDrop,
-}: {
-  rule: PreprocessRule
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: boolean
-  onToggleExpand: () => void
-  onChange: (r: PreprocessRule) => void
-  onDelete: () => void
-  onDragStart: () => void
-  onDragOver: (e: DragEvent) => void
-  onDrop: (e: DragEvent) => void
-}) {
+function RuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<PreprocessRule>) {
   const [test, setTest] = useState('')
-  const reValid = useMemo(() => {
-    if (!rule.pattern) return true
-    try {
-      new RegExp(rule.pattern, rule.flags || 'g')
-      return true
-    } catch {
-      return false
-    }
-  }, [rule.pattern, rule.flags])
-  const tested = useMemo(() => {
-    if (!test || !reValid || !rule.pattern) return null
-    try {
-      return test.replace(new RegExp(rule.pattern, rule.flags || 'g'), rule.replacement ?? '')
-    } catch {
-      return null
-    }
-  }, [test, rule.pattern, rule.flags, rule.replacement, reValid])
+  const reValid = regexValid(rule.pattern, rule.flags)
+  const tested = test && reValid && rule.pattern ? test.replace(new RegExp(rule.pattern, rule.flags || 'g'), rule.replacement ?? '') : null
 
   const up = (p: Partial<PreprocessRule>) => onChange({ ...rule, ...p })
   const summary = rule.name || (rule.pattern ? `${rule.pattern}  →  ${rule.replacement || '（删除）'}` : '（空规则）')
 
   return (
-    <div className="ah-pp-rule" draggable onDragStart={onDragStart} onDragOver={onDragOver} onDrop={onDrop}>
+    <div className="ah-pp-rule" {...drag}>
       <div className="ah-pp-rule-head">
         <span className="ah-pp-grip" title="拖拽排序">
           <IconGrip size={16} />
@@ -656,29 +507,7 @@ function RuleRow({
           <Field label="作用角色（不选 = 全部）">
             <MultiChips options={ROLE_OPTIONS} selected={rule.roles ?? []} onChange={(v) => up({ roles: v.length ? v : undefined })} />
           </Field>
-          <Field label="入口格式（不选 = 全部）">
-            <MultiChips
-              options={FORMAT_OPTIONS}
-              selected={rule.formats ?? []}
-              onChange={(v) => up({ formats: v.length ? (v as PreprocessRule['formats']) : undefined })}
-            />
-          </Field>
-          <Field label="限定渠道（不选 = 全部）">
-            <MultiChips
-              options={channelOptions}
-              selected={(rule.channelIds ?? []).map(String)}
-              onChange={(v) => up({ channelIds: v.length ? v.map(Number) : undefined })}
-              empty="暂无渠道"
-            />
-          </Field>
-          <Field label="限定模型（不选 = 全部）">
-            <MultiChips
-              options={modelOptions}
-              selected={rule.models ?? []}
-              onChange={(v) => up({ models: v.length ? v : undefined })}
-              empty="暂无模型（渠道未配置 models）"
-            />
-          </Field>
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
           <Field label="测试预览">
             <Textarea value={test} onChange={(e) => setTest(e.target.value)} placeholder="粘贴一段文本，实时查看替换效果" rows={2} />
             {test && <pre className="ah-code ah-code-block ah-pp-test-out">{reValid ? tested ?? '' : '（正则无效）'}</pre>}
@@ -803,72 +632,10 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
   )
 }
 
-function ToolFilterEditor({
-  rules,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onUpdate,
-  onDelete,
-  onAdd,
-}: {
-  rules: ToolFilterRule[]
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: Set<string>
-  onToggleExpand: (id: string) => void
-  onUpdate: (r: ToolFilterRule) => void
-  onDelete: (id: string) => void
-  onAdd: () => void
-}) {
-  return (
-    <div className="ah-pp">
-      <div className="ah-pp-toolbar">
-        <Button variant="primary" size="sm" icon={<IconPlus size={16} />} onClick={onAdd}>
-          新增规则
-        </Button>
-      </div>
-      {!rules.length ? (
-        <div className="ah-detail-empty">还没有规则，点「新增规则」开始</div>
-      ) : (
-        <div className="ah-pp-list">
-          {rules.map((r) => (
-            <ToolFilterRuleRow
-              key={r.id}
-              rule={r}
-              channelOptions={channelOptions}
-              modelOptions={modelOptions}
-              expanded={expanded.has(r.id)}
-              onToggleExpand={() => onToggleExpand(r.id)}
-              onChange={onUpdate}
-              onDelete={() => onDelete(r.id)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ToolFilterRuleRow({
-  rule,
-  channelOptions,
-  modelOptions,
-  expanded,
-  onToggleExpand,
-  onChange,
-  onDelete,
-}: {
-  rule: ToolFilterRule
-  channelOptions: Opt[]
-  modelOptions: Opt[]
-  expanded: boolean
-  onToggleExpand: () => void
-  onChange: (r: ToolFilterRule) => void
-  onDelete: () => void
-}) {
-  const [showImport, setShowImport] = useState(false)
+function ToolFilterRuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete }: RuleRowProps<ToolFilterRule>) {
+  const toast = useToast()
+  const [picking, setPicking] = useState(false)
+  const [importable, setImportable] = useState<ToolInfo[] | null>(null)
   const [toolInput, setToolInput] = useState('')
   const up = (p: Partial<ToolFilterRule>) => onChange({ ...rule, ...p })
   const addTools = (names: string[]) => {
@@ -882,6 +649,19 @@ function ToolFilterRuleRow({
     if (!name) return
     addTools([name])
     setToolInput('')
+  }
+  const pickLog = async (id: number) => {
+    try {
+      const tools = parseTools((await api.getLog(id)).request_body)
+      if (!tools.length) {
+        toast('err', '该请求中没有工具定义')
+        return
+      }
+      setPicking(false)
+      setImportable(tools)
+    } catch (e: any) {
+      toast('err', e.message)
+    }
   }
   const summary = rule.name || (rule.tools.length ? `屏蔽 ${rule.tools.length} 个工具` : '（空规则）')
 
@@ -927,44 +707,28 @@ function ToolFilterRuleRow({
               <Button variant="soft" size="sm" onClick={handleAddManual} disabled={!toolInput.trim()}>
                 添加
               </Button>
-              <Button variant="soft" size="sm" icon={<IconExternal size={15} />} onClick={() => setShowImport(true)}>
+              <Button variant="soft" size="sm" icon={<IconExternal size={15} />} onClick={() => setPicking(true)}>
                 从日志导入
               </Button>
             </div>
           </Field>
-          <Field label="入口格式（不选 = 全部）">
-            <MultiChips
-              options={FORMAT_OPTIONS}
-              selected={rule.formats ?? []}
-              onChange={(v) => up({ formats: v.length ? (v as ToolFilterRule['formats']) : undefined })}
-            />
-          </Field>
-          <Field label="限定渠道（不选 = 全部）">
-            <MultiChips
-              options={channelOptions}
-              selected={(rule.channelIds ?? []).map(String)}
-              onChange={(v) => up({ channelIds: v.length ? v.map(Number) : undefined })}
-              empty="暂无渠道"
-            />
-          </Field>
-          <Field label="限定模型（不选 = 全部）">
-            <MultiChips
-              options={modelOptions}
-              selected={rule.models ?? []}
-              onChange={(v) => up({ models: v.length ? v : undefined })}
-              empty="暂无模型（渠道未配置 models）"
-            />
-          </Field>
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
         </div>
       )}
-      {showImport && (
+      {picking && <LogPickerModal onPick={pickLog} onClose={() => setPicking(false)} />}
+      {importable && (
         <ToolImportModal
+          tools={importable}
           existing={new Set(rule.tools)}
           onImport={(names) => {
             addTools(names)
-            setShowImport(false)
+            setImportable(null)
           }}
-          onClose={() => setShowImport(false)}
+          onBack={() => {
+            setImportable(null)
+            setPicking(true)
+          }}
+          onClose={() => setImportable(null)}
         />
       )}
     </div>
@@ -972,42 +736,20 @@ function ToolFilterRuleRow({
 }
 
 function ToolImportModal({
+  tools,
   existing,
   onImport,
+  onBack,
   onClose,
 }: {
+  tools: ToolInfo[]
   existing: Set<string>
   onImport: (names: string[]) => void
+  onBack: () => void
   onClose: () => void
 }) {
-  const toast = useToast()
-  const [step, setStep] = useState<'pick' | 'select'>('pick')
-  const [items, setItems] = useState<LogItem[] | null>(null)
-  const [tools, setTools] = useState<{ name: string; description?: string }[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  useEffect(() => {
-    api
-      .listLogs({ limit: 40 })
-      .then((r) => setItems(r.items))
-      .catch((e) => toast('err', e.message))
-  }, [toast])
-
-  const pickLog = async (id: number) => {
-    try {
-      const d = await api.getLog(id)
-      const parsed = parseTools(d.request_body)
-      if (!parsed.length) {
-        toast('err', '该请求中没有工具定义')
-        return
-      }
-      setTools(parsed)
-      setSelected(new Set(parsed.filter((t) => !existing.has(t.name)).map((t) => t.name)))
-      setStep('select')
-    } catch (e: any) {
-      toast('err', e.message)
-    }
-  }
+  const newTools = () => new Set(tools.filter((t) => !existing.has(t.name)).map((t) => t.name))
+  const [selected, setSelected] = useState(newTools)
 
   const toggleTool = (name: string) => {
     setSelected((prev) => {
@@ -1018,82 +760,52 @@ function ToolImportModal({
   }
 
   return (
-    <Modal title={step === 'pick' ? '选择历史请求' : `选择要屏蔽的工具（${tools.length} 个）`} size="lg" onClose={onClose}>
-      {step === 'pick' ? (
-        !items ? (
-          <div className="ah-logt-empty">
-            <span className="ah-spin ah-spin-orange" /> 加载中…
-          </div>
-        ) : !items.length ? (
-          <div className="ah-detail-empty">暂无请求日志</div>
-        ) : (
-          <div className="ah-pp-picker">
-            {items.map((l) => (
-              <button type="button" key={l.id} className="ah-pp-picker-row" onClick={() => pickLog(l.id)}>
-                <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
-                  {l.status === 'success' ? l.status_code || 200 : 'ERR'}
-                </span>
-                <span className={`ah-fmt-badge ${l.entry_format}`}>{fmtLabel(l.entry_format)}</span>
-                <span className="ah-pp-picker-model ah-truncate">{l.model || '-'}</span>
-                <span className="ah-mini ah-muted ah-truncate">{l.channel_name || '—'}</span>
-                <span className="ah-mini ah-faint ah-num">{new Date(l.created_at).toLocaleString('zh-CN', { hour12: false })}</span>
-              </button>
-            ))}
-          </div>
-        )
-      ) : (
-        <div>
-          <div className="ah-pp-toolbar" style={{ marginBottom: 8 }}>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSelected(new Set(tools.filter((t) => !existing.has(t.name)).map((t) => t.name)))}
+    <Modal title={`选择要屏蔽的工具（${tools.length} 个）`} size="lg" onClose={onClose}>
+      <div className="ah-pp-toolbar" style={{ marginBottom: 8 }}>
+        <Button variant="ghost" size="sm" onClick={() => setSelected(newTools())}>
+          全选新工具
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+          全不选
+        </Button>
+        <span style={{ flex: 1 }} />
+        <Button variant="ghost" size="sm" onClick={onBack}>
+          换一条日志
+        </Button>
+      </div>
+      <div className="ah-pp-picker" style={{ maxHeight: 400 }}>
+        {tools.map((t) => (
+          <button
+            type="button"
+            key={t.name}
+            className={`ah-pp-picker-row${selected.has(t.name) ? ' is-selected' : ''}`}
+            onClick={() => toggleTool(t.name)}
+            style={{ alignItems: 'flex-start' }}
+          >
+            <span
+              className={`ah-pp-chip${selected.has(t.name) ? ' is-on' : ''}`}
+              style={{ flexShrink: 0, cursor: 'pointer', minWidth: 20, textAlign: 'center' }}
             >
-              全选新工具
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
-              全不选
-            </Button>
-            <span style={{ flex: 1 }} />
-            <Button variant="ghost" size="sm" onClick={() => setStep('pick')}>
-              换一条日志
-            </Button>
-          </div>
-          <div className="ah-pp-picker" style={{ maxHeight: 400 }}>
-            {tools.map((t) => (
-              <button
-                type="button"
-                key={t.name}
-                className={`ah-pp-picker-row${selected.has(t.name) ? ' is-selected' : ''}`}
-                onClick={() => toggleTool(t.name)}
-                style={{ alignItems: 'flex-start' }}
-              >
-                <span
-                  className={`ah-pp-chip${selected.has(t.name) ? ' is-on' : ''}`}
-                  style={{ flexShrink: 0, cursor: 'pointer', minWidth: 20, textAlign: 'center' }}
-                >
-                  {selected.has(t.name) ? '✓' : '　'}
-                </span>
-                <span style={{ fontWeight: 500, flexShrink: 0 }}>{t.name}</span>
-                {existing.has(t.name) && <span className="ah-mini ah-faint">（已添加）</span>}
-                {t.description && (
-                  <span className="ah-mini ah-muted ah-truncate" style={{ flex: 1 }}>
-                    {t.description}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
-            <Button variant="ghost" onClick={onClose}>
-              取消
-            </Button>
-            <Button variant="primary" disabled={selected.size === 0} onClick={() => onImport([...selected])}>
-              添加 {selected.size} 个工具到黑名单
-            </Button>
-          </div>
-        </div>
-      )}
+              {selected.has(t.name) ? '✓' : '　'}
+            </span>
+            <span style={{ fontWeight: 500, flexShrink: 0 }}>{t.name}</span>
+            {existing.has(t.name) && <span className="ah-mini ah-faint">（已添加）</span>}
+            {t.description && (
+              <span className="ah-mini ah-muted ah-truncate" style={{ flex: 1 }}>
+                {t.description}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 }}>
+        <Button variant="ghost" onClick={onClose}>
+          取消
+        </Button>
+        <Button variant="primary" disabled={selected.size === 0} onClick={() => onImport([...selected])}>
+          添加 {selected.size} 个工具到黑名单
+        </Button>
+      </div>
     </Modal>
   )
 }
