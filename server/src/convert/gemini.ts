@@ -1,7 +1,6 @@
 import { contentToText, genId, nowSec, splitContent } from './ir'
 import type { StreamDecoder } from './ir'
 import { CandidateError } from '../core/failover'
-export { resolveImageUrls } from '../core/imageResolver'
 import { emptyUsage, usageFromGemini } from './usage'
 
 // Gemini 仅作上游渠道（vertex API key 模式走 Gemini generateContent 协议）。

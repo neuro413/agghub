@@ -1,7 +1,6 @@
 import { DEFAULT_SETTINGS } from '../config'
 import type { Settings } from '../types'
 import { parseSafePath } from './safePath'
-import { validateImageAllowEntry } from './imagePolicy'
 
 export class SettingsValidationError extends Error {
   readonly status = 400
@@ -32,8 +31,7 @@ const integerRanges: Record<string, [number, number]> = {
   request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000], downstream_timeout_ms: [1, 300_000],
   log_retention_days: [0, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
-  image_max_bytes: [1, 100 * 1024 * 1024], image_total_max_bytes: [1, 256 * 1024 * 1024],
-  image_max_count: [1, 100], image_download_concurrency: [1, 8],
+  image_max_bytes: [1, 100 * 1024 * 1024],
 }
 const booleans = new Set(['auto_ban', 'store_request_body', 'store_response_body', 'drop_thinking', 'drop_redacted_thinking', 'strip_top_p', 'pseudo_thinking_enabled', 'reasoning_auto_adjust'])
 const formats = new Set(['openai', 'anthropic', 'responses'])
@@ -64,10 +62,7 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   }
   for (const key of booleans) check(typeof merged[key] === 'boolean', key, '须为布尔值')
   for (const key of ['drop_thinking_channel_ids', 'pseudo_thinking_channel_ids']) check(ids(merged[key]), key, '须为正整数渠道 ID 数组')
-  for (const key of ['drop_thinking_models', 'pseudo_thinking_models', 'image_allowed_hosts']) check(strings(merged[key]), key, '须为非空字符串数组')
-  if (strings(merged.image_allowed_hosts)) merged.image_allowed_hosts.forEach((entry: string, index: number) => {
-    try { validateImageAllowEntry(entry) } catch (error) { errors[`image_allowed_hosts[${index}]`] = (error as Error).message }
-  })
+  for (const key of ['drop_thinking_models', 'pseudo_thinking_models']) check(strings(merged[key]), key, '须为非空字符串数组')
   check(merged.failover_strategy === 'priority_descend', 'failover_strategy', '不支持的故障转移策略')
   check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')

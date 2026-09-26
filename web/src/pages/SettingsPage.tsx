@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
-import { Input, Select, Slider, Textarea } from '../components/Form'
+import { Input, Select, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
 import { IconBolt, IconCopy, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
@@ -37,10 +37,6 @@ export function SettingsPage() {
         log_response_max_bytes: s.log_response_max_bytes,
         stream_buffer_max_bytes: s.stream_buffer_max_bytes,
         image_max_bytes: s.image_max_bytes,
-        image_total_max_bytes: s.image_total_max_bytes,
-        image_max_count: s.image_max_count,
-        image_download_concurrency: s.image_download_concurrency,
-        image_allowed_hosts: s.image_allowed_hosts,
         failover_strategy: s.failover_strategy,
         auto_ban: s.auto_ban,
         auto_ban_codes: s.auto_ban_codes,
@@ -196,16 +192,10 @@ export function SettingsPage() {
           ['downstream_timeout_ms', '客户端写入等待（毫秒）', '默认 30000；背压等待不计入上游空闲'],
           ['log_response_max_bytes', '每字段日志上限（字节）', '默认 4194304（4MiB）；超限标记截断'],
           ['stream_buffer_max_bytes', '流重组与非流式响应上限（字节）', '默认 16777216（16MiB）'],
-          ['image_max_bytes', '单张图片上限（字节）', '默认 20971520（20MiB）'],
-          ['image_total_max_bytes', '图片总下载上限（字节）', '默认 41943040（40MiB）'],
-          ['image_max_count', '图片引用数量上限', '默认 20，重复引用也计数'],
-          ['image_download_concurrency', '单请求图片下载并发', '默认 4；进程总并发最多 8'],
+          ['image_max_bytes', '单张图片上限（字节）', '默认 20971520（20MiB）；仅 Gemini 上游下载远程图片时使用'],
         ] as const).map(([key, label, desc]) => <SettingRow key={key} label={label} desc={desc}>
           <Input aria-label={label} type="number" min="0" step="1" value={s[key]} onChange={e => set(key, Number(e.target.value))} />
         </SettingRow>)}
-        <SettingRow label="可信图片白名单" desc="每行一个精确主机、IP 或 CIDR。默认拒绝内网和保留地址；仅添加可信图片服务。元数据和链路本地地址始终拒绝。">
-          <Textarea aria-label="可信图片白名单" value={s.image_allowed_hosts.join('\n')} onChange={e => set('image_allowed_hosts', e.target.value.split('\n'))} onBlur={() => set('image_allowed_hosts', s.image_allowed_hosts.map(host => host.trim()).filter(Boolean))} placeholder="例如：192.168.1.20" />
-        </SettingRow>
       </Card>
       </fieldset>
       <div className="ah-mini ah-faint" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>

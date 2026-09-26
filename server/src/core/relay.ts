@@ -4,7 +4,7 @@ import { getChannelById, getSettings, setChannelStatus } from '../db'
 import { getAdaptor } from '../adapters'
 import type { Adaptor, UpstreamRequest } from '../adapters'
 import type { UpstreamContext } from '../adapters/base'
-import { resolveImageUrls } from '../convert/gemini'
+import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
 import { LocalRequestError, UpstreamError, extractUpstreamMessage, isRequestError, parseAutoBanCodes, shouldDisable, shouldRetry } from './failover'
@@ -115,7 +115,7 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   let changed = before !== undefined && JSON.stringify(body) !== before
   if (!state.passthrough && upstreamWire === 'gemini') {
     const original = JSON.stringify(body)
-    await resolveImageUrls(body, settings.proxy_url || undefined, { signal: lifecycle.signal, settings, onBytes: lifecycle.touch })
+    await resolveImageUrls(body, settings, lifecycle.signal)
     lifecycle.signal.throwIfAborted()
     changed ||= JSON.stringify(body) !== original
   }

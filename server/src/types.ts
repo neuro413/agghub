@@ -97,10 +97,6 @@ export interface Settings {
   log_response_max_bytes: number
   stream_buffer_max_bytes: number
   image_max_bytes: number
-  image_total_max_bytes: number
-  image_max_count: number
-  image_download_concurrency: number
-  image_allowed_hosts: string[]
   failover_strategy: 'priority_descend'
   auto_ban: boolean
   auto_ban_codes: string
