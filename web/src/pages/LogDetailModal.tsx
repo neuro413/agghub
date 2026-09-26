@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast'
 import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
 import { prettyJson } from '../lib/format'
+import { Loading, StatusPill } from '../components/Primitives'
 import type { LogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
 
@@ -110,9 +111,7 @@ export function LogDetailModal({
       }
     >
       {!detail ? (
-        <div className="ah-logt-empty">
-          <span className="ah-spin ah-spin-orange" /> 加载中…
-        </div>
+        <Loading />
       ) : (
         <>
           <LogMeta detail={detail} />
@@ -147,7 +146,7 @@ export function LogDetailModal({
           {tab === 'params' && <JsonView text={JSON.stringify(paramsOf(activeBody) ?? {}, null, 2)} onCopy={copy} empty="（无额外参数）" />}
           {tab === 'response' && <ResponseView detail={detail} showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy} />}
           {tab === 'raw' && <JsonView text={prettyJson(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
-          {tab === 'thinking' && detail && <ThinkingInjectView detail={detail} />}
+          {tab === 'thinking' && <ThinkingInjectView detail={detail} />}
         </>
       )}
     </Modal>
@@ -159,9 +158,7 @@ function LogMeta({ detail }: { detail: LogDetail }) {
   const time = d.toLocaleString('zh-CN', { hour12: false })
   return (
     <div className="ah-detail-meta">
-      <span className={`ah-log-pill ${detail.status === 'success' ? 'ok' : 'err'}`}>
-        {detail.status === 'success' ? detail.status_code || 200 : detail.status_code || 'ERR'}
-      </span>
+      <StatusPill log={detail} />
       <span className="ah-detail-meta-model">{detail.model || '-'}</span>
       {detail.upstream_model && detail.upstream_model !== detail.model && (
         <span className="ah-mini ah-faint">→ {detail.upstream_model}</span>

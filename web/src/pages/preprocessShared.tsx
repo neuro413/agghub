@@ -5,6 +5,7 @@ import { Button } from '../components/Button'
 import { Field } from '../components/Form'
 import { IconPlus } from '../components/Icons'
 import { Modal } from '../components/Modal'
+import { Loading, StatusPill } from '../components/Primitives'
 import { useToast } from '../components/Toast'
 import type { EntryFormat, LogItem } from '../types'
 
@@ -220,18 +221,14 @@ export function LogPickerModal({ onPick, onClose }: { onPick: (id: number) => vo
   return (
     <Modal title="选择历史请求" size="lg" onClose={onClose}>
       {!items ? (
-        <div className="ah-logt-empty">
-          <span className="ah-spin ah-spin-orange" /> 加载中…
-        </div>
+        <Loading />
       ) : !items.length ? (
         <div className="ah-detail-empty">暂无请求日志</div>
       ) : (
         <div className="ah-pp-picker">
           {items.map((l) => (
             <button type="button" key={l.id} className="ah-pp-picker-row" onClick={() => onPick(l.id)}>
-              <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
-                {l.status === 'success' ? l.status_code || 200 : 'ERR'}
-              </span>
+              <StatusPill log={l} />
               <span className={`ah-fmt-badge ${l.entry_format}`}>{fmtLabel(l.entry_format)}</span>
               <span className="ah-pp-picker-model ah-truncate">{l.model || '-'}</span>
               <span className="ah-mini ah-muted ah-truncate">{l.channel_name || '—'}</span>

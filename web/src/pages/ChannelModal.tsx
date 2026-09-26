@@ -124,15 +124,7 @@ export function ChannelModal({
     }
   }
 
-  const validate = (): string | null => {
-    if (!f.name.trim()) return '请填写渠道名称'
-    if (f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).length === 0) return '请至少填写一个模型'
-    return null
-  }
-
   const save = async () => {
-    const err = validate()
-    if (err) return toast('err', err)
     setSaving(true)
     try {
       const payload = buildPayload(f)
@@ -148,8 +140,6 @@ export function ChannelModal({
   }
 
   const test = async () => {
-    const err = validate()
-    if (err) return toast('err', err)
     setTesting(true)
     try {
       const r = await api.testChannel(buildPayload(f))

@@ -9,6 +9,13 @@ import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Settings } from '../types'
 
+// 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
+const KEYS: (keyof Settings)[] = [
+  'single_retry_times', 'channel_retry_times', 'retry_interval_ms', 'request_timeout_ms', 'request_max_duration_ms',
+  'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
+  'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
+]
+
 export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
   const [saving, setSaving] = useState(false)
@@ -26,24 +33,7 @@ export function SettingsPage() {
     if (!s) return
     setSaving(true)
     try {
-      // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
-      const saved = await api.updateSettings({
-        single_retry_times: s.single_retry_times,
-        channel_retry_times: s.channel_retry_times,
-        retry_interval_ms: s.retry_interval_ms,
-        request_timeout_ms: s.request_timeout_ms,
-        request_max_duration_ms: s.request_max_duration_ms,
-        log_response_max_bytes: s.log_response_max_bytes,
-        stream_buffer_max_bytes: s.stream_buffer_max_bytes,
-        image_max_bytes: s.image_max_bytes,
-        auto_ban: s.auto_ban,
-        auto_ban_codes: s.auto_ban_codes,
-        log_retention_days: s.log_retention_days,
-        store_request_body: s.store_request_body,
-        store_response_body: s.store_response_body,
-        access_token: s.access_token,
-        proxy_url: s.proxy_url,
-      })
+      const saved = await api.updateSettings(Object.fromEntries(KEYS.map((k) => [k, s[k]])))
       setS(saved)
       // 管理 API 与 /v1 共用该令牌，保存后同步本地凭证，避免下一个请求就 401
       setStoredToken(saved.access_token)

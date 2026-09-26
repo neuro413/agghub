@@ -50,11 +50,6 @@ export function shouldRetry(err: any): boolean {
   return false
 }
 
-/** 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理。 */
-export function isRequestError(err: any): boolean {
-  return err instanceof LocalRequestError
-}
-
 /** 是否应自动禁用该渠道：命中熔断状态码（默认 401/403，多为凭证失效）*/
 export function shouldDisable(err: any, autoBanCodes: number[]): boolean {
   if (err instanceof UpstreamError) return autoBanCodes.includes(err.status)

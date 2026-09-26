@@ -1,4 +1,4 @@
-import type { ChannelType } from '../types'
+import type { ChannelType, LogItem } from '../types'
 
 const TYPE_LABEL: Record<ChannelType, string> = {
   openai: 'OpenAI',
@@ -19,4 +19,18 @@ export function StatusDot({ status }: { status: number }) {
 
 export function statusText(status: number): string {
   return status === 1 ? '在线' : status === 2 ? '已熔断' : '已停用'
+}
+
+/** 请求日志状态：成功显示状态码（缺省 200），失败显示状态码或 ERR */
+export function StatusPill({ log }: { log: Pick<LogItem, 'status' | 'status_code'> }) {
+  const ok = log.status === 'success'
+  return <span className={`ah-log-pill ${ok ? 'ok' : 'err'}`}>{log.status_code || (ok ? 200 : 'ERR')}</span>
+}
+
+export function Loading() {
+  return (
+    <div className="ah-logt-empty">
+      <span className="ah-spin ah-spin-orange" /> 加载中…
+    </div>
+  )
 }

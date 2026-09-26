@@ -17,6 +17,7 @@ import { useToast } from '../components/Toast'
 import type { LogFacets, LogItem } from '../types'
 import { LogDetailModal } from './LogDetailModal'
 import { fmtShort } from './preprocessShared'
+import { Loading, StatusPill } from '../components/Primitives'
 
 const PAGE_SIZE = 50
 
@@ -223,9 +224,7 @@ export function LogsPage() {
         </div>
 
         {loading ? (
-          <div className="ah-logt-empty">
-            <span className="ah-spin ah-spin-orange" /> 加载中…
-          </div>
+          <Loading />
         ) : loadError ? <div className="ah-logt-empty" role="alert">加载失败：{loadError}</div> : items.length === 0 ? (
           <div className="ah-logt-empty">
             <IconLogs size={30} style={{ opacity: 0.4, display: 'block', margin: '0 auto 10px' }} />
@@ -236,9 +235,7 @@ export function LogsPage() {
             <div key={l.id} className="ah-logt-row" onClick={() => setOpenId(l.id)}>
               <span className="c-time ah-mini ah-faint ah-num">{fmtTime(l.created_at, true)}</span>
               <span className="c-status">
-                <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
-                  {l.status === 'success' ? l.status_code || 200 : l.status_code || 'ERR'}
-                </span>
+                <StatusPill log={l} />
               </span>
               <span className="c-model">
                 <span className="ah-logt-model ah-truncate">

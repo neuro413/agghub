@@ -10,6 +10,7 @@ import { Card } from '../components/Card'
 import { IconBolt, IconCheck, IconChevronRight, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
 import { useToast } from '../components/Toast'
 import type { LogItem, Stats } from '../types'
+import { StatusPill } from '../components/Primitives'
 
 const RANGES: { k: string; label: string }[] = [
   { k: '24h', label: '24 小时' },
@@ -125,9 +126,7 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
               {l.is_stream ? <span className="ah-tag">stream</span> : null}
               <span className="ah-mini ah-muted ah-num">{l.total_tokens || 0} tok</span>
               <span className="ah-mini ah-muted ah-num">{l.latency_ms ?? 0}ms</span>
-              <span className={`ah-log-pill ${l.status === 'success' ? 'ok' : 'err'}`}>
-                {l.status === 'success' ? l.status_code || 200 : l.status_code || 'ERR'}
-              </span>
+              <StatusPill log={l} />
               <span className="ah-mini ah-faint ah-num">{fmtTime(l.created_at)}</span>
             </div>
           ))

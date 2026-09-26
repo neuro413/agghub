@@ -35,6 +35,14 @@ function newToolFilterRule(partial?: Partial<ToolFilterRule>): ToolFilterRule {
   return { id: newId(), enabled: true, tools: [], ...partial }
 }
 
+// 只提交本页 UI 涉及的字段，避免用本页的旧缓存覆盖设置页的字段
+const KEYS: (keyof Settings)[] = [
+  'strip_top_p', 'drop_thinking', 'drop_thinking_keep_last', 'drop_thinking_channel_ids', 'drop_thinking_models', 'drop_redacted_thinking',
+  'preprocess_rules', 'tool_filter_rules', 'param_rules',
+  'pseudo_thinking_enabled', 'pseudo_thinking_channel_ids', 'pseudo_thinking_models', 'pseudo_thinking_open_tag', 'pseudo_thinking_close_tag',
+  'pseudo_thinking_prompt', 'pseudo_thinking_store_max',
+]
+
 export function PreprocessPage() {
   const toast = useToast()
   const [s, setS] = useState<Settings | null>(null)
@@ -82,24 +90,7 @@ export function PreprocessPage() {
     if (!s || saving || tagError) return
     setSaving(true)
     try {
-      const saved = await api.updateSettings({
-        strip_top_p: s.strip_top_p,
-        drop_thinking: s.drop_thinking,
-        drop_thinking_keep_last: s.drop_thinking_keep_last,
-        drop_thinking_channel_ids: s.drop_thinking_channel_ids,
-        drop_thinking_models: s.drop_thinking_models,
-        drop_redacted_thinking: s.drop_redacted_thinking,
-        preprocess_rules: s.preprocess_rules,
-        tool_filter_rules: s.tool_filter_rules,
-        param_rules: s.param_rules,
-        pseudo_thinking_enabled: s.pseudo_thinking_enabled,
-        pseudo_thinking_channel_ids: s.pseudo_thinking_channel_ids,
-        pseudo_thinking_models: s.pseudo_thinking_models,
-        pseudo_thinking_open_tag: s.pseudo_thinking_open_tag,
-        pseudo_thinking_close_tag: s.pseudo_thinking_close_tag,
-        pseudo_thinking_prompt: s.pseudo_thinking_prompt,
-        pseudo_thinking_store_max: s.pseudo_thinking_store_max,
-      })
+      const saved = await api.updateSettings(Object.fromEntries(KEYS.map((k) => [k, s[k]])))
       setS(saved)
       setDirty(false)
       toast('ok', '已保存')

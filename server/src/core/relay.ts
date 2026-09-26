@@ -7,7 +7,7 @@ import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
-import { LocalRequestError, UpstreamError, extractUpstreamMessage, isRequestError, parseAutoBanCodes, shouldDisable, shouldRetry } from './failover'
+import { LocalRequestError, UpstreamError, extractUpstreamMessage, parseAutoBanCodes, shouldDisable, shouldRetry } from './failover'
 import { applyPreprocess } from './preprocess'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
 import { estimatePromptTokens, parseSSEEvents } from '../convert/ir'
@@ -216,7 +216,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
             banned.add(channel.id)
             setChannelStatus(channel.id, 2)
           }
-          const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !isRequestError(error)
+          // 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
+          const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !(error instanceof LocalRequestError)
           retrySame = canContinue && !banned.has(channel.id) && shouldRetry(error) && index < settings.single_retry_times
           const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
           if (!retrySame && !nextChannel) {

@@ -6,6 +6,7 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import type { ThinkingDetail, ThinkingEntry } from '../types'
 import { clampOffset } from '../lib/format'
+import { Loading } from '../components/Primitives'
 
 const PAGE_SIZE = 30
 
@@ -85,9 +86,7 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
           </pre>
         </div>
       ) : loadError ? <div role="alert">加载失败：{loadError}<Button onClick={() => setRefresh(value => value + 1)}>重试</Button></div> : !items ? (
-        <div className="ah-logt-empty">
-          <span className="ah-spin ah-spin-orange" /> 加载中&hellip;
-        </div>
+        <Loading />
       ) : (
         <>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
