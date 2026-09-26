@@ -1,4 +1,4 @@
-import { contentToText, genId, nowSec, splitContent } from './ir'
+import { contentToText, genId, nowSec, parseDataUrl, parseToolArgs, splitContent } from './ir'
 import type { StreamDecoder } from './ir'
 import { CandidateError } from '../core/failover'
 import { emptyUsage, usageFromGemini } from './usage'
@@ -32,10 +32,18 @@ function finishMap(fr: string | null | undefined): string | null {
   }
 }
 
-function dataUrlToInline(u: string): any | null {
-  const m = /^data:([^;]+);base64,(.*)$/.exec(u)
-  if (m) return { inlineData: { mimeType: m[1], data: m[2] } }
-  throw new CandidateError('Gemini 图片尚未解析为有效 data URL，已停止发送缺图请求')
+/** 单个 Gemini part → IR delta：思考分流到 reasoning_content，内联媒体转 markdown 图片 */
+function partToDelta(p: any): any | null {
+  if (p.thought === true) return p.text ? { reasoning_content: p.text } : null
+  if (p.inlineData) {
+    const mime = p.inlineData.mimeType || ''
+    return { content: `![${mime.startsWith('image') ? 'image' : 'media'}](data:${mime};base64,${p.inlineData.data})` }
+  }
+  if (p.text) return { content: p.text }
+  if (p.functionCall) {
+    return { tool_calls: [{ id: genId('call'), type: 'function', function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) } }] }
+  }
+  return null
 }
 
 // Gemini 的 functionDeclarations 仅接受 OpenAPI 3.0 Schema 子集，
@@ -128,13 +136,7 @@ export function buildRequest(ir: any, _upstreamModel: string): any {
       if (txt) parts.push({ text: txt })
       if (Array.isArray(msg.tool_calls)) {
         for (const tc of msg.tool_calls) {
-          let args: any = {}
-          try {
-            args = JSON.parse(tc.function?.arguments || '{}')
-          } catch {
-            args = {}
-          }
-          parts.push({ functionCall: { name: tc.function?.name, args } })
+          parts.push({ functionCall: { name: tc.function?.name, args: parseToolArgs(tc.function?.arguments) } })
           if (tc.id && tc.function?.name) toolCallNames.set(tc.id, tc.function.name)
         }
       }
@@ -147,8 +149,9 @@ export function buildRequest(ir: any, _upstreamModel: string): any {
     const parts: any[] = []
     if (text) parts.push({ text })
     for (const img of images) {
-      const inl = dataUrlToInline(img)
-      if (inl) parts.push(inl)
+      const d = parseDataUrl(img)
+      if (!d) throw new CandidateError('Gemini 图片尚未解析为有效 data URL，已停止发送缺图请求')
+      parts.push({ inlineData: { mimeType: d.media_type, data: d.data } })
     }
     appendUser(parts)
   }
@@ -203,27 +206,11 @@ function partsToMessage(parts: any[]): GeminiMessage {
   let text = ''
   let reasoning = ''
   const toolCalls: any[] = []
-  for (const p of parts || []) {
-    if (p.thought === true && p.text != null) {
-      // 思考内容分流到 reasoning_content，避免混入正文
-      reasoning += p.text
-    } else if (p.inlineData) {
-      const mime = p.inlineData.mimeType || ''
-      const tag = mime.startsWith('image') ? 'image' : 'media'
-      text += `![${tag}](data:${mime};base64,${p.inlineData.data})`
-    } else if (p.executableCode) {
-      text += `\n\`\`\`${p.executableCode.language || ''}\n${p.executableCode.code || ''}\n\`\`\`\n`
-    } else if (p.codeExecutionResult) {
-      text += `\n\`\`\`output\n${p.codeExecutionResult.output || ''}\n\`\`\`\n`
-    } else if (p.text != null) {
-      text += p.text
-    } else if (p.functionCall) {
-      toolCalls.push({
-        id: genId('call'),
-        type: 'function',
-        function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) },
-      })
-    }
+  for (const p of parts) {
+    const d = partToDelta(p)
+    if (d?.reasoning_content) reasoning += d.reasoning_content
+    else if (d?.content) text += d.content
+    else if (d?.tool_calls) toolCalls.push(d.tool_calls[0])
   }
   const msg: GeminiMessage = { content: text || null }
   if (reasoning) msg.reasoning_content = reasoning
@@ -278,32 +265,10 @@ export function createStreamDecoder(model: string): StreamDecoder {
         out.push(mk({ role: 'assistant', content: '' }))
       }
       for (const p of cand?.content?.parts || []) {
-        if (p.thought === true && p.text != null && p.text !== '') {
-          out.push(mk({ reasoning_content: p.text }))
-        } else if (p.inlineData) {
-          const mime = p.inlineData.mimeType || ''
-          const tag = mime.startsWith('image') ? 'image' : 'media'
-          out.push(mk({ content: `![${tag}](data:${mime};base64,${p.inlineData.data})` }))
-        } else if (p.executableCode) {
-          out.push(mk({ content: `\n\`\`\`${p.executableCode.language || ''}\n${p.executableCode.code || ''}\n\`\`\`\n` }))
-        } else if (p.codeExecutionResult) {
-          out.push(mk({ content: `\n\`\`\`output\n${p.codeExecutionResult.output || ''}\n\`\`\`\n` }))
-        } else if (p.text != null && p.text !== '') {
-          out.push(mk({ content: p.text }))
-        } else if (p.functionCall) {
-          out.push(
-            mk({
-              tool_calls: [
-                {
-                  index: toolIndex++,
-                  id: genId('call'),
-                  type: 'function',
-                  function: { name: p.functionCall.name, arguments: JSON.stringify(p.functionCall.args ?? {}) },
-                },
-              ],
-            }),
-          )
-        }
+        const delta = partToDelta(p)
+        if (!delta) continue
+        if (delta.tool_calls) delta.tool_calls[0].index = toolIndex++
+        out.push(mk(delta))
       }
       if (cand?.finishReason) {
         const chunk = mk({}, finishMap(cand.finishReason) || 'stop')

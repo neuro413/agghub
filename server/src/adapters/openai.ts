@@ -1,32 +1,23 @@
 import * as oai from '../convert/openai'
-import type { Adaptor } from './base'
+import type { Channel } from '../types'
+import type { Adaptor, UpstreamRequest } from './base'
 import { trimSlash, withV1 } from './base'
+
+function request(channel: Channel, body: any, stream: boolean): UpstreamRequest {
+  const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
+  body.stream = stream
+  if (stream) body.stream_options = { include_usage: true }
+  return {
+    url: withV1(root) + '/chat/completions',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${channel.api_key}` },
+    body: JSON.stringify(body),
+  }
+}
 
 export const openaiAdaptor: Adaptor = {
   wireFormat: 'openai',
-  buildRequest(channel, ir, upstreamModel, stream) {
-    const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
-    const url = withV1(root) + '/chat/completions'
-    const body = oai.buildRequest(ir, upstreamModel)
-    body.stream = stream
-    if (stream) body.stream_options = { include_usage: true }
-    return {
-      url,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${channel.api_key}` },
-      body: JSON.stringify(body),
-    }
-  },
+  buildRequest: (channel, ir, upstreamModel, stream) => request(channel, oai.buildRequest(ir, upstreamModel), stream),
+  buildPassthroughRequest: (channel, rawBody, upstreamModel, stream) => request(channel, { ...rawBody, model: upstreamModel }, stream),
   parseResponse: (json, context) => oai.parseResponse(json, context.requestedModel),
   createStreamDecoder: context => oai.createStreamDecoder(context.requestedModel),
-  buildPassthroughRequest(channel, rawBody, upstreamModel, stream) {
-    const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
-    const url = withV1(root) + '/chat/completions'
-    const body: any = { ...rawBody, model: upstreamModel, stream }
-    if (stream) body.stream_options = { include_usage: true }
-    return {
-      url,
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${channel.api_key}` },
-      body: JSON.stringify(body),
-    }
-  },
 }

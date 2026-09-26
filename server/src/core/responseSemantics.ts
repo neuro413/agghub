@@ -1,7 +1,7 @@
 import type { EntryFormat, IRUsage } from '../types'
 import { contentToText } from '../convert/ir'
 import * as responses from '../convert/responses'
-import { mergeUsage, usageFromClaude, usageFromOpenAI, usageFromResponses, usageToClaude } from '../convert/usage'
+import { mergeClaudeUsage, mergeUsage, usageFromClaude, usageFromOpenAI, usageFromResponses } from '../convert/usage'
 
 export function passthroughUsage(format: EntryFormat, json: any): IRUsage {
   if (format === 'responses') return usageFromResponses(json?.usage)
@@ -13,7 +13,7 @@ export function accumulateUsage(format: EntryFormat, data: any, acc: IRUsage): I
   if (format === 'responses') return data?.response?.usage ? usageFromResponses(data.response.usage) : acc
   if (format === 'anthropic') {
     if (data?.type === 'message_start' && data.message?.usage) return usageFromClaude(data.message.usage)
-    if (data?.type === 'message_delta' && data.usage) return usageFromClaude({ ...usageToClaude(acc), ...data.usage })
+    if (data?.type === 'message_delta' && data.usage) return mergeClaudeUsage(acc, data.usage)
     return acc
   }
   return data?.usage ? mergeUsage(acc, usageFromOpenAI(data.usage)) : acc

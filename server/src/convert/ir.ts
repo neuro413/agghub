@@ -1,6 +1,4 @@
 import crypto from 'node:crypto'
-import type { IRUsage } from '../types'
-import { emptyUsage as _emptyUsage } from './usage'
 import { readBytes, type ReadOptions } from '../core/bodyReader'
 
 /** OpenAI 对 safety_identifier / prompt_cache_key 的官方长度上限 */
@@ -26,8 +24,14 @@ export function nowSec(): number {
   return Math.floor(Date.now() / 1000)
 }
 
-export function emptyUsage(): IRUsage {
-  return _emptyUsage()
+/** 工具参数 JSON 文本 → 对象；非法或非对象时返回 {} */
+export function parseToolArgs(raw: unknown): Record<string, any> {
+  try {
+    const value = JSON.parse(typeof raw === 'string' && raw ? raw : '{}')
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
 }
 
 /** 把 OpenAI 消息 content（string | parts[]）提取为纯文本 */

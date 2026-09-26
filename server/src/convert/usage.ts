@@ -64,6 +64,11 @@ export function usageFromClaude(u: any): IRUsage {
   return withCache(out, cacheRead, cacheCreate)
 }
 
+/** 合并 Claude message_delta 的累计 usage（含 output_tokens 与新版 API 的 input_tokens / 缓存字段）*/
+export function mergeClaudeUsage(acc: IRUsage | null, delta: any): IRUsage {
+  return usageFromClaude({ ...(acc ? usageToClaude(acc) : {}), ...(delta || {}) })
+}
+
 /** IR usage → Claude usage 对象（input_tokens 剔除缓存部分）*/
 export function usageToClaude(u: any): any {
   const prompt = num(u?.prompt_tokens)

@@ -63,7 +63,7 @@ export class StreamState {
     } else {
       for (const candidate of data?.candidates || []) {
         this.finished ||= !!candidate.finishReason
-        this.content ||= !!candidate.content?.parts?.some((part: any) => part.text || part.functionCall || part.inlineData || part.executableCode || part.codeExecutionResult)
+        this.content ||= !!candidate.content?.parts?.some((part: any) => part.text || part.functionCall || part.inlineData)
       }
     }
     return data

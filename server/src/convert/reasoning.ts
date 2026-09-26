@@ -7,13 +7,11 @@ import type { IRReasoning, IRReasoningItem } from '../types'
 
 // ─────────────────────────── 档位互转 ───────────────────────────
 
-export const EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+const EFFORT_LEVELS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
-/** effort → Claude budget_tokens */
-export function effortToBudget(effort: string | undefined): number | null {
+/** effort → Claude budget_tokens（effort 为 none 时调用方直接关闭 thinking）*/
+export function effortToBudget(effort: string | undefined): number {
   switch (effort) {
-    case 'none':
-      return null
     case 'minimal':
     case 'low':
       return 2048
@@ -30,13 +28,13 @@ export function effortToBudget(effort: string | undefined): number | null {
 }
 
 /** Claude budget_tokens → effort */
-export function budgetToEffort(budget: number): string {
+function budgetToEffort(budget: number): string {
   if (budget < 4096) return 'low'
   if (budget < 12288) return 'medium'
   return 'high'
 }
 
-export function isKnownEffort(v: any): v is (typeof EFFORT_LEVELS)[number] {
+function isKnownEffort(v: any): v is (typeof EFFORT_LEVELS)[number] {
   return typeof v === 'string' && (EFFORT_LEVELS as readonly string[]).includes(v)
 }
 
@@ -56,7 +54,7 @@ export function effortForClaude(effort: string | undefined): string | undefined 
   }
 }
 
-export type ClaudeThinkingMode = 'adaptive' | 'adaptive-legacy' | 'budget'
+type ClaudeThinkingMode = 'adaptive' | 'adaptive-legacy' | 'budget'
 
 /**
  * 按模型名判断 Claude thinking 的写法：

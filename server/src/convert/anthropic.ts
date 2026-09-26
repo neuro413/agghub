@@ -1,10 +1,9 @@
-import { contentToText, genId, hashIdentifier, nowSec, parseDataUrl, splitContent } from './ir'
+import { contentToText, genId, hashIdentifier, nowSec, parseDataUrl, parseToolArgs, splitContent } from './ir'
 import type { StreamDecoder, StreamEncoder } from './ir'
 import { claudeStopToFinish, finishToClaudeStop } from './reasonmap'
 import { claudeThinkingMode, effortForClaude, effortToBudget, reasoningFromClaude, reasoningItemsText } from './reasoning'
-import { usageFromClaude, usageToClaude } from './usage'
+import { mergeClaudeUsage, usageFromClaude, usageToClaude } from './usage'
 import type { IRReasoningItem } from '../types'
-import { serialToolBlocks } from './serialToolBlocks'
 
 const DEFAULT_MAX_TOKENS = 4096
 const MIN_THINKING_BUDGET = 1024
@@ -21,26 +20,40 @@ function parseImageSource(u: string): any {
 
 /** IR file 部件 → Claude document 块；无法构造时返回 null */
 function fileToDocument(f: any): any | null {
-  if (!f || typeof f !== 'object') return null
-  if (f.file_data) {
-    const d = parseDataUrl(f.file_data)
-    const media_type = d?.media_type || f.media_type || 'application/pdf'
-    const data = d?.data || f.file_data
-    const doc: any = { type: 'document', source: { type: 'base64', media_type, data } }
-    if (f.filename) doc.title = f.filename
-    return doc
-  }
-  if (f.file_url) {
-    const doc: any = { type: 'document', source: { type: 'url', url: f.file_url } }
-    if (f.filename) doc.title = f.filename
-    return doc
-  }
-  if (f.file_id) {
-    const doc: any = { type: 'document', source: { type: 'file', file_id: f.file_id } }
-    if (f.filename) doc.title = f.filename
-    return doc
-  }
-  return null
+  const d = f.file_data ? parseDataUrl(f.file_data) : null
+  const source = f.file_data ? { type: 'base64', media_type: d?.media_type || f.media_type || 'application/pdf', data: d?.data || f.file_data }
+    : f.file_url ? { type: 'url', url: f.file_url }
+      : f.file_id ? { type: 'file', file_id: f.file_id } : null
+  if (!source) return null
+  return f.filename ? { type: 'document', source, title: f.filename } : { type: 'document', source }
+}
+
+/** Claude image source → IR 图片 URL（base64 转 data URL）*/
+function claudeImageUrl(src: any): string | undefined {
+  return src?.type === 'base64' ? `data:${src.media_type};base64,${src.data}` : src?.url
+}
+
+/** Claude 文本（string 或 text 块数组）→ 纯文本，多块以空行连接 */
+function claudeText(content: any): string {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map((b: any) => (typeof b === 'string' ? b : b?.text || '')).filter(Boolean).join('\n\n')
+}
+
+/** web_search 的 user_location（两侧字段相同）*/
+function approximateLocation(loc: any): any {
+  const l: any = { type: 'approximate' }
+  for (const k of ['city', 'region', 'country', 'timezone']) if (loc[k]) l[k] = loc[k]
+  return l
+}
+
+/** Claude 的 thinking / redacted_thinking / tool_use 块 → IR 推理项或工具调用；其它块返回 false */
+function collectClaudeBlock(block: any, items: IRReasoningItem[], toolCalls: any[]): boolean {
+  if (block.type === 'thinking') items.push(block.signature ? { text: block.thinking || '', signature: block.signature } : { text: block.thinking || '' })
+  else if (block.type === 'redacted_thinking') { if (block.data) items.push({ redacted: block.data }) }
+  else if (block.type === 'tool_use') toolCalls.push({ id: block.id, type: 'function', function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) } })
+  else return false
+  return true
 }
 
 /** IR reasoning_items → Claude thinking / redacted_thinking 块（缺签名的块无法回传，跳过）*/
@@ -70,12 +83,7 @@ function hostedToolToClaude(t: any): any | null {
   const out: any = { type: 'web_search_20250305', name: 'web_search' }
   const allowed = t.filters?.allowed_domains
   if (Array.isArray(allowed) && allowed.length) out.allowed_domains = allowed
-  const loc = t.user_location
-  if (loc && typeof loc === 'object') {
-    const l: any = { type: 'approximate' }
-    for (const k of ['city', 'region', 'country', 'timezone']) if (loc[k]) l[k] = loc[k]
-    out.user_location = l
-  }
+  if (t.user_location && typeof t.user_location === 'object') out.user_location = approximateLocation(t.user_location)
   return out
 }
 
@@ -92,9 +100,6 @@ export function buildRequest(ir: any, upstreamModel: string): any {
     if (!blocks.length) return
     const last = messages[messages.length - 1]
     if (last && last.role === role) {
-      if (typeof last.content === 'string') {
-        last.content = last.content ? [{ type: 'text', text: last.content }] : []
-      }
       last.content.push(...blocks)
     } else {
       messages.push({ role, content: blocks })
@@ -299,7 +304,6 @@ function applyReasoning(out: any, ir: any, model: string): void {
 
   // budget 模式：enabled + budget_tokens，附带三条硬约束
   let budget = typeof r.budget_tokens === 'number' && r.budget_tokens > 0 ? r.budget_tokens : effortToBudget(r.effort)
-  if (budget == null) return
   if (budget < MIN_THINKING_BUDGET) budget = MIN_THINKING_BUDGET
   if (out.max_tokens <= budget) {
     const raised = budget + 1024
@@ -329,29 +333,13 @@ export function parseResponse(resp: any, model: string): any {
   const items: IRReasoningItem[] = []
   const toolCalls: any[] = []
   for (const block of resp.content || []) {
-    if (!block) continue
-    if (block.type === 'text') text += block.text || ''
-    else if (block.type === 'thinking') {
-      const it: IRReasoningItem = { text: block.thinking || '' }
-      if (block.signature) it.signature = block.signature
-      items.push(it)
-    } else if (block.type === 'redacted_thinking') {
-      if (block.data) items.push({ redacted: block.data })
-    } else if (block.type === 'tool_use') {
-      toolCalls.push({
-        id: block.id,
-        type: 'function',
-        function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
-      })
-    }
+    if (!collectClaudeBlock(block, items, toolCalls) && block.type === 'text') text += block.text || ''
   }
   const message: any = { role: 'assistant', content: text || null }
   if (items.length) {
     message.reasoning_items = items
     const rc = reasoningItemsText(items)
     if (rc) message.reasoning_content = rc
-    const sig = items.find((x) => x.signature)?.signature
-    if (sig) message.reasoning_signature = sig
   }
   if (toolCalls.length) message.tool_calls = toolCalls
   const finish = claudeStopToFinish(resp.stop_reason) || 'stop'
@@ -379,7 +367,6 @@ export function createStreamDecoder(model: string): StreamDecoder {
   const created = nowSec()
   let started = false
   let usage: any = null
-  let refusal = false
   const toolIndexMap = new Map<number, number>()
   let nextToolIndex = 0
 
@@ -422,7 +409,7 @@ export function createStreamDecoder(model: string): StreamDecoder {
         }
       } else if (t === 'content_block_delta') {
         const d = data.delta
-        if (d?.type === 'text_delta') out.push(mk(refusal ? { refusal: d.text } : { content: d.text }))
+        if (d?.type === 'text_delta') out.push(mk({ content: d.text }))
         else if (d?.type === 'thinking_delta') out.push(mk({ reasoning_content: d.thinking }))
         else if (d?.type === 'signature_delta') out.push(mk({ reasoning_signature: d.signature }))
         else if (d?.type === 'input_json_delta') {
@@ -430,13 +417,9 @@ export function createStreamDecoder(model: string): StreamDecoder {
           out.push(mk({ tool_calls: [{ index: tcIndex, function: { arguments: d.partial_json || '' } }] }))
         }
       } else if (t === 'message_delta') {
-        const finish = claudeStopToFinish(data.delta?.stop_reason) || 'stop'
-        if (finish === 'content_filter') refusal = true
-        // message_delta.usage 是累计值，含 output_tokens 与（新版 API）input_tokens / 缓存字段
-        const merged = usageFromClaude({ ...(usage ? usageToClaude(usage) : {}), ...(data.usage || {}) })
-        usage = merged
-        const chunk = mk({}, finish)
-        chunk.usage = merged
+        usage = mergeClaudeUsage(usage, data.usage)
+        const chunk = mk({}, claudeStopToFinish(data.delta?.stop_reason) || 'stop')
+        chunk.usage = usage
         out.push(chunk)
       }
       return out
@@ -466,15 +449,8 @@ function cacheKeySeed(userId: unknown): string {
 export function parseRequest(body: any): { ir: any; stream: boolean } {
   body = body || {}
   const messages: any[] = []
-  if (body.system) {
-    const sys =
-      typeof body.system === 'string'
-        ? body.system
-        : Array.isArray(body.system)
-          ? body.system.map((b: any) => (typeof b === 'string' ? b : b?.text || '')).filter(Boolean).join('\n\n')
-          : ''
-    if (sys) messages.push({ role: 'system', content: sys })
-  }
+  const sys = claudeText(body.system)
+  if (sys) messages.push({ role: 'system', content: sys })
 
   for (const m of body.messages || []) {
     if (!m) continue
@@ -483,12 +459,7 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
       // 对话中途的 system 消息（Claude Code 的 mid-conversation-system beta）：无论 string / 块数组，
       // 都按 system 角色原位保留。之前块数组形态会落到 user 分支，同一条消息在相邻两轮里
       // 角色来回变，破坏上游提示词缓存前缀。
-      const txt =
-        typeof content === 'string'
-          ? content
-          : Array.isArray(content)
-            ? content.map((b: any) => (typeof b === 'string' ? b : b?.type === 'text' ? b.text || '' : '')).filter(Boolean).join('\n\n')
-            : ''
+      const txt = claudeText(content)
       if (txt) messages.push({ role: 'system', content: txt })
       continue
     }
@@ -502,11 +473,10 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
     const toolCalls: any[] = []
     const items: IRReasoningItem[] = []
     for (const block of content) {
-      if (!block) continue
+      if (!block || collectClaudeBlock(block, items, toolCalls)) continue
       if (block.type === 'text') parts.push({ type: 'text', text: block.text || '' })
       else if (block.type === 'image') {
-        const src = block.source
-        const url = src?.type === 'base64' ? `data:${src.media_type};base64,${src.data}` : src?.url
+        const url = claudeImageUrl(block.source)
         if (url) parts.push({ type: 'image_url', image_url: { url } })
       } else if (block.type === 'document') {
         const src = block.source || {}
@@ -522,18 +492,6 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
         }
         if (block.title) file.filename = block.title
         if (Object.keys(file).length) parts.push({ type: 'file', file })
-      } else if (block.type === 'thinking') {
-        const it: IRReasoningItem = { text: block.thinking || '' }
-        if (block.signature) it.signature = block.signature
-        items.push(it)
-      } else if (block.type === 'redacted_thinking') {
-        if (block.data) items.push({ redacted: block.data })
-      } else if (block.type === 'tool_use') {
-        toolCalls.push({
-          id: block.id,
-          type: 'function',
-          function: { name: block.name, arguments: JSON.stringify(block.input ?? {}) },
-        })
       } else if (block.type === 'tool_result') {
         const toolMsg: any = { role: 'tool', tool_call_id: block.tool_use_id }
         if (Array.isArray(block.content)) {
@@ -543,8 +501,7 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
             if (typeof x === 'string') inner.push({ type: 'text', text: x })
             else if (x?.type === 'text') inner.push({ type: 'text', text: x.text || '' })
             else if (x?.type === 'image') {
-              const src = x.source
-              const url = src?.type === 'base64' ? `data:${src.media_type};base64,${src.data}` : src?.url
+              const url = claudeImageUrl(x.source)
               if (url) {
                 onlyText = false
                 inner.push({ type: 'image_url', image_url: { url } })
@@ -609,11 +566,7 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
         const h: any = { type: 'web_search' }
         if (Array.isArray(t.allowed_domains) && t.allowed_domains.length) h.filters = { allowed_domains: t.allowed_domains }
         if (Array.isArray(t.blocked_domains) && t.blocked_domains.length) warn('web_search 的 blocked_domains 在 Responses 侧没有对应物，已忽略')
-        if (t.user_location && typeof t.user_location === 'object') {
-          const l: any = { type: 'approximate' }
-          for (const k of ['city', 'region', 'country', 'timezone']) if (t.user_location[k]) l[k] = t.user_location[k]
-          h.user_location = l
-        }
+        if (t.user_location && typeof t.user_location === 'object') h.user_location = approximateLocation(t.user_location)
         hosted.push(h)
         continue
       }
@@ -644,8 +597,7 @@ export function buildResponse(ir: any): any {
       else content.push({ type: 'thinking', thinking: it.text || '', signature: it.signature || '' })
     }
   } else if (msg.reasoning_content) {
-    const tb: any = { type: 'thinking', thinking: msg.reasoning_content, signature: msg.reasoning_signature || '' }
-    content.push(tb)
+    content.push({ type: 'thinking', thinking: msg.reasoning_content, signature: msg.reasoning_signature || '' })
   }
   const txt = contentToText(msg.content)
   if (txt) content.push({ type: 'text', text: txt })
@@ -653,16 +605,7 @@ export function buildResponse(ir: any): any {
   if (Array.isArray(msg.tool_calls)) {
     for (const tc of msg.tool_calls) {
       if (!tc) continue
-      let input: any = {}
-      if (tc.type === 'custom') {
-        input = { input: tc.custom?.input ?? tc.function?.arguments ?? '' }
-      } else {
-        try {
-          input = JSON.parse(tc.function?.arguments || '{}')
-        } catch {
-          input = {}
-        }
-      }
+      const input = tc.type === 'custom' ? { input: tc.custom?.input ?? tc.function?.arguments ?? '' } : parseToolArgs(tc.function?.arguments)
       content.push({ type: 'tool_use', id: tc.id || genId('toolu'), name: tc.function?.name || tc.custom?.name, input })
     }
   }
@@ -681,26 +624,25 @@ export function buildResponse(ir: any): any {
 }
 
 // ═══════════ 入口方向：IR(OpenAI) chunks → Claude SSE 事件 ═══════════
-// 覆盖文本 / 扩展思考 / 工具调用的流式重组：每路 IR delta 映射到一个 Claude
-// content block，按出现顺序分配 index，切换块类型前先发 content_block_stop。
-export function createStreamEncoder(opts?: { estimatePromptTokens?: number }): StreamEncoder {
-  return serialToolBlocks(createSequentialEncoder(opts))
-}
+// 每路 IR delta 映射到一个 Claude content block，按出现顺序分配 index，切换块类型前先发 content_block_stop。
+// Claude 的块不能交错写入，而 OpenAI 的并行工具参数是交错到达的：首个工具出现之前的文本 / 思考实时发出，
+// 之后的所有内容按首次出现顺序排队，终态时校验工具完整性再串行输出。
+type QueuedTool = { id: string; name: string; kind: 'function' | 'custom'; args: string }
 
-function createSequentialEncoder(opts?: { estimatePromptTokens?: number }): StreamEncoder {
+export function createStreamEncoder(opts?: { estimatePromptTokens?: number }): StreamEncoder {
   let started = false
   let msgId = genId('msg')
   let model = ''
   let finishReason: string | null = null
-  let hasToolCall = false
   // 跨格式流式时上游 usage 在流末才到，而 message_start 必须首发：
-  // 用预估值占位，avoid Claude 客户端在 message_start 看到 input_tokens=0。
+  // 用预估值占位，避免 Claude 客户端在 message_start 看到 input_tokens=0。
   let usage: any = { prompt_tokens: opts?.estimatePromptTokens || 0, completion_tokens: 0 }
 
-  let openKind: 'text' | 'thinking' | 'tool' | null = null
+  let openKind: 'text' | 'thinking' | null = null
   let openIndex = -1
   let blockCounter = 0
-  const toolIndexMap = new Map<number, number>()
+  const tools = new Map<number, QueuedTool>()
+  const queue: ({ tool: QueuedTool } | { delta: any })[] = []
 
   const ev = (event: string, data: any): string => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
 
@@ -740,84 +682,87 @@ function createSequentialEncoder(opts?: { estimatePromptTokens?: number }): Stre
     return out
   }
 
+  /** 完整的一个块：start → (delta) → stop */
+  const wholeBlock = (content_block: any, delta?: any): string => {
+    const index = blockCounter++
+    return closeBlock()
+      + ev('content_block_start', { type: 'content_block_start', index, content_block })
+      + (delta ? ev('content_block_delta', { type: 'content_block_delta', index, delta }) : '')
+      + ev('content_block_stop', { type: 'content_block_stop', index })
+  }
+
+  const emitDelta = (delta: any): string => {
+    let out = ''
+    if (typeof delta.reasoning_redacted === 'string' && delta.reasoning_redacted) {
+      out += wholeBlock({ type: 'redacted_thinking', data: delta.reasoning_redacted })
+    }
+    if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length) {
+      out += openTextLike('thinking')
+      out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'thinking_delta', thinking: delta.reasoning_content } })
+    }
+    if (typeof delta.reasoning_signature === 'string' && delta.reasoning_signature.length) {
+      out += openTextLike('thinking')
+      out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'signature_delta', signature: delta.reasoning_signature } })
+      // 签名标志 thinking 块结束；下一段推理正文会开新块
+      out += closeBlock()
+    }
+    const textDelta = (typeof delta.content === 'string' ? delta.content : '') + (typeof delta.refusal === 'string' ? delta.refusal : '')
+    if (textDelta.length) {
+      out += openTextLike('text')
+      out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'text_delta', text: textDelta } })
+    }
+    return out
+  }
+
+  const emitTool = (tool: QueuedTool): string => wholeBlock(
+    { type: 'tool_use', id: tool.id, name: tool.name, input: {} },
+    { type: 'input_json_delta', partial_json: tool.kind === 'custom' ? JSON.stringify({ input: tool.args }) : tool.args || '{}' },
+  )
+
   return {
     encode(chunk) {
-      let out = ''
       model = chunk.model || model
       msgId = chunk.id || msgId
-      const delta = chunk.choices?.[0]?.delta || {}
-      const fr = chunk.choices?.[0]?.finish_reason
       if (chunk.usage) usage = { ...usage, ...chunk.usage }
-      out += ensureStart()
-
-      if (typeof delta.reasoning_redacted === 'string' && delta.reasoning_redacted) {
-        out += closeBlock()
-        const idx = blockCounter++
-        out += ev('content_block_start', { type: 'content_block_start', index: idx, content_block: { type: 'redacted_thinking', data: delta.reasoning_redacted } })
-        out += ev('content_block_stop', { type: 'content_block_stop', index: idx })
-      }
-      if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length) {
-        out += openTextLike('thinking')
-        out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'thinking_delta', thinking: delta.reasoning_content } })
-      }
-      if (typeof delta.reasoning_signature === 'string' && delta.reasoning_signature.length) {
-        out += openTextLike('thinking')
-        out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'signature_delta', signature: delta.reasoning_signature } })
-        // 签名标志 thinking 块结束；下一段推理正文会开新块
-        out += closeBlock()
-      }
-      const textDelta = (typeof delta.content === 'string' ? delta.content : '') + (typeof delta.refusal === 'string' ? delta.refusal : '')
-      if (textDelta.length) {
-        out += openTextLike('text')
-        out += ev('content_block_delta', { type: 'content_block_delta', index: openIndex, delta: { type: 'text_delta', text: textDelta } })
-      }
-      if (Array.isArray(delta.tool_calls)) {
-        for (const tc of delta.tool_calls) {
-          if (!tc) continue
-          hasToolCall = true
-          const oaiIdx = tc.index ?? 0
-          if (!toolIndexMap.has(oaiIdx)) {
-            out += closeBlock()
-            openIndex = blockCounter++
-            openKind = 'tool'
-            toolIndexMap.set(oaiIdx, openIndex)
-            out += ev('content_block_start', {
-              type: 'content_block_start',
-              index: openIndex,
-              content_block: { type: 'tool_use', id: tc.id || genId('toolu'), name: tc.function?.name || tc.custom?.name || '', input: {} },
-            })
-          }
-          const claudeIdx = toolIndexMap.get(oaiIdx)!
-          const args = tc.type === 'custom' ? tc.custom?.input : tc.function?.arguments
-          if (typeof args === 'string' && args.length) {
-            const partial = tc.type === 'custom' ? JSON.stringify({ input: args }) : args
-            out += ev('content_block_delta', { type: 'content_block_delta', index: claudeIdx, delta: { type: 'input_json_delta', partial_json: partial } })
-          }
+      const { tool_calls, ...delta } = chunk.choices?.[0]?.delta || {}
+      let out = ensureStart()
+      if (!queue.length) out += emitDelta(delta)
+      else if (Object.keys(delta).length) queue.push({ delta })
+      for (const call of Array.isArray(tool_calls) ? tool_calls : []) {
+        const index = call.index ?? 0
+        let tool = tools.get(index)
+        if (!tool) {
+          tool = { id: '', name: '', kind: call.type === 'custom' || call.custom ? 'custom' : 'function', args: '' }
+          tools.set(index, tool)
+          queue.push({ tool })
         }
+        tool.id ||= call.id || ''
+        tool.name ||= call.function?.name || call.custom?.name || ''
+        const args = tool.kind === 'custom' ? call.custom?.input : call.function?.arguments
+        if (typeof args === 'string') tool.args += args
       }
-
-      if (fr) finishReason = fr
+      if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason
       return out
     },
     finalize() {
+      // 先验证全部工具，错误时不对外补发任何成功块。
+      for (const tool of tools.values()) {
+        if (!tool.id || !tool.name) throw new Error('上游工具调用缺少 ID 或名称')
+        if (tool.kind === 'function') {
+          try { JSON.parse(tool.args || '{}') } catch { throw new Error('上游工具调用参数 JSON 不完整') }
+        }
+      }
       let out = ensureStart()
+      for (const segment of queue) out += 'tool' in segment ? emitTool(segment.tool) : emitDelta(segment.delta)
       out += closeBlock()
       let stop = finishToClaudeStop(finishReason)
-      if (stop === 'end_turn' && hasToolCall) stop = 'tool_use'
-      const cu = usageToClaude(usage)
-      out += ev('message_delta', {
-        type: 'message_delta',
-        delta: { stop_reason: stop, stop_sequence: null },
-        usage: cu,
-      })
+      if (stop === 'end_turn' && tools.size) stop = 'tool_use'
+      out += ev('message_delta', { type: 'message_delta', delta: { stop_reason: stop, stop_sequence: null }, usage: usageToClaude(usage) })
       out += ev('message_stop', { type: 'message_stop' })
       return out
     },
     fail(message) {
-      let out = ensureStart()
-      out += closeBlock()
-      out += ev('error', { type: 'error', error: { type: 'api_error', message } })
-      return out
+      return ensureStart() + closeBlock() + ev('error', { type: 'error', error: { type: 'api_error', message } })
     },
   }
 }

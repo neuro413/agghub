@@ -8,6 +8,8 @@ import { RequestStopped } from '../src/core/requestLifecycle'
 import { FakeResponse, reset, channel, relay, logs, jsonResponse, oaiBody, anthBody, gemBody, respBody, sse, oaiEvents, anthEvents } from './helpers/relay'
 
 const originalFetch = globalThis.fetch
+// Vertex Claude 只支持服务账号：合成凭证，OAuth 交换由各测试的 fetch 替身应答
+const vertexCreds = JSON.stringify({ project_id: 'synthetic', client_email: 'vertex@synthetic.invalid', private_key: generateKeyPairSync('rsa', { modulusLength: 2048, privateKeyEncoding: { type: 'pkcs8', format: 'pem' }, publicKeyEncoding: { type: 'spki', format: 'pem' } }).privateKey })
 beforeEach(reset)
 afterEach(() => { globalThis.fetch = originalFetch })
 after(() => db.close())
@@ -47,8 +49,8 @@ for (const streaming of [false, true]) {
     ['claude-alias', 'gemini-synthetic', gemBody, [gemBody]],
   ] as const) {
     test(`D03: Vertex 双向别名解码 ${alias}→${upstream}, stream=${streaming}`, async () => {
-      channel('vertex', 0, { [alias]: upstream })
-      globalThis.fetch = (async () => streaming ? sse([...events]) : jsonResponse(body)) as typeof fetch
+      channel('vertex', 0, { [alias]: upstream }, upstream.startsWith('claude') ? vertexCreds : undefined)
+      globalThis.fetch = (async (url: any) => String(url).includes('oauth2') ? jsonResponse({ access_token: 'synthetic-token' }) : streaming ? sse([...events]) : jsonResponse(body)) as typeof fetch
       const request = relay('openai', streaming, undefined, { model: alias })
       await request.run()
       assert.equal(request.res.statusCode, 200)

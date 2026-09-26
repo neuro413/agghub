@@ -36,7 +36,7 @@ export function finishToClaudeStop(fr: string | null | undefined): string {
   }
 }
 
-export interface ResponsesStatus {
+interface ResponsesStatus {
   status: 'completed' | 'incomplete'
   incomplete_details: { reason: string } | null
 }

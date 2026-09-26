@@ -69,7 +69,7 @@ npm start
 Vertex 的区域默认 `global`：
 
 - Gemini 使用 `generateContent` / `streamGenerateContent`；支持 API Key 或服务账号 JSON。
-- 映射后的上游模型名以小写 `claude` 开头时，使用 Anthropic `rawPredict` / `streamRawPredict`。Vertex Claude 建议使用包含 `project_id`、`private_key`、`client_email` 的服务账号 JSON，由网关换取 OAuth 令牌；模型可用性取决于项目、区域及上游权限。
+- 映射后的上游模型名以小写 `claude` 开头时，使用 Anthropic `rawPredict` / `streamRawPredict`。Vertex Claude 必须使用包含 `project_id`、`private_key`、`client_email` 的服务账号 JSON（API Key 仅支持 Gemini），由网关换取 OAuth 令牌；模型可用性取决于项目、区域及上游权限。
 - 服务账号 JSON 填入同一个凭证输入框；当前没有 ADC / Workload Identity 接入。
 - Vertex 跨格式转换使用模型别名时，应保持入口模型名与上游模型名的 `claude` 前缀分类一致，避免响应解析选择到另一种协议。
 
