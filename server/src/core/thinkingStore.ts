@@ -1,20 +1,29 @@
 import crypto from 'node:crypto'
 import { db } from '../db'
+import { compressText, decompressText } from '../stats/blobstore'
 import type { ReasoningStoreItem } from '../convert/responses'
 
 // 两类记录共用一张表：
 //   kind='text'       伪思考：签名 ↔ 思维链正文（thinking 列）
 //   kind='responses'  Responses 上游推理组：签名 ↔ payload JSON { items: [{ id, encrypted, followers }] }
 //                     供 Anthropic 客户端把 thinking 块签名回传后还原成 reasoning 项
+//                     payload 以 compressText 压缩存为 BLOB（旧库声明为 TEXT，不影响存取）
 db.exec(`
 CREATE TABLE IF NOT EXISTS thinking_store (
   signature  TEXT PRIMARY KEY,
   thinking   TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   kind       TEXT NOT NULL DEFAULT 'text',
-  payload    TEXT
+  payload    BLOB
 );
 `)
+
+// 旧库中未压缩的 payload 就地压缩
+{
+  const legacy = db.prepare("SELECT signature, payload FROM thinking_store WHERE typeof(payload) = 'text'").all() as { signature: string; payload: string }[]
+  const update = db.prepare('UPDATE thinking_store SET payload = ? WHERE signature = ?')
+  if (legacy.length) db.transaction(() => { for (const row of legacy) update.run(compressText(row.payload), row.signature) })()
+}
 
 const SIG_MAGIC = Buffer.from([0x12, 0xaf, 0x03, 0x0a, 0x63])
 const SIG_TOTAL_BYTES = 280
@@ -85,15 +94,15 @@ const upsertStmt = db.prepare(
  */
 export function saveReasoning(items: ReasoningStoreItem[], maxEntries: number): string {
   const sig = makeSignature('responses:' + items.map((it) => it.encrypted).join('\n'))
-  upsertStmt.run(sig, '', Date.now(), 'responses', JSON.stringify({ items }))
+  upsertStmt.run(sig, '', Date.now(), 'responses', compressText(JSON.stringify({ items })))
   evict('responses', maxEntries)
   return sig
 }
 
 export function lookupReasoning(signature: string): ReasoningStoreItem[] | null {
-  const row = lookupStmt.get(signature) as { kind: string; payload: string | null } | undefined
+  const row = lookupStmt.get(signature) as { kind: string; payload: Buffer | string | null } | undefined
   if (row?.kind !== 'responses' || !row.payload) return null
-  return JSON.parse(row.payload).items ?? null
+  return JSON.parse(decompressText(row.payload)).items ?? null
 }
 
 export function count(): number {

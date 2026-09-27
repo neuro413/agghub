@@ -1,6 +1,6 @@
 import { db, getSettings } from '../db'
 import type { Settings } from '../types'
-import { gcBlobs, getBlob, getJsonBody, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
+import { clearBlobs, gcBlobs, getBlob, getJsonBody, packBlobs, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
 
 export interface LogEntry {
   channel_id: number | null
@@ -53,7 +53,7 @@ const insertStmt = db.prepare(
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated)`,
 )
 
-const opt = (s: string | null | undefined, put: (t: string) => Buffer): Buffer | null => (s == null ? null : put(s))
+const opt = (s: string | null | undefined, put: (t: string) => number): number | null => (s == null ? null : put(s))
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
 
 /** 写一条日志；大正文写入块存储（去重 + 压缩），整个过程在一个事务内。 */
@@ -133,13 +133,14 @@ export function hydrateLogRow(row: any): any {
   }
 }
 
-/** 清理超过保留期的日志，随后回收无引用的块并归还空闲页 */
+/** 清理超过保留期的日志，随后回收无引用的块、把冷块打包并归还空闲页 */
 export function cleanupOldLogs(): void {
   const s = getSettings()
   const cutoff = Date.now() - s.log_retention_days * 86_400_000
   const r = db.prepare('DELETE FROM request_logs WHERE created_at < ?').run(cutoff)
   const freed = gcBlobs()
-  if (r.changes || freed) {
+  const packed = packBlobs()
+  if (r.changes || freed || packed) {
     db.pragma('incremental_vacuum')
     db.pragma('wal_checkpoint(TRUNCATE)')
   }
@@ -149,8 +150,7 @@ export function cleanupOldLogs(): void {
 export function clearAllLogs(): void {
   db.transaction(() => {
     db.exec('DELETE FROM request_logs')
-    db.exec('DELETE FROM blob_edges')
-    db.exec('DELETE FROM blobs')
+    clearBlobs()
   })()
   // 清空后整库重建，把文件立刻缩回去
   db.exec('VACUUM')

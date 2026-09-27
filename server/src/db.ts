@@ -6,14 +6,12 @@ import type { Channel, ChannelRow, ChannelStatus, Settings } from './types'
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
 export const db = new Database(DB_PATH)
+// 增量自动回收：删日志后能逐步归还空闲页而不用整库 VACUUM。只能在空库写入首页（切换 WAL）之前设置，已有库保持原状。
+if (db.pragma('page_count', { simple: true }) === 0) db.pragma('auto_vacuum = INCREMENTAL')
 db.pragma('journal_mode = WAL')
 db.pragma('busy_timeout = 5000')
-
-// 增量自动回收：删日志后能逐步归还空闲页而不用整库 VACUUM。修改该 pragma 需要 VACUUM 一次才生效。
-if (db.pragma('auto_vacuum', { simple: true }) !== 2) {
-  db.pragma('auto_vacuum = INCREMENTAL')
-  db.exec('VACUUM')
-}
+// checkpoint 后把 WAL 文件截回 4MB 以内，避免一次大事务后长期占着磁盘
+db.pragma('journal_size_limit = 4194304')
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS channels (
@@ -41,7 +39,7 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
--- 日志行只存元数据，正文以 *_ref 引用 blobs 中的内容寻址块（见 stats/blobstore）
+-- 日志行只存元数据，正文以 *_ref 存 blobs 的块 id（块表由 stats/blobstore 建立）
 CREATE TABLE IF NOT EXISTS request_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   created_at INTEGER NOT NULL,
@@ -64,12 +62,12 @@ CREATE TABLE IF NOT EXISTS request_logs (
   error_message TEXT,
   preprocessed INTEGER DEFAULT 0,
   pseudo_thinking INTEGER DEFAULT 0,
-  request_headers_ref BLOB,
-  request_body_ref BLOB,
-  response_body_ref BLOB,
-  preprocessed_body_ref BLOB,
-  thinking_inject_ref BLOB,
-  upstream_response_body_ref BLOB,
+  request_headers_ref INTEGER,
+  request_body_ref INTEGER,
+  response_body_ref INTEGER,
+  preprocessed_body_ref INTEGER,
+  thinking_inject_ref INTEGER,
+  upstream_response_body_ref INTEGER,
   request_id TEXT,
   attempt_latency_ms INTEGER,
   response_body_truncated INTEGER NOT NULL DEFAULT 0,
@@ -80,20 +78,6 @@ CREATE INDEX IF NOT EXISTS idx_logs_channel ON request_logs(channel_id);
 CREATE INDEX IF NOT EXISTS idx_logs_model ON request_logs(model);
 CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_request_final ON request_logs(request_id) WHERE request_id IS NOT NULL AND is_retry = 0;
-
-CREATE TABLE IF NOT EXISTS blobs (
-  hash BLOB PRIMARY KEY,
-  raw_size INTEGER NOT NULL,
-  codec INTEGER NOT NULL,
-  data BLOB NOT NULL,
-  created_at INTEGER NOT NULL
-) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS blob_edges (
-  parent BLOB NOT NULL,
-  child BLOB NOT NULL,
-  PRIMARY KEY (parent, child)
-) WITHOUT ROWID;
-CREATE INDEX IF NOT EXISTS idx_blob_edges_child ON blob_edges(child);
 `)
 
 function encodeSetting(value: unknown): string {
