@@ -249,5 +249,100 @@ export async function runRegressions(browser: Browser, dist: string, artifacts: 
     await page.waitForTimeout(80)
     await expect(page.locator('.ah-logt-model')).toContainText('current-filter')
   })
+  await scenario('日志详情按标签加载正文，重复切换复用已加载字段', async (page, _settings, custom) => {
+    const bodies: Record<string, string> = {
+      request_body: JSON.stringify({ messages: [{ role: 'user', content: '原始请求样本' }] }),
+      preprocessed_body: JSON.stringify({ messages: [{ role: 'user', content: '处理后请求样本' }] }),
+      response_body: '{"reply":"网关响应样本"}',
+      upstream_response_body: 'data: 上游原文样本\n\n',
+      request_headers: '{"user-agent":"字段按需测试"}',
+    }
+    const requested: string[] = []
+    custom.handle = async (route, url) => {
+      if (url.pathname === '/api/logs') { await reply(route, { total: 1, items: [sampleLog(1)] }); return true }
+      if (url.pathname !== '/api/logs/1') return false
+      const fields = url.searchParams.get('fields')
+      requested.push(fields ?? 'ALL')
+      const { request_body: _unused, ...meta } = sampleLog(1)
+      const selected = fields ? fields.split(',') : []
+      await reply(route, { ...meta, preprocessed: 1, available_fields: Object.keys(bodies), ...Object.fromEntries(selected.map(field => [field, bodies[field] ?? null])) })
+      return true
+    }
+    await navigate(page, '请求日志')
+    await page.getByRole('button', { name: '查看详情', exact: true }).click()
+    await expect(page.getByText('处理后请求样本', { exact: true })).toBeVisible()
+    expect(requested).toEqual(['', 'preprocessed_body'])
+    await page.getByRole('button', { name: '请求头', exact: true }).click()
+    await expect(page.locator('.ah-ua')).toHaveText('字段按需测试')
+    await page.getByRole('button', { name: '对话', exact: true }).click()
+    await expect(page.getByText('处理后请求样本', { exact: true })).toBeVisible()
+    expect(requested.filter(field => field === 'preprocessed_body')).toHaveLength(1)
+    await page.getByRole('button', { name: '响应', exact: true }).click()
+    await expect(page.locator('pre')).toContainText('网关响应样本')
+    expect(requested).not.toContain('upstream_response_body')
+    await page.getByRole('button', { name: '显示上游原始回复', exact: true }).click()
+    await expect(page.locator('pre')).toContainText('上游原文样本')
+    await page.getByRole('button', { name: '对话', exact: true }).click()
+    await page.getByRole('button', { name: '显示原始请求', exact: true }).click()
+    await expect(page.getByText('原始请求样本', { exact: true })).toBeVisible()
+    expect(requested).not.toContain('ALL')
+  })
+
+  await scenario('日志字段慢响应不会覆盖新标签，字段加载失败可以重试', async (page, _settings, custom) => {
+    let release: (() => void) | undefined
+    let waiting = false
+    let failedOnce = false
+    custom.handle = async (route, url) => {
+      if (url.pathname === '/api/logs') { await reply(route, { total: 1, items: [sampleLog(1)] }); return true }
+      if (url.pathname !== '/api/logs/1') return false
+      const field = url.searchParams.get('fields') || ''
+      const { request_body: _unused, ...meta } = sampleLog(1)
+      const data: any = { ...meta, available_fields: ['request_body', 'request_headers'] }
+      if (field === 'request_body') {
+        waiting = true
+        await new Promise<void>(resolve => { release = resolve })
+        data.request_body = '{"messages":[]}'
+      }
+      if (field === 'request_headers') {
+        if (!failedOnce) {
+          failedOnce = true
+          await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"合成字段加载失败"}' })
+          return true
+        }
+        data.request_headers = '{"user-agent":"重试后请求头"}'
+      }
+      await reply(route, data).catch(() => {})
+      return true
+    }
+    await navigate(page, '请求日志')
+    await page.getByRole('button', { name: '查看详情', exact: true }).click()
+    await expect.poll(() => waiting).toBe(true)
+    await page.getByRole('button', { name: '请求头', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('合成字段加载失败')
+    release!()
+    await page.getByRole('button', { name: '重试加载', exact: true }).click()
+    await expect(page.locator('.ah-ua')).toHaveText('重试后请求头')
+    await expect(page.locator('.ah-detail-tab.is-active')).toHaveText('请求头')
+  })
+  await scenario('某个响应字段损坏时仍可切换上游原文', async (page, _settings, custom) => {
+    custom.handle = async (route, url) => {
+      if (url.pathname === '/api/logs') { await reply(route, { total: 1, items: [sampleLog(1)] }); return true }
+      if (url.pathname !== '/api/logs/1') return false
+      const field = url.searchParams.get('fields') || ''
+      const { request_body: _unused, ...meta } = sampleLog(1)
+      if (field === 'response_body') {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"合成响应损坏"}' })
+      } else {
+        await reply(route, { ...meta, available_fields: ['response_body', 'upstream_response_body'], ...(field === 'upstream_response_body' ? { upstream_response_body: 'data: 独立可用的上游原文\n\n' } : {}) })
+      }
+      return true
+    }
+    await navigate(page, '请求日志')
+    await page.getByRole('button', { name: '查看详情', exact: true }).click()
+    await page.getByRole('button', { name: '响应', exact: true }).click()
+    await expect(page.getByRole('alert')).toContainText('合成响应损坏')
+    await page.getByRole('button', { name: '显示上游原始回复', exact: true }).click()
+    await expect(page.locator('pre')).toContainText('独立可用的上游原文')
+  })
   return results
 }

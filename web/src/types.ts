@@ -1,5 +1,6 @@
 // 渠道 / 设置 / 规则类型与后端共用（type-only 导入，构建时擦除）
-import type { Channel as ServerChannel } from '../../server/src/types'
+import type { Channel as ServerChannel, LogBodyField } from '../../server/src/types'
+export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
 } from '../../server/src/types'
@@ -60,7 +61,10 @@ export interface LogItem {
   pseudo_thinking: number
 }
 
+export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }
+
 export interface LogDetail extends LogItem {
+  available_fields?: LogBodyField[]
   request_headers: string | null
   request_body: string | null
   response_body: string | null

@@ -47,6 +47,8 @@ export interface Channel {
 }
 
 // ── 请求日志（统计 + 正文）───────────────────────────────
+export type LogBodyField = 'request_headers' | 'request_body' | 'response_body' | 'preprocessed_body' | 'thinking_inject' | 'upstream_response_body'
+
 export interface LogRow {
   id: number
   created_at: number

@@ -1,6 +1,8 @@
 import type {
   Channel,
   LogDetail,
+  LogBodyField,
+  PartialLogDetail,
   LogFacets,
   LogItem,
   ParamRule,
@@ -100,6 +102,8 @@ export const api = {
     return req<{ total: number; limit: number; offset: number; items: LogItem[] }>(`/logs?${query.toString()}`, { signal })
   },
   getLog: (id: number, signal?: AbortSignal) => req<LogDetail>(`/logs/${id}`, { signal }),
+  getLogFields: (id: number, fields: LogBodyField[], signal?: AbortSignal) =>
+    req<PartialLogDetail>(`/logs/${id}?${new URLSearchParams({ fields: fields.join(',') })}`, { signal }),
   getLogFacets: (signal?: AbortSignal) => req<LogFacets>('/logs/facets', { signal }),
   deleteLog: (id: number) => req<{ ok: boolean }>(`/logs/${id}`, { method: 'DELETE' }),
   clearLogs: () => req<{ ok: boolean }>('/logs', { method: 'DELETE' }),

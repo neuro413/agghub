@@ -44,7 +44,7 @@ export function relay(format: EntryFormat, stream: boolean, res = new FakeRespon
   return { raw, res, run: () => handleRelay({ entryFormat: format, stream, ir, rawBody: raw, rawHeaders: { 'x-synthetic': 'yes' }, res: res as any }) }
 }
 
-export function logs() { return (db.prepare('SELECT * FROM request_logs ORDER BY id').all() as any[]).map(hydrateLogRow) }
+export function logs() { return (db.prepare('SELECT * FROM request_logs ORDER BY id').all() as any[]).map(row => hydrateLogRow(row)) }
 export const jsonResponse = (data: any, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } })
 export const oaiBody = { id: 'synthetic', model: 'actual', choices: [{ index: 0, message: { role: 'assistant', content: '你好🙂' }, finish_reason: 'stop' }], usage: { prompt_tokens: 2, completion_tokens: 3, total_tokens: 5 } }
 export const anthBody = { id: 'synthetic', type: 'message', role: 'assistant', model: 'actual', content: [{ type: 'text', text: '你好🙂' }], stop_reason: 'end_turn', usage: { input_tokens: 2, output_tokens: 3 } }

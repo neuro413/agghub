@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { db } from '../db'
-import { clearAllLogs, hydrateLogRow } from '../stats/recorder'
+import { clearAllLogs, hydrateLogRow, LOG_BODY_FIELDS } from '../stats/recorder'
+import type { LogBodyField } from '../types'
 
 export const logsRouter = Router()
 
@@ -72,11 +73,18 @@ logsRouter.get('/facets', (_req, res) => {
   res.json({ models, channels })
 })
 
-// 单条详情（含 request/response 正文 + 请求头；正文从块存储还原）
+// 单条详情：fields 为空时只取元数据，省略时维持完整详情接口。
 logsRouter.get('/:id', (req, res) => {
+  let fields: LogBodyField[] | undefined
+  if (req.query.fields !== undefined) {
+    if (typeof req.query.fields !== 'string') return res.status(400).json({ error: 'fields 必须为逗号分隔的字段名' })
+    const names = req.query.fields === '' ? [] : req.query.fields.split(',')
+    if (names.some(field => !LOG_BODY_FIELDS.includes(field as LogBodyField))) return res.status(400).json({ error: '未知日志正文字段' })
+    fields = [...new Set(names)] as LogBodyField[]
+  }
   const row = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(Number(req.params.id))
   if (!row) return res.status(404).json({ error: 'not found' })
-  res.json(hydrateLogRow(row))
+  res.json(hydrateLogRow(row, fields))
 })
 
 // 删除单条

@@ -64,10 +64,11 @@ app.use((err: any, req: express.Request, res: express.Response, _next: express.N
 
 // ── 定时清理过期日志 ──
 const cleanup = () => {
-  try { cleanupOldLogs() } catch (error) { console.warn('[agghub] 清理过期日志失败:', error) }
+  void cleanupOldLogs().catch(error => console.warn('[agghub] 清理过期日志失败:', error))
 }
-cleanup()
-setInterval(cleanup, 6 * 3600 * 1000)
+// 启动监听后再分批维护；小包尾部仍沿用一天等待期，GC 至少每六小时执行。
+setImmediate(cleanup)
+setInterval(cleanup, 60_000).unref()
 
 app.listen(PORT, () => {
   console.log(`🍊 AggHub 网关已启动: http://localhost:${PORT}`)

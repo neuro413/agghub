@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Input } from '../components/Form'
@@ -10,7 +10,7 @@ import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
 import { prettyJson } from '../lib/format'
 import { Loading, StatusPill } from '../components/Primitives'
-import type { LogDetail } from '../types'
+import type { LogBodyField, LogItem, PartialLogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
 
 const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|password|proxy-authorization/i
@@ -54,17 +54,49 @@ export function LogDetailModal({
   onDeleted: () => void
 }) {
   const toast = useToast()
-  const [detail, setDetail] = useState<LogDetail | null>(null)
+  const [detail, setDetail] = useState<PartialLogDetail | null>(null)
   const [tab, setTab] = useState<Tab>('conv')
   const [showOriginal, setShowOriginal] = useState(false)
   const [showUpstream, setShowUpstream] = useState(false)
+  const [loadError, setLoadError] = useState('')
+  const [bodyError, setBodyError] = useState('')
+  const [reload, setReload] = useState(0)
+  const hasField = (field: LogBodyField) => detail?.available_fields?.includes(field) ?? detail?.[field] != null
+  const activeField: LogBodyField = !showOriginal && hasField('preprocessed_body') ? 'preprocessed_body' : 'request_body'
+  const wanted: LogBodyField = tab === 'headers' ? 'request_headers'
+    : tab === 'thinking' ? 'thinking_inject'
+    : tab === 'response' ? showUpstream ? 'upstream_response_body' : 'response_body'
+    : activeField
+  const bodyPending = !!detail && detail[wanted] === undefined && (detail.available_fields === undefined || hasField(wanted))
+
+  useEffect(() => {
+    setTab('conv')
+    setShowOriginal(false)
+    setShowUpstream(false)
+  }, [id])
 
   useEffect(() => {
     const controller = new AbortController()
     setDetail(null)
-    api.getLog(id, controller.signal).then(value => { if (!controller.signal.aborted) setDetail(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    setLoadError('')
+    setBodyError('')
+    api.getLogFields(id, [], controller.signal)
+      .then(value => { if (!controller.signal.aborted) setDetail(value) })
+      .catch(e => { if (!controller.signal.aborted) setLoadError(e.message) })
     return () => controller.abort()
-  }, [id, toast])
+  }, [id, reload])
+
+  useEffect(() => {
+    setBodyError('')
+    if (!bodyPending || detail?.id !== id) return
+    const controller = new AbortController()
+    api.getLogFields(id, [wanted], controller.signal)
+      .then(value => {
+        if (!controller.signal.aborted) setDetail(current => current?.id === id ? { ...current, ...value } : current)
+      })
+      .catch(e => { if (!controller.signal.aborted) setBodyError(e.message) })
+    return () => controller.abort()
+  }, [id, detail?.id, wanted, bodyPending])
 
   const copy = async (text: string, label = '已复制') => {
     if (await copyText(text)) toast('ok', label)
@@ -82,8 +114,8 @@ export function LogDetailModal({
     }
   }
 
-  const activeBody =
-    detail && detail.preprocessed_body && !showOriginal ? detail.preprocessed_body : (detail?.request_body ?? null)
+  const activeBody = detail?.[activeField] ?? null
+  const retry = <Button variant="soft" size="sm" onClick={() => setReload(value => value + 1)}>重试加载</Button>
 
   const TABS: { k: Tab; label: string }[] = [
     { k: 'conv', label: '对话' },
@@ -111,14 +143,14 @@ export function LogDetailModal({
       }
     >
       {!detail ? (
-        <Loading />
+        loadError ? <div role="alert">{loadError} {retry}</div> : <Loading />
       ) : (
         <>
           <LogMeta detail={detail} />
           {detail.request_id && <div className="ah-mini ah-muted">请求 ID：{detail.request_id} · 总耗时 {detail.latency_ms ?? 0}ms · 最后尝试 {detail.attempt_latency_ms ?? '—'}ms</div>}
           {!!(detail.response_body_truncated || detail.upstream_response_body_truncated) && <div role="note" className="ah-detail-empty">日志正文已截断，仅保存前缀；复制得到的也只有已保存内容。实际业务输出不受日志上限影响。</div>}
           {detail.preprocessed_body?.includes('"contents"') && !showOriginal && <div className="ah-mini ah-muted">当前为 Gemini 上游请求体，请在「原始」标签查看 contents；切换原始请求可查看客户端对话。</div>}
-          {detail.preprocessed_body && (
+          {hasField('preprocessed_body') && (
             <div className="ah-pp-viewbar">
               <span className={`ah-pp-viewflag${showOriginal ? '' : ' is-pp'}`}>
                 {showOriginal ? '当前：原始请求' : '当前：后处理改写后'}
@@ -135,25 +167,28 @@ export function LogDetailModal({
                 {t.label}
               </button>
             ))}
-            {detail.thinking_inject && (
+            {hasField('thinking_inject') && (
               <button className={`ah-detail-tab${tab === 'thinking' ? ' is-active' : ''}`} onClick={() => setTab('thinking')}>
                 思考块
               </button>
             )}
           </div>
-          {tab === 'conv' && <ConvView body={activeBody} />}
-          {tab === 'headers' && <HeadersView detail={detail} onCopy={copy} />}
-          {tab === 'params' && <JsonView text={JSON.stringify(paramsOf(activeBody) ?? {}, null, 2)} onCopy={copy} empty="（无额外参数）" />}
-          {tab === 'response' && <ResponseView detail={detail} showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy} />}
-          {tab === 'raw' && <JsonView text={prettyJson(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
-          {tab === 'thinking' && <ThinkingInjectView detail={detail} />}
+          {tab === 'response' ? <ResponseView detail={detail} showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy}
+            bodyStatus={bodyError ? <div role="alert">{bodyError} {retry}</div> : bodyPending ? <Loading /> : undefined} />
+            : bodyError ? <div role="alert">{bodyError} {retry}</div> : bodyPending ? <Loading /> : <>
+              {tab === 'conv' && <ConvView body={activeBody} />}
+              {tab === 'headers' && <HeadersView detail={detail} onCopy={copy} />}
+              {tab === 'params' && <JsonView text={JSON.stringify(paramsOf(activeBody) ?? {}, null, 2)} onCopy={copy} empty="（无额外参数）" />}
+              {tab === 'raw' && <JsonView text={prettyJson(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
+              {tab === 'thinking' && <ThinkingInjectView detail={detail} />}
+            </>}
         </>
       )}
     </Modal>
   )
 }
 
-function LogMeta({ detail }: { detail: LogDetail }) {
+function LogMeta({ detail }: { detail: LogItem }) {
   const d = new Date(detail.created_at)
   const time = d.toLocaleString('zh-CN', { hour12: false })
   return (
@@ -293,7 +328,7 @@ function ConvView({ body }: { body: string | null }) {
 }
 
 // ── 请求头（UA 突出 + 表格 + 敏感字段脱敏） ────────────────
-function HeadersView({ detail, onCopy }: { detail: LogDetail; onCopy: (t: string, l?: string) => void }) {
+function HeadersView({ detail, onCopy }: { detail: PartialLogDetail; onCopy: (t: string, l?: string) => void }) {
   const [showFull, setShowFull] = useState(false)
   const headers = useMemo<Record<string, string>>(() => {
     if (!detail.request_headers) return {}
@@ -364,16 +399,18 @@ function ResponseView({
   showUpstream,
   onToggle,
   onCopy,
+  bodyStatus,
 }: {
-  detail: LogDetail
+  detail: PartialLogDetail
   showUpstream: boolean
   onToggle: () => void
   onCopy: (t: string, l?: string) => void
+  bodyStatus?: ReactNode
 }) {
-  const hasUpstream = typeof detail.upstream_response_body === 'string' && detail.upstream_response_body.length > 0
+  const hasUpstream = detail.available_fields?.includes('upstream_response_body') ?? !!detail.upstream_response_body
   const upstream = hasUpstream && showUpstream
   // 上游原始回复：非流式 JSON 做格式化；流式 SSE 帧 / 非 JSON 错误体原样展示
-  const text = prettyJson(upstream ? detail.upstream_response_body : detail.response_body)
+  const text = prettyJson((upstream ? detail.upstream_response_body : detail.response_body) ?? null)
   const empty = upstream
     ? '（未存储上游原始回复）'
     : hasUpstream
@@ -390,7 +427,7 @@ function ResponseView({
           {upstream ? '显示网关响应' : '显示上游原始回复'}
         </Button>
       </div>
-      <JsonView text={text} onCopy={onCopy} empty={empty} error={upstream ? null : detail.error_message} />
+      {bodyStatus ?? <JsonView text={text} onCopy={onCopy} empty={empty} error={upstream ? null : detail.error_message} />}
     </>
   )
 }
@@ -428,7 +465,7 @@ function JsonView({
   )
 }
 
-function ThinkingInjectView({ detail }: { detail: LogDetail }) {
+function ThinkingInjectView({ detail }: { detail: PartialLogDetail }) {
   const entries = useMemo(() => {
     if (!detail.thinking_inject) return []
     try {

@@ -15,6 +15,7 @@
     "build": "npm -w web run build",
     "start": "npm -w server run start",
     "test": "node scripts/run-tests.mjs",
+    "logs:storage": "node --import tsx scripts/compact-logs.ts",
     "test:e2e": "node --import tsx scripts/run-e2e.ts",
     "typecheck": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json && tsc -p server/tsconfig.test.json && tsc -p tsconfig.tools.json"
   },

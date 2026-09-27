@@ -1,6 +1,7 @@
 import { db, getSettings } from '../db'
-import type { Settings } from '../types'
-import { clearBlobs, gcBlobs, getBlob, getJsonBody, packBlobs, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
+import { setImmediate as yieldTurn } from 'node:timers/promises'
+import type { LogBodyField, Settings } from '../types'
+import { clearBlobs, createBlobReader, gcBlobs, packBlobs, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
 
 export interface LogEntry {
   channel_id: number | null
@@ -61,6 +62,13 @@ export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings
   const s = snapshot ?? getSettings()
   const storeReq = s.store_request_body
   const storeRes = s.store_response_body
+  // 仅在本次事务内复用完全相同的正文，不把块 id 缓存到 GC 或事务边界之外。
+  const jsonRefs = new Map<string, number>()
+  const putJson = (text: string): number => {
+    let id = jsonRefs.get(text)
+    if (id === undefined) { id = putJsonBody(text); jsonRefs.set(text, id) }
+    return id
+  }
   insertStmt.run({
     created_at: Date.now(),
     channel_id: e.channel_id ?? null,
@@ -87,10 +95,10 @@ export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings
     preprocessed: e.preprocessed ? 1 : 0,
     pseudo_thinking: e.pseudo_thinking ? 1 : 0,
     request_headers_ref: storeReq ? opt(sanitizeHeaders(e.request_headers), putBlob) : null,
-    request_body_ref: storeReq ? opt(e.request_body, putJsonBody) : null,
-    preprocessed_body_ref: storeReq ? opt(e.preprocessed_body, putJsonBody) : null,
+    request_body_ref: storeReq ? opt(e.request_body, putJson) : null,
+    preprocessed_body_ref: storeReq ? opt(e.preprocessed_body, putJson) : null,
     thinking_inject_ref: storeReq ? opt(e.thinking_inject, putBlob) : null,
-    response_body_ref: storeRes ? opt(e.response_body, putJsonBody) : null,
+    response_body_ref: storeRes ? opt(e.response_body, putJson) : null,
     upstream_response_body_ref: storeRes ? opt(e.upstream_response_body, putBlob) : null,
   })
 })
@@ -111,39 +119,55 @@ export function safeRecordLog(build: () => LogEntry, snapshot?: StorageSettings,
   }
 }
 
-/** 日志行 → 对外 API 形状（把 *_ref 解开成原来的正文字段，接口对前端保持不变）*/
-export function hydrateLogRow(row: any): any {
-  const {
-    request_headers_ref,
-    request_body_ref,
-    response_body_ref,
-    preprocessed_body_ref,
-    thinking_inject_ref,
-    upstream_response_body_ref,
-    ...rest
-  } = row
-  return {
-    ...rest,
-    request_headers: getBlob(request_headers_ref),
-    request_body: getJsonBody(request_body_ref),
-    response_body: getJsonBody(response_body_ref),
-    preprocessed_body: getJsonBody(preprocessed_body_ref),
-    thinking_inject: getBlob(thinking_inject_ref),
-    upstream_response_body: getBlob(upstream_response_body_ref),
+export const LOG_BODY_FIELDS: LogBodyField[] = ['request_headers', 'request_body', 'response_body', 'preprocessed_body', 'thinking_inject', 'upstream_response_body']
+const JSON_BODY_FIELDS = new Set<LogBodyField>(['request_body', 'response_body', 'preprocessed_body'])
+
+/** 不传 fields 时保持完整详情兼容；按需读取时额外返回 available_fields，未加载字段不冒充 null。 */
+export function hydrateLogRow(row: any, fields: readonly LogBodyField[] = LOG_BODY_FIELDS): any {
+  const result = { ...row }
+  const available = LOG_BODY_FIELDS.filter(field => row[`${field}_ref`] != null)
+  for (const field of LOG_BODY_FIELDS) {
+    delete result[`${field}_ref`]
+    delete result[field]
+  }
+  const reader = createBlobReader(fields.map(field => row[`${field}_ref`]))
+  for (const field of fields) result[field] = JSON_BODY_FIELDS.has(field)
+    ? reader.getJsonBody(row[`${field}_ref`]) : reader.getBlob(row[`${field}_ref`])
+  result.available_fields = available
+  return result
+}
+
+let cleaning: Promise<void> | undefined
+let lastGc = -Infinity
+
+/** 小批删除、定期原子 GC；每轮只压两个包并限制维护时间，积压留给下一轮。 */
+async function runCleanup(): Promise<void> {
+  const s = getSettings()
+  const cutoff = Date.now() - s.log_retention_days * 86_400_000
+  const remove = db.prepare('DELETE FROM request_logs WHERE id IN (SELECT id FROM request_logs WHERE created_at < ? ORDER BY created_at LIMIT 500)')
+  let removed = 0
+  for (let batch = 0; batch < 10; batch++) {
+    const n = remove.run(cutoff).changes
+    removed += n
+    if (n < 500) break
+    await yieldTurn()
+  }
+  let freed = 0
+  if (removed || Date.now() - lastGc >= 6 * 3_600_000) {
+    freed = gcBlobs()
+    lastGc = Date.now()
+    await yieldTurn()
+  }
+  const packed = await packBlobs(Date.now(), { maxPacks: 2, maxMs: 250 })
+  if (removed || freed || packed) {
+    db.pragma('incremental_vacuum(128)')
+    db.pragma('wal_checkpoint(PASSIVE)')
   }
 }
 
-/** 清理超过保留期的日志，随后回收无引用的块、把冷块打包并归还空闲页 */
-export function cleanupOldLogs(): void {
-  const s = getSettings()
-  const cutoff = Date.now() - s.log_retention_days * 86_400_000
-  const r = db.prepare('DELETE FROM request_logs WHERE created_at < ?').run(cutoff)
-  const freed = gcBlobs()
-  const packed = packBlobs()
-  if (r.changes || freed || packed) {
-    db.pragma('incremental_vacuum')
-    db.pragma('wal_checkpoint(TRUNCATE)')
-  }
+export function cleanupOldLogs(): Promise<void> {
+  if (!cleaning) cleaning = runCleanup().finally(() => { cleaning = undefined })
+  return cleaning
 }
 
 /** 清空全部日志与块（管理接口用）*/
