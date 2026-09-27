@@ -43,31 +43,31 @@ export interface LogItem {
   status: 'success' | 'error'
   status_code: number | null
   latency_ms: number | null
-  request_id?: string | null
-  attempt_latency_ms?: number | null
-  response_body_truncated?: number
-  upstream_response_body_truncated?: number
+  request_id: string | null
+  attempt_latency_ms: number | null
+  response_body_truncated: number
+  upstream_response_body_truncated: number
   prompt_tokens: number
   completion_tokens: number
   total_tokens: number
-  /** 缓存读取 / 写入 token（prompt_tokens 的子集；旧日志可能缺省）*/
-  cache_read_tokens?: number
-  cache_write_tokens?: number
+  /** 缓存读取 / 写入 token（prompt_tokens 的子集）*/
+  cache_read_tokens: number
+  cache_write_tokens: number
   retry_count: number
   is_stream: number
   error_message: string | null
-  preprocessed?: number
-  pseudo_thinking?: number
+  preprocessed: number
+  pseudo_thinking: number
 }
 
 export interface LogDetail extends LogItem {
   request_headers: string | null
   request_body: string | null
   response_body: string | null
-  preprocessed_body?: string | null
-  thinking_inject?: string | null
-  /** 上游原始回复：非流式为原始 JSON，流式为原始 SSE 帧，HTTP 错误为原始错误体（旧日志缺省）*/
-  upstream_response_body?: string | null
+  preprocessed_body: string | null
+  thinking_inject: string | null
+  /** 上游原始回复：非流式为原始 JSON，流式为原始 SSE 帧，HTTP 错误为原始错误体 */
+  upstream_response_body: string | null
 }
 
 export interface TestResult {

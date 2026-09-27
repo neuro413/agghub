@@ -373,7 +373,7 @@ function ResponseView({
   const hasUpstream = typeof detail.upstream_response_body === 'string' && detail.upstream_response_body.length > 0
   const upstream = hasUpstream && showUpstream
   // 上游原始回复：非流式 JSON 做格式化；流式 SSE 帧 / 非 JSON 错误体原样展示
-  const text = prettyJson(upstream ? detail.upstream_response_body ?? null : detail.response_body)
+  const text = prettyJson(upstream ? detail.upstream_response_body : detail.response_body)
   const empty = upstream
     ? '（未存储上游原始回复）'
     : hasUpstream
