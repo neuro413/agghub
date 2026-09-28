@@ -22,6 +22,7 @@ import type { ChunkTransform, ThinkingInjectEntry } from './pseudoThinking'
 import * as thinkingStore from './thinkingStore'
 import { AttemptLifecycle, RequestLifecycle, RequestStopped, sleep } from './requestLifecycle'
 import { BoundedCapture } from './capture'
+import { ResponsesSseLog, logResponsesBody } from './upstreamLog'
 import { readBodyText } from './bodyReader'
 import { createStreamWriter } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
@@ -254,6 +255,7 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
   })
   state.lifecycle.signal.throwIfAborted()
   const json = JSON.parse(raw)
+  if (state.upstreamWire === 'responses') logResponsesBody(state.upstream, json)
   let output: any
   if (state.passthrough && !state.pseudo) {
     if (isEmptyPassthroughBody(ctx.entryFormat, json)) throw new UpstreamError(502, '上游返回空回复')
@@ -284,6 +286,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     ? createPseudoThinkingTransform(settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max)) : undefined
   const observer = new StreamState(state.upstreamWire)
   const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle)
+  const upstreamLog = state.upstreamWire === 'responses' ? new ResponsesSseLog(state.upstream) : state.upstream
   let pending: string[] = []
   let opened = false
   let errorForwarded = false
@@ -318,7 +321,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   try {
     for await (const event of parseSSEEvents(response.body, undefined, {
       signal: state.lifecycle.signal,
-      onBytes: bytes => { state.lifecycle.touch(); state.upstream.append(bytes) },
+      onBytes: bytes => { state.lifecycle.touch(); upstreamLog.append(bytes) },
     })) {
       const data = observer.observe(event)
       if (observer.failed) {
@@ -353,6 +356,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     }
     throw error
   } finally {
+    if (upstreamLog instanceof ResponsesSseLog) upstreamLog.flush()
     if (opened && !ctx.res.writableEnded) ctx.res.end()
   }
 }

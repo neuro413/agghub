@@ -26,15 +26,19 @@ test('块存储保持字节还原、中文、非紧凑 JSON、原型同名数据
   assert.equal(getJsonBody(first), text)
 })
 
-test('冷块打包后按偏移还原，manifest 保持散块，未满最小包的新块等满一天再打', async () => {
+test('冷块打包后按偏移还原，manifest 与正文分开成包，未满最小包的新块等满一天再打', async () => {
   const texts = Array.from({ length: 6 }, (_, i) => JSON.stringify({ model: 'p', messages: [{ content: `第${i}条`.repeat(100) }, { content: '共享🙂'.repeat(300) }] }))
   const ids = texts.map(putJsonBody)
   const before = packs()
   assert.equal(await packBlobs(later(2 * 3_600_000)), 0)
   assert.equal(packs(), before)
-  assert.ok(await packBlobs(later(2 * 86_400_000)) >= 1)
-  const loose = db.prepare('SELECT kind, COUNT(*) n FROM blobs WHERE pack_id IS NULL GROUP BY kind').all() as any[]
-  assert.deepEqual(loose.map(row => row.kind), [1])
+  assert.ok(await packBlobs(later(2 * 86_400_000)) >= 2)
+  assert.equal(db.prepare('SELECT COUNT(*) FROM blobs WHERE pack_id IS NULL').pluck().get(), 0)
+  // 打包后散块正文整行删除，不留空行
+  assert.equal(db.prepare('SELECT COUNT(*) FROM blob_data').pluck().get(), 0)
+  const kinds = db.prepare('SELECT pack_id, COUNT(DISTINCT kind) n, MIN(kind) kind FROM blobs GROUP BY pack_id').all() as any[]
+  assert.ok(kinds.every(row => row.n === 1))
+  assert.deepEqual([...new Set(kinds.map(row => row.kind))].sort(), [0, 1])
   texts.forEach((text, i) => assert.equal(getJsonBody(ids[i]), text))
   const next = putJsonBody(texts[0].replace('"model":"p"', '"model":"q"'))
   assert.deepEqual(children(next), children(ids[0]))
@@ -54,10 +58,11 @@ test('GC 通过 manifest 标记子块，稀疏包直接重写有效块且从不�
   assert.equal(db.prepare('SELECT COUNT(*) n FROM blobs WHERE pack_id IS NULL AND kind = 0').pluck().get(), 0)
   db.exec('DELETE FROM request_logs WHERE created_at = 2')
   assert.ok(gcBlobs() >= 2)
-  db.exec(`CREATE TRIGGER forbid_loose BEFORE UPDATE OF data ON blobs
-    WHEN OLD.pack_id IS NOT NULL AND NEW.data IS NOT NULL BEGIN SELECT RAISE(ABORT, '禁止回写散块'); END`)
+  db.exec(`CREATE TRIGGER forbid_loose BEFORE INSERT ON blob_data
+    WHEN (SELECT pack_id FROM blobs WHERE id = NEW.id) IS NOT NULL BEGIN SELECT RAISE(ABORT, '禁止回写散块'); END`)
   try { await packBlobs(later(2 * 86_400_000)) } finally { db.exec('DROP TRIGGER forbid_loose') }
-  const packRows = db.prepare('SELECT p.raw_size, SUM(b.raw_size) live FROM blob_packs p JOIN blobs b ON b.pack_id = p.id GROUP BY p.id').all() as any[]
+  // 两个 manifest 等长，删掉一个后 manifest 包恰好半满、未达重写条件；只检查正文包
+  const packRows = db.prepare('SELECT p.raw_size, SUM(b.raw_size) live FROM blob_packs p JOIN blobs b ON b.pack_id = p.id WHERE b.kind = 0 GROUP BY p.id').all() as any[]
   assert.ok(packRows.every(row => row.live === row.raw_size))
   const row = db.prepare('SELECT request_body_ref, upstream_response_body_ref FROM request_logs WHERE id = ?').get(kept) as any
   assert.equal(getJsonBody(row.request_body_ref), keep)
@@ -152,11 +157,44 @@ test('旧超大包可读取但不进入常驻缓存，错误偏移和解压长�
   const pack = db.prepare('INSERT INTO blob_packs(codec,raw_size,created_at,data) VALUES (1,?,1,?)')
     .run(raw.length, zlib.zstdCompressSync(raw)).lastInsertRowid
   const id = putBlob('AAA')
-  db.prepare('UPDATE blobs SET pack_id=?,pack_offset=0,data=NULL WHERE id=?').run(pack, id)
+  db.prepare('UPDATE blobs SET pack_id=?,pack_offset=0 WHERE id=?').run(pack, id)
+  db.prepare('DELETE FROM blob_data WHERE id=?').run(id)
   assert.equal(getBlob(id), 'AAA')
   assert.equal(getPackCacheUsage().bytes, 0)
   db.prepare('UPDATE blobs SET pack_offset=? WHERE id=?').run(raw.length, id)
   assert.throws(() => getBlob(id), /偏移或长度/)
   assert.throws(() => decompress(0, Buffer.from('xx'), 1), /长度不匹配/)
   assert.throws(() => decompress(2, zlib.gzipSync('x'.repeat(1000)), 10))
+})
+
+test('散块正文缺失时报错，GC 同步回收无引用的散块正文', () => {
+  reset()
+  const kept = putBlob('保留的散块'.repeat(100))
+  const dropped = putBlob('回收的散块'.repeat(100))
+  db.prepare("INSERT INTO request_logs(created_at,status,upstream_response_body_ref) VALUES (1,'success',?)").run(kept)
+  gcBlobs()
+  assert.deepEqual(db.prepare('SELECT id FROM blob_data').pluck().all(), [kept])
+  assert.equal(getBlob(dropped), null)
+  db.prepare('DELETE FROM blob_data WHERE id=?').run(kept)
+  assert.throws(() => getBlob(kept), /正文缺失/)
+})
+
+test('manifest 包在 GC 中按 id 顺序读取，失效过半后按 manifest 包大小重写', async () => {
+  reset()
+  const bodies = Array.from({ length: 40 }, (_, i) => JSON.stringify({ model: 'm', messages: Array.from({ length: i + 1 }, (_, j) => ({ content: `第${j}轮`.repeat(40) })) }))
+  const refs = bodies.map(putJsonBody)
+  const insert = db.prepare("INSERT INTO request_logs(created_at,status,request_body_ref) VALUES (?, 'success', ?)")
+  refs.forEach((ref, i) => insert.run(i + 1, ref))
+  await packBlobs(later(2 * 86_400_000))
+  const manifestPacks = () => db.prepare('SELECT DISTINCT pack_id FROM blobs WHERE kind = 1').pluck().all() as number[]
+  assert.equal(manifestPacks().length, 1)
+  db.exec('DELETE FROM request_logs WHERE created_at <= 30')
+  gcBlobs()
+  const before = manifestPacks()
+  await packBlobs(later(2 * 86_400_000))
+  assert.notDeepEqual(manifestPacks(), before)
+  const live = db.prepare('SELECT request_body_ref FROM request_logs ORDER BY created_at').pluck().all() as number[]
+  live.forEach((ref, i) => assert.equal(getJsonBody(ref), bodies[30 + i]))
+  const rows = db.prepare('SELECT p.raw_size, SUM(b.raw_size) live FROM blob_packs p JOIN blobs b ON b.pack_id = p.id GROUP BY p.id').all() as any[]
+  assert.ok(rows.every(row => row.live === row.raw_size))
 })

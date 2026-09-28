@@ -7,24 +7,29 @@ export { compressText, decompressText } from './blobCodec'
 const CHUNK_MIN = 128
 const STRING_CHUNK_MIN = 64
 const KIND_DATA = 0
-/** manifest 始终保持散块：GC 每轮都要逐个读取，打进包里会拖慢 GC */
 const KIND_MANIFEST = 1
 // 打包：相邻请求的正文高度相似（同一文件反复读取、上游回显的系统提示词与工具定义等），
-// 整包压缩能消掉逐块压缩看不到的跨块重复。只打包超过 PACK_MIN_AGE 的冷块，凑不满 PACK_MIN_RAW 的尾部放满一天再打。
+// 整包压缩能消掉逐块压缩看不到的跨块重复。只打包超过 PACK_MIN_AGE 的冷块，凑不满最小包的尾部放满一天再打。
 const PACK_MIN_AGE = 3_600_000
 const PACK_FLUSH_AGE = 86_400_000
 const PACK_TARGET_RAW = 16 << 20
-const PACK_MIN_RAW = 4 << 20
+// manifest 单独成包：相邻几轮的 manifest 只差末尾几项，拼在一起才压得掉；包更小，GC 和详情读取每次只解压几 MiB
+const PACK_LIMITS: Record<number, { target: number; min: number }> = {
+  [KIND_MANIFEST]: { target: 4 << 20, min: 1 << 20 },
+  [KIND_DATA]: { target: PACK_TARGET_RAW, min: 4 << 20 },
+}
 const PACK_CACHE_MAX = 64 << 20
 const PACK_CACHE_IDLE = 60_000
 const PACK_MAX_BLOCKS = 1024
 const READ_BATCH_SIZE = 200
 
-// 旧版块表以 32 字节哈希为主键、用 blob_edges 记录父子关系；先改名让出表名，建好新表后再搬数据（见文末）
+// 旧布局（哈希主键、正文内嵌在 blobs 行里）不再自动迁移，需停服后用独立脚本转换
 const blobColumns = db.prepare("SELECT name FROM pragma_table_info('blobs')").pluck().all() as string[]
-if (blobColumns.length && !blobColumns.includes('id')) db.exec('ALTER TABLE blobs RENAME TO blobs_v1')
+if (blobColumns.length && (!blobColumns.includes('id') || blobColumns.includes('data'))) {
+  throw new Error('日志块表仍是旧版布局，当前版本不再自动迁移；请停服后先转换数据库')
+}
 
-const blobSchema = `
+db.exec(`
 CREATE TABLE IF NOT EXISTS blobs (
   id          INTEGER PRIMARY KEY,
   hash        BLOB    NOT NULL,
@@ -34,26 +39,15 @@ CREATE TABLE IF NOT EXISTS blobs (
   created_at  INTEGER NOT NULL,
   pack_id     INTEGER,
   pack_offset INTEGER,
-  data        BLOB,
   UNIQUE(kind, hash)
-)`
-// 原整数 id 格式只有 UNIQUE(hash)；保留 id、偏移和压缩数据，事务内更换唯一键。
-if (blobColumns.includes('id')) {
-  const uniqueIndexes = db.prepare("SELECT name FROM pragma_index_list('blobs') WHERE \"unique\" = 1").pluck().all() as string[]
-  const typed = uniqueIndexes.some(name => {
-    const keys = db.prepare('SELECT name FROM pragma_index_info(?) ORDER BY seqno').pluck().all(name)
-    return keys.join(',') === 'kind,hash'
-  })
-  if (!typed) db.transaction(() => {
-    db.exec('ALTER TABLE blobs RENAME TO blobs_untyped')
-    db.exec(blobSchema)
-    db.exec('INSERT INTO blobs SELECT * FROM blobs_untyped')
-    db.exec('DROP TABLE blobs_untyped')
-  })()
-}
-db.exec(`${blobSchema};
+);
+-- 散块正文单独成表：打包时整行删除，页面能整页释放；留在元数据行里置空只会留下回收不掉的页内空洞
+CREATE TABLE IF NOT EXISTS blob_data (
+  id   INTEGER PRIMARY KEY,
+  data BLOB    NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_blobs_pack ON blobs(pack_id) WHERE pack_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_blobs_loose ON blobs(created_at) WHERE pack_id IS NULL AND kind = 0;
+CREATE INDEX IF NOT EXISTS idx_blobs_loose ON blobs(kind, created_at) WHERE pack_id IS NULL;
 CREATE TABLE IF NOT EXISTS blob_packs (
   id         INTEGER PRIMARY KEY,
   codec      INTEGER NOT NULL,
@@ -68,18 +62,27 @@ const STRING_KEYS = ['system', 'instructions']
 /** s：去掉大块后的骨架；c：[路径, 块 id]。非 JSON 正文存为 { raw: 块 id } */
 type Manifest = { v: 2; s: any; c: [(string | number)[], number][] } | { v: 2; raw: number }
 
+const BLOB_SELECT = 'SELECT b.id, b.hash, b.kind, b.raw_size, b.codec, b.pack_id, b.pack_offset, d.data FROM blobs b LEFT JOIN blob_data d ON d.id = b.id'
 const selectId = db.prepare('SELECT id FROM blobs WHERE kind = ? AND hash = ?').pluck()
-const insertBlob = db.prepare('INSERT INTO blobs (hash, kind, raw_size, codec, created_at, data) VALUES (?, ?, ?, ?, ?, ?)')
-const selectBlob = db.prepare('SELECT id, hash, kind, raw_size, codec, pack_id, pack_offset, data FROM blobs WHERE id = ?')
+const insertBlob = db.prepare('INSERT INTO blobs (hash, kind, raw_size, codec, created_at) VALUES (?, ?, ?, ?, ?)')
+const insertData = db.prepare('INSERT INTO blob_data (id, data) VALUES (?, ?)')
+const selectBlob = db.prepare(`${BLOB_SELECT} WHERE b.id = ?`)
 const selectPack = db.prepare('SELECT raw_size, codec, data FROM blob_packs WHERE id = ?')
 const insertPack = db.prepare('INSERT INTO blob_packs (codec, raw_size, created_at, data) VALUES (?, ?, ?, ?)')
 const deletePack = db.prepare('DELETE FROM blob_packs WHERE id = ?')
 const selectLoose = db.prepare(
-  `SELECT id, raw_size, created_at FROM blobs WHERE pack_id IS NULL AND kind = ${KIND_DATA}
+  `SELECT id, raw_size, created_at FROM blobs WHERE pack_id IS NULL AND kind = ?
    AND created_at < ? AND raw_size <= ? ORDER BY created_at, id LIMIT ?`,
 )
-const selectPacked = db.prepare('SELECT id, hash, kind, raw_size, codec, pack_id, pack_offset, data FROM blobs WHERE pack_id = ? ORDER BY pack_offset')
-const setPacked = db.prepare('UPDATE blobs SET pack_id = ?, pack_offset = ?, data = NULL WHERE id = ?')
+const selectPacked = db.prepare('SELECT id, hash, kind, raw_size, codec, pack_id, pack_offset FROM blobs WHERE pack_id = ? ORDER BY pack_offset')
+const setPacked = db.prepare('UPDATE blobs SET pack_id = ?, pack_offset = ? WHERE id = ?')
+const deleteData = db.prepare('DELETE FROM blob_data WHERE id = ?')
+
+const insertLoose = db.transaction((hash: Buffer, kind: number, rawSize: number, codec: number, data: Buffer): number => {
+  const id = Number(insertBlob.run(hash, kind, rawSize, codec, Date.now()).lastInsertRowid)
+  insertData.run(id, data)
+  return id
+})
 
 export function putBlob(text: string, kind = KIND_DATA): number {
   const buf = Buffer.from(text, 'utf8')
@@ -87,10 +90,10 @@ export function putBlob(text: string, kind = KIND_DATA): number {
   const existing = selectId.get(kind, hash) as number | undefined
   if (existing !== undefined) return existing
   const { codec, data } = compress(buf)
-  return Number(insertBlob.run(hash, kind, buf.length, codec, Date.now(), data).lastInsertRowid)
+  return insertLoose(hash, kind, buf.length, codec, data)
 }
 
-type BlobRow = { id: number; hash: Buffer; kind: number; raw_size: number; codec: number; pack_id: number | null; pack_offset: number | null; data: Buffer | null }
+type BlobRow = { id: number; hash: Buffer; kind: number; raw_size: number; codec: number; pack_id: number | null; pack_offset: number | null; data?: Buffer | null }
 type PackRow = { raw_size: number; codec: number; data: Buffer }
 
 function packSlice(buf: Buffer, offset: number | null, size: number): Buffer {
@@ -101,8 +104,9 @@ function packSlice(buf: Buffer, offset: number | null, size: number): Buffer {
 }
 
 function readBlob(row: BlobRow): string {
-  if (row.pack_id == null) return decompress(row.codec, row.data!, row.raw_size).toString('utf8')
-  return packSlice(loadPack(row.pack_id), row.pack_offset, row.raw_size).toString('utf8')
+  if (row.pack_id != null) return packSlice(loadPack(row.pack_id), row.pack_offset, row.raw_size).toString('utf8')
+  if (!row.data) throw new Error(`日志块正文缺失: ${row.id}`)
+  return decompress(row.codec, row.data, row.raw_size).toString('utf8')
 }
 
 export function getBlob(id: number | null | undefined): string | null {
@@ -200,7 +204,7 @@ export function createBlobReader(ids: (number | null | undefined)[] = []) {
     for (let i = 0; i < missing.length; i += READ_BATCH_SIZE) {
       const batch = missing.slice(i, i + READ_BATCH_SIZE)
       for (const id of batch) rows.set(id, undefined)
-      const found = db.prepare(`SELECT id, hash, kind, raw_size, codec, pack_id, pack_offset, data FROM blobs WHERE id IN (${batch.map(() => '?').join(',')})`).all(...batch) as BlobRow[]
+      const found = db.prepare(`${BLOB_SELECT} WHERE b.id IN (${batch.map(() => '?').join(',')})`).all(...batch) as BlobRow[]
       for (const row of found) rows.set(row.id, row)
     }
   }
@@ -256,6 +260,7 @@ export function gcBlobs(): number {
       // 通过引用字段识别 manifest，也保护旧版本已发生 kind 混用的记录。
       if (JSON_REF_COLUMNS.has(column)) db.exec(`INSERT OR IGNORE INTO live_manifests SELECT ${column} FROM request_logs WHERE ${column} IS NOT NULL`)
     }
+    // manifest 按 id 顺序读取，和打包顺序一致，每个 manifest 包只需解压一次
     const manifests = db.prepare('SELECT id FROM live_manifests WHERE id > ? ORDER BY id LIMIT ?').pluck()
     const mark = db.prepare('INSERT OR IGNORE INTO live_blobs (id) VALUES (?)')
     for (let last = 0; ;) {
@@ -267,6 +272,7 @@ export function gcBlobs(): number {
       last = ids[ids.length - 1]
     }
     const result = db.prepare('DELETE FROM blobs WHERE id NOT IN (SELECT id FROM live_blobs)').run()
+    db.exec('DELETE FROM blob_data WHERE id NOT IN (SELECT id FROM live_blobs)')
     db.exec('DELETE FROM live_blobs; DELETE FROM live_manifests')
     const empty = db.prepare('DELETE FROM blob_packs WHERE NOT EXISTS (SELECT 1 FROM blobs WHERE pack_id = blob_packs.id)').run()
     if (empty.changes) clearPackCache()
@@ -286,15 +292,19 @@ const commitPack = db.transaction((group: BlobRow[], rawSize: number, data: Buff
   }
   const id = Number(insertPack.run(CODEC_ZSTD, rawSize, Date.now(), data).lastInsertRowid)
   let offset = 0
-  for (const blob of group) { setPacked.run(id, offset, blob.id); offset += blob.raw_size }
+  for (const blob of group) {
+    setPacked.run(id, offset, blob.id)
+    deleteData.run(blob.id)
+    offset += blob.raw_size
+  }
   return true
 })
 
-function takeGroup<T extends { raw_size: number }>(rows: T[]): T[] {
+function takeGroup<T extends { raw_size: number }>(rows: T[], target: number): T[] {
   const group: T[] = []
   let size = 0
   for (const row of rows) {
-    if (group.length >= PACK_MAX_BLOCKS || size + row.raw_size > PACK_TARGET_RAW) break
+    if (group.length >= PACK_MAX_BLOCKS || size + row.raw_size > target) break
     group.push(row)
     size += row.raw_size
   }
@@ -303,20 +313,21 @@ function takeGroup<T extends { raw_size: number }>(rows: T[]): T[] {
 
 /** 失效数据过半的包直接重写有效片段，不经过单块压缩、写库、再解压的中间阶段。 */
 async function compactPacks(maxPacks: number, deadline: number, epoch: number): Promise<number> {
-  const sparse = db.prepare(`SELECT p.id FROM blob_packs p JOIN blobs b ON b.pack_id = p.id
+  const sparse = db.prepare(`SELECT p.id, MIN(b.kind) AS kind FROM blob_packs p JOIN blobs b ON b.pack_id = p.id
     GROUP BY p.id HAVING SUM(b.raw_size) * 2 < p.raw_size AND MIN(b.raw_size) <= ?
-    ORDER BY p.id LIMIT ?`).pluck().all(PACK_TARGET_RAW, maxPacks) as number[]
+    ORDER BY p.id LIMIT ?`).all(PACK_TARGET_RAW, maxPacks) as { id: number; kind: number }[]
   let written = 0
-  for (const id of sparse) {
+  for (const { id, kind } of sparse) {
     if (epoch !== storageEpoch || Date.now() >= deadline) break
     const pack = selectPack.get(id) as PackRow | undefined
     if (!pack) continue
     const raw = await decompressAsync(pack.codec, pack.data, pack.raw_size)
     if (epoch !== storageEpoch) break
-    const candidates = (selectPacked.all(id) as BlobRow[]).filter(row => row.raw_size <= PACK_TARGET_RAW)
+    const target = (PACK_LIMITS[kind] ?? PACK_LIMITS[KIND_DATA]).target
+    const candidates = (selectPacked.all(id) as BlobRow[]).filter(row => row.raw_size <= target)
     for (let start = 0; start < candidates.length;) {
       if (written >= maxPacks || epoch !== storageEpoch || Date.now() >= deadline) return written
-      const group = takeGroup(candidates.slice(start))
+      const group = takeGroup(candidates.slice(start), target)
       const data = Buffer.concat(group.map(row => packSlice(raw, row.pack_offset, row.raw_size)))
       const compressed = await compressPack(data)
       if (!commitPack(group, data.length, compressed, epoch)) return written
@@ -340,30 +351,33 @@ async function runPacking(now: number, options: PackOptions): Promise<number> {
   const deadline = Date.now() + (options.maxMs ?? Infinity)
   const epoch = storageEpoch
   let written = 0
-  while (written < maxPacks && epoch === storageEpoch && Date.now() < deadline) {
-    // 超大单块继续单独压缩存放，避免撑破包大小和缓存预算；候选元数据也分批读取。
-    const candidates = selectLoose.all(now - PACK_MIN_AGE, PACK_TARGET_RAW, PACK_MAX_BLOCKS + 1) as { id: number; raw_size: number; created_at: number }[]
-    if (!candidates.length) break
-    const selected = takeGroup(candidates)
-    const size = selected.reduce((sum, row) => sum + row.raw_size, 0)
-    if (size < PACK_MIN_RAW && selected.length === candidates.length && selected[0].created_at > now - PACK_FLUSH_AGE) break
-    const group = selected.map(({ id }) => selectBlob.get(id) as BlobRow)
-    const parts: Buffer[] = []
-    for (let i = 0; i < group.length; i++) {
-      const row = group[i]
-      parts.push(await decompressAsync(row.codec, row.data!, row.raw_size))
-      if (i % 32 === 31) await yieldTurn()
-      if (epoch !== storageEpoch) return written
+  const more = () => written < maxPacks && epoch === storageEpoch && Date.now() < deadline
+  // 普通正文与 manifest 分开成包，互不稀释；超大单块继续单独压缩存放，候选元数据也分批读取。
+  for (const kind of [KIND_MANIFEST, KIND_DATA]) {
+    const { target, min } = PACK_LIMITS[kind]
+    while (more()) {
+      const candidates = selectLoose.all(kind, now - PACK_MIN_AGE, target, PACK_MAX_BLOCKS + 1) as { id: number; raw_size: number; created_at: number }[]
+      if (!candidates.length) break
+      const selected = takeGroup(candidates, target)
+      const size = selected.reduce((sum, row) => sum + row.raw_size, 0)
+      if (size < min && selected.length === candidates.length && selected[0].created_at > now - PACK_FLUSH_AGE) break
+      const group = selected.map(({ id }) => selectBlob.get(id) as BlobRow)
+      const parts: Buffer[] = []
+      for (let i = 0; i < group.length; i++) {
+        const row = group[i]
+        if (!row.data) throw new Error(`日志块正文缺失: ${row.id}`)
+        parts.push(await decompressAsync(row.codec, row.data, row.raw_size))
+        if (i % 32 === 31) await yieldTurn()
+        if (epoch !== storageEpoch) return written
+      }
+      const raw = Buffer.concat(parts, size)
+      const data = await compressPack(raw)
+      if (!commitPack(group, raw.length, data, epoch)) return written
+      written++
+      await yieldTurn()
     }
-    const raw = Buffer.concat(parts, size)
-    const data = await compressPack(raw)
-    if (!commitPack(group, raw.length, data, epoch)) return written
-    written++
-    await yieldTurn()
   }
-  if (written < maxPacks && epoch === storageEpoch && Date.now() < deadline) {
-    written += await compactPacks(maxPacks - written, deadline, epoch)
-  }
+  if (more()) written += await compactPacks(maxPacks - written, deadline, epoch)
   return written
 }
 
@@ -377,6 +391,7 @@ export function packBlobs(now = Date.now(), options: PackOptions = {}): Promise<
 export function clearBlobs(): void {
   storageEpoch++
   db.exec('DELETE FROM blobs')
+  db.exec('DELETE FROM blob_data')
   db.exec('DELETE FROM blob_packs')
   clearPackCache()
 }
@@ -398,59 +413,3 @@ export function sanitizeHeaders(text: string | null | undefined): string | null 
   }
   return JSON.stringify(out)
 }
-
-/** 旧版块存储迁移：正文块原样搬运并分配整数 id，manifest 改写为 id 引用，日志引用列同步换成 id，最后删掉 blob_edges 并整库重建 */
-function migrateLegacyBlobs(): void {
-  console.log('[agghub] 正在迁移日志块存储格式，日志较多时需要一些时间……')
-  const logs = db.prepare(`SELECT id, ${REF_COLUMNS.join(', ')} FROM request_logs`).all() as Record<string, any>[]
-  const manifests = new Set<string>()
-  for (const row of logs) for (const column of JSON_REF_COLUMNS) if (row[column]) manifests.add(row[column].toString('hex'))
-  const selectPage = db.prepare('SELECT hash, raw_size, codec, data, created_at FROM blobs_v1 WHERE hash > ? ORDER BY hash LIMIT 256')
-  const selectLegacy = db.prepare('SELECT codec, data FROM blobs_v1 WHERE hash = ?')
-  const update = db.prepare(`UPDATE request_logs SET ${REF_COLUMNS.map(column => `${column} = ?`).join(', ')} WHERE id = ?`)
-  const ids = new Map<string, number>()
-  // 旧 manifest 缺子块时无法还原，对应引用置空
-  const rewrite = (hex: string): number | null => {
-    const row = selectLegacy.get(Buffer.from(hex, 'hex')) as { codec: number; data: Buffer } | undefined
-    if (!row) return null
-    const old = JSON.parse(decompress(row.codec, row.data).toString('utf8'))
-    if ('raw' in old) {
-      const raw = ids.get(old.raw)
-      return raw === undefined ? null : putManifest({ v: 2, raw })
-    }
-    const chunks: [(string | number)[], number][] = []
-    for (const [path, child] of old.c as [(string | number)[], string][]) {
-      const id = ids.get(child)
-      if (id === undefined) return null
-      chunks.push([path, id])
-    }
-    return putManifest({ v: 2, s: old.s, c: chunks })
-  }
-  db.transaction(() => {
-    for (let last: Buffer = Buffer.alloc(0); ;) {
-      const rows = selectPage.all(last) as { hash: Buffer; raw_size: number; codec: number; data: Buffer; created_at: number }[]
-      if (!rows.length) break
-      for (const row of rows) {
-        const hex = row.hash.toString('hex')
-        if (!manifests.has(hex)) ids.set(hex, Number(insertBlob.run(row.hash, KIND_DATA, row.raw_size, row.codec, row.created_at, row.data).lastInsertRowid))
-      }
-      last = rows[rows.length - 1].hash
-    }
-    const rewritten = new Map<string, number | null>()
-    for (const hex of manifests) rewritten.set(hex, rewrite(hex))
-    for (const row of logs) {
-      const refs = REF_COLUMNS.map(column => {
-        const hex = row[column]?.toString('hex')
-        if (!hex) return null
-        return (JSON_REF_COLUMNS.has(column) ? rewritten.get(hex) : ids.get(hex)) ?? null
-      })
-      update.run(...refs, row.id)
-    }
-    db.exec('DROP TABLE blobs_v1')
-    db.exec('DROP TABLE IF EXISTS blob_edges')
-  })()
-  db.exec('VACUUM')
-  console.log('[agghub] 日志块存储迁移完成')
-}
-
-if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'blobs_v1'").get()) migrateLegacyBlobs()

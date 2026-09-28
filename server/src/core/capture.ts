@@ -14,6 +14,14 @@ export class BoundedCapture {
     this.chunks.push(part)
     this.size += part.length
   }
+  /** 用改写后的完整副本替换已抓取内容，按同样的上限重新截断。 */
+  replace(value: string): void {
+    if (!this.enabled) return
+    this.chunks = []
+    this.size = 0
+    this.truncated = false
+    this.append(value)
+  }
   text(): string | undefined {
     if (!this.enabled) return undefined
     const decoder = new TextDecoder()
