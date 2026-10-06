@@ -17,6 +17,7 @@ import * as respConv from '../convert/responses'
 import { cacheParts, emptyUsage } from '../convert/usage'
 import type { Channel, EntryFormat, IRUsage, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
+import { applySingleRole } from './singleRole'
 import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinkingTransform, splitIRResponse } from './pseudoThinking'
 import type { ChunkTransform, ThinkingInjectEntry } from './pseudoThinking'
 import * as thinkingStore from './thinkingStore'
@@ -107,6 +108,14 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   const request = state.passthrough
     ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, ctx.stream, ctx.rawHeaders)
     : adaptor.buildRequest(channel, body, upstreamModel, ctx.stream)
+  if (channel.single_role) {
+    const upstreamBody = JSON.parse(request.body)
+    const options = { mergeSystem: channel.single_role_merge_system, excludeLastUser: channel.single_role_exclude_last_user }
+    if (applySingleRole(upstreamBody, upstreamWire, channel.single_role, options)) {
+      request.body = JSON.stringify(upstreamBody)
+      changed = true
+    }
+  }
   const rules = matchParamRules(settings, meta)
   if (rules.length) {
     const result = applyParamRules(request.body, upstreamWire, rules)

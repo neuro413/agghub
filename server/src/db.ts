@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS channels (
   ua_override   INTEGER NOT NULL DEFAULT 0,
   ua_value      TEXT,
   strip_headers INTEGER NOT NULL DEFAULT 0,
+  single_role   TEXT,
+  single_role_merge_system INTEGER NOT NULL DEFAULT 0,
+  single_role_exclude_last_user INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
 );
@@ -79,6 +82,18 @@ CREATE INDEX IF NOT EXISTS idx_logs_model ON request_logs(model);
 CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_request_final ON request_logs(request_id) WHERE request_id IS NOT NULL AND is_retry = 0;
 `)
+
+// 渠道表后加的列：已有库按缺失补齐
+{
+  const columns = db.prepare("SELECT name FROM pragma_table_info('channels')").pluck().all() as string[]
+  for (const [name, definition] of [
+    ['single_role', 'TEXT'],
+    ['single_role_merge_system', 'INTEGER NOT NULL DEFAULT 0'],
+    ['single_role_exclude_last_user', 'INTEGER NOT NULL DEFAULT 0'],
+  ]) {
+    if (!columns.includes(name)) db.exec(`ALTER TABLE channels ADD COLUMN ${name} ${definition}`)
+  }
+}
 
 function encodeSetting(value: unknown): string {
   return typeof value === 'boolean' ? (value ? '1' : '0') : typeof value === 'object' ? JSON.stringify(value) : String(value)
@@ -155,6 +170,9 @@ export function rowToChannel(r: ChannelRow): Channel {
     ua_override: !!r.ua_override,
     ua_value: r.ua_value,
     strip_headers: !!r.strip_headers,
+    single_role: r.single_role === 'user' || r.single_role === 'system' ? r.single_role : null,
+    single_role_merge_system: !!r.single_role_merge_system,
+    single_role_exclude_last_user: !!r.single_role_exclude_last_user,
     created_at: r.created_at,
     updated_at: r.updated_at,
   }

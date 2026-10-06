@@ -2,11 +2,12 @@ import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
 import { getProxyAgent } from '../core/proxy'
 import { trimSlash, withV1 } from '../adapters/base'
-import type { ChannelRow, ChannelType } from '../types'
+import type { ChannelRow, ChannelType, SingleRoleMode } from '../types'
 
 export const channelsRouter = Router()
 
 const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses']
+const SINGLE_ROLE_MODES: SingleRoleMode[] = ['user', 'system']
 
 function startOfToday(): number {
   const d = new Date()
@@ -29,6 +30,9 @@ interface ChannelInput {
   ua_override?: boolean
   ua_value?: string | null
   strip_headers?: boolean
+  single_role?: SingleRoleMode | null
+  single_role_merge_system?: boolean
+  single_role_exclude_last_user?: boolean
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -41,6 +45,7 @@ function validate(input: ChannelInput): string | null {
   if (!input.name || !input.name.trim()) return '渠道名称不能为空'
   if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses'
   if (normalizeModels(input.models).length === 0) return '至少配置一个模型'
+  if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
   return null
 }
 
@@ -68,8 +73,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, api_key, models, model_mapping, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @api_key, @models, @model_mapping, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, api_key, models, model_mapping, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @api_key, @models, @model_mapping, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -86,6 +91,9 @@ channelsRouter.post('/', (req, res) => {
       ua_override: input.ua_override ? 1 : 0,
       ua_value: input.ua_value?.trim() || null,
       strip_headers: input.strip_headers ? 1 : 0,
+      single_role: input.single_role || null,
+      single_role_merge_system: input.single_role_merge_system ? 1 : 0,
+      single_role_exclude_last_user: input.single_role_exclude_last_user ? 1 : 0,
       created_at: now,
       updated_at: now,
     })
@@ -105,7 +113,9 @@ channelsRouter.put('/:id', (req, res) => {
     `UPDATE channels SET
        name=@name, type=@type, base_url=@base_url, api_key=@api_key, models=@models,
        model_mapping=@model_mapping, priority=@priority, weight=@weight, status=@status,
-       region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers, updated_at=@updated_at
+       region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
+       single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
+       updated_at=@updated_at
      WHERE id=@id`,
   ).run({
     id,
@@ -130,6 +140,13 @@ channelsRouter.put('/:id', (req, res) => {
     ua_override: input.ua_override !== undefined ? (input.ua_override ? 1 : 0) : existing.ua_override ? 1 : 0,
     ua_value: input.ua_value !== undefined ? input.ua_value?.trim() || null : existing.ua_value,
     strip_headers: input.strip_headers !== undefined ? (input.strip_headers ? 1 : 0) : existing.strip_headers ? 1 : 0,
+    single_role: input.single_role !== undefined ? input.single_role || null : existing.single_role,
+    single_role_merge_system:
+      input.single_role_merge_system !== undefined ? (input.single_role_merge_system ? 1 : 0) : existing.single_role_merge_system ? 1 : 0,
+    single_role_exclude_last_user:
+      input.single_role_exclude_last_user !== undefined
+        ? (input.single_role_exclude_last_user ? 1 : 0)
+        : existing.single_role_exclude_last_user ? 1 : 0,
     updated_at: Date.now(),
   })
   res.json(getChannelById(id))

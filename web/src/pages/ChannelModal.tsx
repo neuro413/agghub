@@ -6,7 +6,7 @@ import { IconCheck, IconPlus, IconRefresh, IconTest } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Channel, ChannelType } from '../types'
+import type { Channel, ChannelType, SingleRoleMode } from '../types'
 
 const PLACEHOLDER: Record<ChannelType, string> = {
   openai: 'https://api.openai.com（留空用官方）',
@@ -29,11 +29,30 @@ interface FormState {
   ua_override: boolean
   ua_value: string
   strip_headers: boolean
+  single_role: boolean
+  single_role_mode: SingleRoleMode
+  merge_system: boolean
+  exclude_last_user: boolean
+}
+
+function singleRoleHint(f: FormState): string {
+  if (!f.single_role) return '上游只接受单一角色消息时开启：把对话历史按原顺序打包成 JSON 文本发送'
+  if (f.single_role_mode === 'system')
+    return f.exclude_last_user
+      ? '最后一条 user 消息原样保留为唯一的 user 消息（工具结果不算），其余消息（含系统提示）按原顺序打包进系统提示（JSON 文本）'
+      : '全部消息（含系统提示）按原顺序打包进系统提示（JSON 文本），随后跟一条内容为换行加零宽空格的 user 消息'
+  return f.merge_system
+    ? '系统提示放在最前，与其余消息一起按原顺序打包为一条 user 消息（JSON 文本），原系统提示置空'
+    : '系统提示保持原样，其余消息按原顺序打包为一条 user 消息（JSON 文本）'
 }
 
 function initForm(c: Channel | null): FormState {
   if (!c)
-    return { name: '', type: 'openai', base_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, region: '', timeout: '', ua_override: false, ua_value: '', strip_headers: false }
+    return {
+      name: '', type: 'openai', base_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, region: '', timeout: '',
+      ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
+      exclude_last_user: false,
+    }
   return {
     name: c.name,
     type: c.type,
@@ -48,6 +67,10 @@ function initForm(c: Channel | null): FormState {
     ua_override: !!c.ua_override,
     ua_value: c.ua_value || '',
     strip_headers: !!c.strip_headers,
+    single_role: !!c.single_role,
+    single_role_mode: c.single_role || 'user',
+    merge_system: !!c.single_role_merge_system,
+    exclude_last_user: !!c.single_role_exclude_last_user,
   }
 }
 
@@ -76,6 +99,9 @@ function buildPayload(f: FormState): Partial<Channel> {
     ua_override: f.ua_override,
     ua_value: f.ua_override ? f.ua_value.trim() || null : null,
     strip_headers: f.strip_headers,
+    single_role: f.single_role ? f.single_role_mode : null,
+    single_role_merge_system: f.single_role && f.single_role_mode === 'user' && f.merge_system,
+    single_role_exclude_last_user: f.single_role && f.single_role_mode === 'system' && f.exclude_last_user,
   }
 }
 
@@ -288,6 +314,39 @@ export function ChannelModal({
           <Toggle checked={f.strip_headers} onChange={(v) => set('strip_headers', v)} />
           <span className="ah-mini ah-muted">{f.strip_headers ? '仅保留必要请求头' : '透传/转发非必要头'}</span>
         </div>
+      </Field>
+
+      <Field label="单 role 渠道兼容" hint={singleRoleHint(f)}>
+        <div className="ah-row">
+          <Toggle checked={f.single_role} onChange={(v) => set('single_role', v)} />
+          <span className="ah-mini ah-muted">{f.single_role ? '打包对话历史' : '保持原消息结构'}</span>
+        </div>
+        {f.single_role && (
+          <div className="ah-pp-chips" style={{ marginTop: 8 }}>
+            {(['user', 'system'] as const).map((mode) => (
+              <button
+                type="button"
+                key={mode}
+                className={`ah-pp-chip${f.single_role_mode === mode ? ' is-on' : ''}`}
+                onClick={() => set('single_role_mode', mode)}
+              >
+                {mode === 'user' ? '使用 user 模式' : '使用 system 格式'}
+              </button>
+            ))}
+          </div>
+        )}
+        {f.single_role && f.single_role_mode === 'user' && (
+          <div className="ah-row" style={{ marginTop: 8 }}>
+            <Toggle checked={f.merge_system} onChange={(v) => set('merge_system', v)} />
+            <span className="ah-mini ah-muted">合并 system</span>
+          </div>
+        )}
+        {f.single_role && f.single_role_mode === 'system' && (
+          <div className="ah-row" style={{ marginTop: 8 }}>
+            <Toggle checked={f.exclude_last_user} onChange={(v) => set('exclude_last_user', v)} />
+            <span className="ah-mini ah-muted">最后 user 除外</span>
+          </div>
+        )}
       </Field>
 
       <div className="ah-grid2">

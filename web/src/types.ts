@@ -2,7 +2,7 @@
 import type { Channel as ServerChannel, LogBodyField } from '../../server/src/types'
 export type { LogBodyField } from '../../server/src/types'
 export type {
-  ChannelType, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
+  ChannelType, SingleRoleMode, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
 } from '../../server/src/types'
 
 export type Channel = ServerChannel & { today_requests?: number; today_success?: number }

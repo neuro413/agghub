@@ -38,8 +38,13 @@ function strings(value: any): boolean {
 function ids(value: any): boolean {
   return Array.isArray(value) && value.every(v => Number.isSafeInteger(v) && v > 0)
 }
+/** 跨字段校验的错误记在前者上，提交任一字段都要报告 */
+const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'] }
 
-/** 对合并后的完整设置校验，调用者仅保存规范化后的 patch。 */
+/**
+ * 对合并后的完整设置校验，但只报告本次提交涉及的字段：库里遗留的旧值（如早期版本允许的更大范围）
+ * 不应阻止其他页面保存。调用者仅保存规范化后的 patch。
+ */
 export function validateSettingsPatch(current: Settings, input: unknown): Record<string, unknown> {
   const errors: Record<string, string> = Object.create(null)
   const check = (condition: boolean, key: string, message: string) => { if (!condition) errors[key] = message }
@@ -111,6 +116,11 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
         })
       }
     })
+  }
+  for (const key of Object.keys(errors)) {
+    const root = key.split(/[.[]/, 1)[0]
+    const linked = Object.hasOwn(LINKED, root) ? LINKED[root] : []
+    if (![root, ...linked].some(k => Object.hasOwn(input, k))) delete errors[key]
   }
   if (Object.keys(errors).length) throw new SettingsValidationError(errors)
   return patch

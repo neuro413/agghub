@@ -4,6 +4,9 @@ export type ChannelType = 'openai' | 'anthropic' | 'vertex' | 'responses'
 /** 0=手动禁用 1=启用 2=自动禁用（命中熔断） */
 export type ChannelStatus = 0 | 1 | 2
 
+/** 单 role 渠道兼容：对话历史打包进一条 user 消息 / 打包进系统提示 */
+export type SingleRoleMode = 'user' | 'system'
+
 /** 数据库原始行（models / model_mapping 为 JSON 字符串） */
 export interface ChannelRow {
   id: number
@@ -21,6 +24,9 @@ export interface ChannelRow {
   ua_override: number
   ua_value: string | null
   strip_headers: number
+  single_role: string | null
+  single_role_merge_system: number
+  single_role_exclude_last_user: number
   created_at: number
   updated_at: number
 }
@@ -42,6 +48,12 @@ export interface Channel {
   ua_override: boolean
   ua_value: string | null
   strip_headers: boolean
+  /** 单 role 兼容模式，null = 关闭 */
+  single_role: SingleRoleMode | null
+  /** user 模式下把系统提示合并进打包的 user 消息最前，原系统提示置空 */
+  single_role_merge_system: boolean
+  /** system 模式下最后一条 user 消息不打包，原样作为随后的 user 消息 */
+  single_role_exclude_last_user: boolean
   created_at: number
   updated_at: number
 }
