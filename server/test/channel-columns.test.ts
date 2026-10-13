@@ -17,14 +17,16 @@ INSERT INTO channels (name, type, models, created_at, updated_at) VALUES ('old',
 `)
 legacy.close()
 
-test('已有渠道表补齐单 role 列', async () => {
+test('已有渠道表补齐单 role 与分组列', async () => {
   const { db, getChannelById } = await import('../src/db')
   const columns = db.prepare("SELECT name FROM pragma_table_info('channels')").pluck().all()
-  for (const name of ['single_role', 'single_role_merge_system', 'single_role_exclude_last_user']) assert.ok(columns.includes(name), name)
+  for (const name of ['single_role', 'single_role_merge_system', 'single_role_exclude_last_user', 'groups', 'ban_until']) assert.ok(columns.includes(name), name)
   const old = getChannelById(1)!
   assert.equal(old.name, 'old')
   assert.equal(old.single_role, null)
   assert.equal(old.single_role_merge_system, false)
   assert.equal(old.single_role_exclude_last_user, false)
+  assert.deepEqual(old.groups, ['default'])
+  assert.equal(old.ban_until, null)
   db.close()
 })

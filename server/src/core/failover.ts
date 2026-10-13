@@ -65,3 +65,18 @@ export function extractUpstreamMessage(body: string): string {
     return (body || '').slice(0, 300)
   }
 }
+
+/** 错误来源：上游 HTTP 错误 / 网络与未知错误 / 本地判定（参数、无渠道、取消、超时） */
+export type ErrorKind = 'upstream' | 'network' | 'local'
+
+export function errorKind(error: unknown): ErrorKind {
+  if (error instanceof UpstreamError) return 'upstream'
+  if (error instanceof LocalRequestError || error instanceof CandidateError || error instanceof RequestStopped) return 'local'
+  return 'network'
+}
+
+// 【签名桩】由「安全加固」任务实现；导出名称和参数类型不得修改，relay.ts 按此调用。
+/** 公网端口返回给客户端前的错误信息脱敏；日志仍记录原文 */
+export function sanitizePublicError(_kind: ErrorKind, message: string): string {
+  return message
+}

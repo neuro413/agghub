@@ -33,8 +33,44 @@ CREATE TABLE IF NOT EXISTS channels (
   single_role   TEXT,
   single_role_merge_system INTEGER NOT NULL DEFAULT 0,
   single_role_exclude_last_user INTEGER NOT NULL DEFAULT 0,
+  groups        TEXT    NOT NULL DEFAULT '["default"]',
+  ban_until     INTEGER,
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL
+);
+
+-- 分发 Key：明文存储；user_id 预留给以后的用户系统
+CREATE TABLE IF NOT EXISTS api_keys (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL,
+  key           TEXT    NOT NULL UNIQUE,
+  enabled       INTEGER NOT NULL DEFAULT 1,
+  groups        TEXT    NOT NULL DEFAULT '[]',
+  models        TEXT    NOT NULL DEFAULT '[]',
+  rpm           INTEGER,
+  concurrency   INTEGER,
+  quota_total   INTEGER,
+  quota_used    INTEGER NOT NULL DEFAULT 0,
+  quota_daily   INTEGER,
+  log_bodies    INTEGER,
+  expires_at    INTEGER,
+  note          TEXT,
+  user_id       INTEGER,
+  created_at    INTEGER NOT NULL,
+  updated_at    INTEGER NOT NULL,
+  last_used_at  INTEGER
+);
+
+-- 按账户的每日用量，与请求日志独立（日志过期清理不影响额度）；account_type 现在只有 'key'
+CREATE TABLE IF NOT EXISTS usage_daily (
+  account_type      TEXT    NOT NULL,
+  account_id        INTEGER NOT NULL,
+  day               TEXT    NOT NULL,
+  requests          INTEGER NOT NULL DEFAULT 0,
+  points            INTEGER NOT NULL DEFAULT 0,
+  prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+  completion_tokens INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (account_type, account_id, day)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -74,7 +110,12 @@ CREATE TABLE IF NOT EXISTS request_logs (
   request_id TEXT,
   attempt_latency_ms INTEGER,
   response_body_truncated INTEGER NOT NULL DEFAULT 0,
-  upstream_response_body_truncated INTEGER NOT NULL DEFAULT 0
+  upstream_response_body_truncated INTEGER NOT NULL DEFAULT 0,
+  source TEXT,
+  key_id INTEGER,
+  key_name TEXT,
+  client_ip TEXT,
+  quota_points INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_logs_created ON request_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_logs_channel ON request_logs(channel_id);
@@ -83,17 +124,28 @@ CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_request_final ON request_logs(request_id) WHERE request_id IS NOT NULL AND is_retry = 0;
 `)
 
-// 渠道表后加的列：已有库按缺失补齐
-{
-  const columns = db.prepare("SELECT name FROM pragma_table_info('channels')").pluck().all() as string[]
-  for (const [name, definition] of [
-    ['single_role', 'TEXT'],
-    ['single_role_merge_system', 'INTEGER NOT NULL DEFAULT 0'],
-    ['single_role_exclude_last_user', 'INTEGER NOT NULL DEFAULT 0'],
-  ]) {
-    if (!columns.includes(name)) db.exec(`ALTER TABLE channels ADD COLUMN ${name} ${definition}`)
+// 后加的列：已有库按缺失补齐
+function addMissingColumns(table: string, definitions: [string, string][]): void {
+  const columns = db.prepare(`SELECT name FROM pragma_table_info('${table}')`).pluck().all() as string[]
+  for (const [name, definition] of definitions) {
+    if (!columns.includes(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`)
   }
 }
+addMissingColumns('channels', [
+  ['single_role', 'TEXT'],
+  ['single_role_merge_system', 'INTEGER NOT NULL DEFAULT 0'],
+  ['single_role_exclude_last_user', 'INTEGER NOT NULL DEFAULT 0'],
+  ['groups', `TEXT NOT NULL DEFAULT '["default"]'`],
+  ['ban_until', 'INTEGER'],
+])
+addMissingColumns('request_logs', [
+  ['source', 'TEXT'],
+  ['key_id', 'INTEGER'],
+  ['key_name', 'TEXT'],
+  ['client_ip', 'TEXT'],
+  ['quota_points', 'INTEGER'],
+])
+db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')
 
 function encodeSetting(value: unknown): string {
   return typeof value === 'boolean' ? (value ? '1' : '0') : typeof value === 'object' ? JSON.stringify(value) : String(value)
@@ -173,6 +225,8 @@ export function rowToChannel(r: ChannelRow): Channel {
     single_role: r.single_role === 'user' || r.single_role === 'system' ? r.single_role : null,
     single_role_merge_system: !!r.single_role_merge_system,
     single_role_exclude_last_user: !!r.single_role_exclude_last_user,
+    groups: safeArray(r.groups),
+    ban_until: r.ban_until ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   }

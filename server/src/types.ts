@@ -27,6 +27,9 @@ export interface ChannelRow {
   single_role: string | null
   single_role_merge_system: number
   single_role_exclude_last_user: number
+  /** JSON 字符串数组 */
+  groups: string
+  ban_until: number | null
   created_at: number
   updated_at: number
 }
@@ -54,8 +57,97 @@ export interface Channel {
   single_role_merge_system: boolean
   /** system 模式下最后一条 user 消息不打包，原样作为随后的 user 消息 */
   single_role_exclude_last_user: boolean
+  /** 渠道分组；Key 只能使用与自身分组有交集的渠道，owner 不受限 */
+  groups: string[]
+  /** 自动熔断的恢复时间（毫秒时间戳），null = 需手动恢复 */
+  ban_until: number | null
   created_at: number
   updated_at: number
+}
+
+// ── 调用主体与分发 Key ─────────────────────────────────
+/** 请求从哪个监听器进入：内网 app / 公网 app */
+export type Surface = 'lan' | 'public'
+
+/** 调用来源：内网匿名或管理令牌 / 内网带 Key / 公网带 Key（预留以后的 'user'） */
+export type CallerSource = 'owner' | 'lan_key' | 'public_key'
+
+/** api_keys 数据库原始行 */
+export interface ApiKeyRow {
+  id: number
+  name: string
+  key: string
+  enabled: number
+  groups: string
+  models: string
+  rpm: number | null
+  concurrency: number | null
+  quota_total: number | null
+  quota_used: number
+  quota_daily: number | null
+  log_bodies: number | null
+  expires_at: number | null
+  note: string | null
+  user_id: number | null
+  created_at: number
+  updated_at: number
+  last_used_at: number | null
+}
+
+/** 应用层分发 Key */
+export interface ApiKey {
+  id: number
+  name: string
+  /** 明文 Key：sk-agh- + 40 位 base62 */
+  key: string
+  enabled: boolean
+  /** 可用渠道分组（至少一个） */
+  groups: string[]
+  /** 模型白名单，支持 * 通配符；空 = 不限 */
+  models: string[]
+  /** 每分钟请求数上限，null = 不限 */
+  rpm: number | null
+  /** 同时进行中的请求数上限，null = 不限 */
+  concurrency: number | null
+  /** 总额度点数，null = 不限 */
+  quota_total: number | null
+  /** 累计已用点数 */
+  quota_used: number
+  /** 每日额度点数（服务器本地时间 0 点重置），null = 不限 */
+  quota_daily: number | null
+  /** 正文记录：null 跟随全局 / true 记录 / false 不记录 */
+  log_bodies: boolean | null
+  /** 过期时间（毫秒时间戳），null = 永不过期 */
+  expires_at: number | null
+  note: string | null
+  /** 预留：用户系统 */
+  user_id: number | null
+  created_at: number
+  updated_at: number
+  last_used_at: number | null
+}
+
+/** 本次请求的调用主体，由鉴权中间件解析后挂在 res.locals.caller */
+export interface Caller {
+  surface: Surface
+  source: CallerSource
+  /** source 为 lan_key / public_key 时存在 */
+  key: ApiKey | null
+  /** 客户端 IP（已去掉 ::ffff: 前缀），未知时为空串 */
+  ip: string
+}
+
+/** 模型倍率：点数 = 未缓存输入×input + 缓存读×cache_read + 缓存写×cache_write + 输出×output + per_request */
+export interface ModelRatio {
+  id: string
+  /** 精确模型名或 * 通配符模式，按客户端请求的模型名（映射前）匹配 */
+  pattern: string
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number
+  /** 每次请求固定点数，仅在产生输出时计入 */
+  per_request: number
 }
 
 // ── 请求日志（统计 + 正文）───────────────────────────────
@@ -98,6 +190,14 @@ export interface LogRow {
   pseudo_thinking: number
   /** 伪思考入向续接注入信息 JSON：[{messageIndex, thinking}]（仅注入时记录）*/
   thinking_inject: string | null
+  /** 调用来源；旧日志为 null，按 owner 显示 */
+  source: CallerSource | null
+  key_id: number | null
+  /** Key 名称快照，删除 Key 后仍可显示 */
+  key_name: string | null
+  client_ip: string | null
+  /** 本次请求折算点数；未命中倍率时为 null */
+  quota_points: number | null
 }
 
 // ── 设置 ───────────────────────────────────────────────
@@ -141,10 +241,26 @@ export interface Settings {
   /** Responses 上游推理密文暂存条数上限（Anthropic 客户端思维链回传用） */
   reasoning_store_max: number
   proxy_url: string
+  /** 模型倍率表 */
+  model_ratios: ModelRatio[]
+  /** 连续命中熔断状态码 N 次才停用渠道 */
+  auto_ban_threshold: number
+  /** 自动停用后多少分钟自动恢复，0 = 只能手动恢复 */
+  auto_ban_cooldown_minutes: number
+  /** 仅用于显示：给分发用户的公网 Base URL */
+  public_base_url: string
+}
+
+/** 规则「调用来源」作用域，三类规则共用 */
+export interface CallerScope {
+  /** 限定调用来源，空/缺省 = 全部 */
+  sources?: CallerSource[]
+  /** 限定 Key id，空/缺省 = 全部 */
+  keyIds?: number[]
 }
 
 // ── 提示词预处理规则 ─────────────────────────────────────
-export interface PreprocessRule {
+export interface PreprocessRule extends CallerScope {
   id: string
   enabled: boolean
   name?: string
@@ -169,7 +285,7 @@ export interface PreprocessRule {
 }
 
 // ── 工具过滤规则 ────────────────────────────────────────
-export interface ToolFilterRule {
+export interface ToolFilterRule extends CallerScope {
   id: string
   enabled: boolean
   name?: string
@@ -198,7 +314,7 @@ export interface ParamOp {
   replacement?: string
 }
 
-export interface ParamRule {
+export interface ParamRule extends CallerScope {
   id: string
   enabled: boolean
   name?: string
@@ -293,3 +409,65 @@ export type WireFormat = 'openai' | 'anthropic' | 'gemini' | 'responses'
 
 /** 对外入口格式：OpenAI Chat / Anthropic Messages / OpenAI Responses */
 export type EntryFormat = 'openai' | 'anthropic' | 'responses'
+
+// ── 分发相关管理 API 契约（后端实现与前端调用共用）────────
+/** GET /api/keys 列表项及各 Key 接口的返回值 */
+export interface ApiKeyView extends ApiKey {
+  /** 今日（服务器本地日期）已用点数 */
+  today_points: number
+  /** 今日请求数 */
+  today_requests: number
+}
+
+/** POST /api/keys 与 PUT /api/keys/:id 的请求体；PUT 只更新出现的字段 */
+export interface ApiKeyInput {
+  name?: string
+  enabled?: boolean
+  groups?: string[]
+  models?: string[]
+  rpm?: number | null
+  concurrency?: number | null
+  quota_total?: number | null
+  quota_daily?: number | null
+  log_bodies?: boolean | null
+  expires_at?: number | null
+  note?: string | null
+}
+
+/** POST /api/keys/:id/quota 的请求体 */
+export type KeyQuotaOp = { op: 'reset_used' } | { op: 'add_total'; value: number }
+
+/** GET /api/keys/:id/usage 的数组元素，按日期升序，没有用量的日期不返回 */
+export interface KeyUsageDay {
+  day: string
+  requests: number
+  points: number
+  prompt_tokens: number
+  completion_tokens: number
+}
+
+/** GET /api/system */
+export interface SystemInfo {
+  lan_host: string | null
+  lan_port: number
+  public_enabled: boolean
+  public_host: string | null
+  public_port: number | null
+  /** AGGHUB_TRUST_PROXY 的解析结果转为字符串 */
+  trust_proxy: string
+}
+
+/** POST /api/billing/preview 的请求体 */
+export interface BillingPreviewInput {
+  model: string
+  prompt_tokens: number
+  completion_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+}
+
+/** POST /api/billing/preview 的返回值；未命中倍率时两项都为 null */
+export interface BillingPreviewResult {
+  ratio: ModelRatio | null
+  points: number | null
+}

@@ -19,6 +19,22 @@ export const DB_PATH = path.join(DATA_DIR, 'agghub.db')
 export const WEB_DIST = path.resolve(PROJECT_ROOT, 'web', 'dist')
 /** 网关端口（默认 3210，避开常见代理端口）*/
 export const PORT = Number(process.env.PORT) || 3210
+/** 内网监听地址；不设则监听所有网卡 */
+export const HOST = process.env.HOST || undefined
+/** 公网端口；不设（0）则不开启公网监听器 */
+export const PUBLIC_PORT = Number(process.env.AGGHUB_PUBLIC_PORT) || 0
+/** 公网监听地址，默认只监听回环，交给隧道 / 反代暴露 */
+export const PUBLIC_HOST = process.env.AGGHUB_PUBLIC_HOST || '127.0.0.1'
+
+/** 公网 app 的 Express trust proxy：false / 跳数 / loopback 等预设或 CIDR 列表 */
+function parseTrustProxy(raw: string): boolean | number | string {
+  const value = raw.trim()
+  if (!value || value === 'false' || value === '0') return false
+  if (value === 'true') return true
+  if (/^\d+$/.test(value)) return Number(value)
+  return value
+}
+export const TRUST_PROXY = parseTrustProxy(process.env.AGGHUB_TRUST_PROXY ?? 'loopback')
 
 /** 设置默认值；库中以字符串存储，读取时按默认值的类型解析（数字 / 布尔 / JSON 数组 / 文本） */
 export const DEFAULT_SETTINGS: Settings = {
@@ -57,6 +73,12 @@ export const DEFAULT_SETTINGS: Settings = {
   /** 跨格式思维链往返：Responses 上游密文暂存上限 */
   reasoning_store_max: 2000,
   proxy_url: '',
+  /** 默认一条 * 规则，开箱即用；删掉后未定价模型不允许 Key 调用 */
+  model_ratios: [{ id: 'default', pattern: '*', input: 1, output: 1, cache_read: 1, cache_write: 1, per_request: 0 }],
+  /** 默认值保持旧行为：命中一次即停用、只能手动恢复 */
+  auto_ban_threshold: 1,
+  auto_ban_cooldown_minutes: 0,
+  public_base_url: '',
 }
 
 /** 整数设置的取值范围（保存时校验） */
@@ -66,4 +88,5 @@ export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> =
   log_retention_days: [1, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
   image_max_bytes: [1, 100 * 1024 * 1024],
+  auto_ban_threshold: [1, 100], auto_ban_cooldown_minutes: [0, 10_080],
 }

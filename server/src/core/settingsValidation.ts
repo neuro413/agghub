@@ -29,6 +29,8 @@ export function normalizeAccessToken(value: unknown): string {
 const booleans = Object.keys(DEFAULT_SETTINGS).filter(key => typeof DEFAULT_SETTINGS[key as keyof Settings] === 'boolean')
 const formats = new Set(['openai', 'anthropic', 'responses'])
 const roles = new Set(['system', 'user', 'assistant', 'tool'])
+const sources = new Set(['owner', 'lan_key', 'public_key'])
+const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write', 'per_request']
 function object(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -77,6 +79,29 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
     }
   } catch { errors.proxy_url = '须为空串或有效的 HTTP/HTTPS 代理地址' }
+  try {
+    if (typeof merged.public_base_url !== 'string' || merged.public_base_url.length > 512) throw new Error()
+    if (merged.public_base_url) {
+      const url = new URL(merged.public_base_url)
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+    }
+  } catch { errors.public_base_url = '须为空串或有效的 HTTP/HTTPS 地址' }
+  if (!Array.isArray(merged.model_ratios)) errors.model_ratios = '须为倍率数组'
+  else {
+    const ratioIds = new Set<string>()
+    const patterns = new Set<string>()
+    merged.model_ratios.forEach((ratio: any, index: number) => {
+      const at = `model_ratios[${index}]`
+      if (!object(ratio)) { errors[at] = '倍率须为对象'; return }
+      check(typeof ratio.id === 'string' && !!ratio.id && !ratioIds.has(ratio.id), `${at}.id`, 'ID 须为非空且不重复的字符串')
+      ratioIds.add(ratio.id)
+      check(typeof ratio.pattern === 'string' && !!ratio.pattern.trim() && ratio.pattern.length <= 128 && !patterns.has(ratio.pattern), `${at}.pattern`, '模型模式须为 1～128 字符且不重复')
+      patterns.add(ratio.pattern)
+      for (const field of RATIO_FIELDS) {
+        check(typeof ratio[field] === 'number' && Number.isFinite(ratio[field]) && ratio[field] >= 0 && ratio[field] <= 1_000_000, `${at}.${field}`, '须为 0～1000000 的数字')
+      }
+    })
+  }
   for (const key of ['preprocess_rules', 'tool_filter_rules', 'param_rules']) {
     const rules = merged[key]
     if (!Array.isArray(rules)) { errors[key] = '须为规则数组'; continue }
@@ -91,6 +116,8 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       if (rule.channelIds !== undefined) check(ids(rule.channelIds), `${at}.channelIds`, '须为正整数数组')
       if (rule.models !== undefined) check(strings(rule.models), `${at}.models`, '须为模型名数组')
       if (rule.formats !== undefined) check(Array.isArray(rule.formats) && rule.formats.every((v: any) => formats.has(v)), `${at}.formats`, '含不支持的入口格式')
+      if (rule.sources !== undefined) check(Array.isArray(rule.sources) && rule.sources.every((v: any) => sources.has(v)), `${at}.sources`, '含不支持的调用来源')
+      if (rule.keyIds !== undefined) check(ids(rule.keyIds), `${at}.keyIds`, '须为正整数数组')
       const regex = (op: any, where: string) => {
         check(typeof op.pattern === 'string', `${where}.pattern`, '须为字符串')
         check(typeof op.replacement === 'string', `${where}.replacement`, '须为字符串')

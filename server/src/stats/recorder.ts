@@ -1,6 +1,6 @@
 import { db, getSettings } from '../db'
 import { setImmediate as yieldTurn } from 'node:timers/promises'
-import type { LogBodyField, Settings } from '../types'
+import type { CallerSource, LogBodyField, Settings } from '../types'
 import { clearBlobs, createBlobReader, gcBlobs, packBlobs, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
 
 export interface LogEntry {
@@ -37,6 +37,12 @@ export interface LogEntry {
   preprocessed_body?: string | null
   pseudo_thinking?: boolean
   thinking_inject?: string | null
+  source?: CallerSource | null
+  key_id?: number | null
+  key_name?: string | null
+  client_ip?: string | null
+  /** 本次请求折算点数；未命中倍率时为 null */
+  quota_points?: number | null
 }
 
 const insertStmt = db.prepare(
@@ -45,13 +51,15 @@ const insertStmt = db.prepare(
     latency_ms, prompt_tokens, completion_tokens, total_tokens, cache_read_tokens, cache_write_tokens,
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
-    upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated)
+    upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
+    source, key_id, key_name, client_ip, quota_points)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
-    @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated)`,
+    @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
+    @source, @key_id, @key_name, @client_ip, @quota_points)`,
 )
 
 const opt = (s: string | null | undefined, put: (t: string) => number): number | null => (s == null ? null : put(s))
@@ -94,6 +102,11 @@ export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings
     error_message: e.error_message ?? null,
     preprocessed: e.preprocessed ? 1 : 0,
     pseudo_thinking: e.pseudo_thinking ? 1 : 0,
+    source: e.source ?? null,
+    key_id: e.key_id ?? null,
+    key_name: e.key_name ?? null,
+    client_ip: e.client_ip || null,
+    quota_points: e.quota_points ?? null,
     request_headers_ref: storeReq ? opt(sanitizeHeaders(e.request_headers), putBlob) : null,
     request_body_ref: storeReq ? opt(e.request_body, putJson) : null,
     preprocessed_body_ref: storeReq ? opt(e.preprocessed_body, putJson) : null,

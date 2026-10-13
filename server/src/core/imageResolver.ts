@@ -5,8 +5,13 @@ import { getProxyAgent } from './proxy'
 
 type ImageSettings = Pick<Settings, 'image_max_bytes' | 'proxy_url'>
 
+export interface ImageOptions {
+  /** 公网调用方：启用 SSRF 防护（拒绝内网地址、手动校验重定向） */
+  restrictPrivate?: boolean
+}
+
 /** Gemini 只接受内联图片：把远程图片下载成 data URL。任一失败整体失败，由 relay 切换渠道。 */
-export async function resolveImageUrls(ir: any, settings: ImageSettings, signal: AbortSignal): Promise<void> {
+export async function resolveImageUrls(ir: any, settings: ImageSettings, signal: AbortSignal, _options: ImageOptions = {}): Promise<void> {
   const parts: any[] = []
   for (const message of ir?.messages || []) {
     for (const part of Array.isArray(message.content) ? message.content : []) {

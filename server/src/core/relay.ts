@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import type { Response } from 'express'
-import { getSettings, setChannelStatus } from '../db'
+import { getSettings } from '../db'
 import { getAdaptor } from '../adapters'
 import type { Adaptor, UpstreamRequest } from '../adapters'
 import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
-import { LocalRequestError, UpstreamError, extractUpstreamMessage, parseAutoBanCodes, shouldDisable, shouldRetry } from './failover'
+import { LocalRequestError, UpstreamError, errorKind, extractUpstreamMessage, parseAutoBanCodes, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
+import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
 import { estimatePromptTokens, parseSSEEvents } from '../convert/ir'
@@ -15,7 +16,7 @@ import * as oaiConv from '../convert/openai'
 import * as anthConv from '../convert/anthropic'
 import * as respConv from '../convert/responses'
 import { cacheParts, emptyUsage } from '../convert/usage'
-import type { Channel, EntryFormat, IRUsage, Settings } from '../types'
+import type { Caller, Channel, EntryFormat, IRUsage, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
 import { applySingleRole } from './singleRole'
 import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinkingTransform, splitIRResponse } from './pseudoThinking'
@@ -28,6 +29,9 @@ import { readBodyText } from './bodyReader'
 import { createStreamWriter } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
 import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthroughUsage, streamDeltaText } from './responseSemantics'
+import { OWNER_CALLER, callerSettings } from './caller'
+import { OutputMeter, estimateIRPrompt, findRatio, settleRequest } from './billing'
+import { onAttemptSuccess, onBanSignal } from './channelHealth'
 
 respConv.setReasoningStore({
   save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
@@ -41,6 +45,8 @@ export interface RelayContext {
   readonly rawBody: any
   rawHeaders?: Record<string, any>
   res: Response
+  /** 鉴权中间件解析的调用方；缺省视为内网 owner */
+  caller?: Caller
 }
 
 interface AttemptState extends UpstreamContext {
@@ -55,12 +61,16 @@ interface AttemptState extends UpstreamContext {
   preprocessed?: boolean
   pseudo: boolean
   thinkingInject?: ThinkingInjectEntry[]
+  /** 输出计量，usage 缺失时用于估算计费 */
+  meter: OutputMeter
 }
 
 interface Outcome {
   status: 'success' | 'error'
   code: number
   error?: string
+  /** 错误来源，公网脱敏按此区分 */
+  kind?: ErrorKind
   usage: IRUsage
 }
 
@@ -69,7 +79,35 @@ function errorOutcome(error: unknown): Outcome {
     : error instanceof RequestStopped ? error.reason === 'client_cancel' ? 499 : 504 : 502
   const message = error instanceof UpstreamError ? extractUpstreamMessage(error.body)
     : error instanceof Error ? error.message : String(error || 'relay failed')
-  return { status: 'error', code, error: message, usage: emptyUsage() }
+  return { status: 'error', code, error: message, kind: errorKind(error), usage: emptyUsage() }
+}
+
+/** 返回给客户端的错误信息：公网端口脱敏，日志仍记录原文 */
+function clientError(caller: Caller, outcome: Outcome): string {
+  return caller.surface === 'public' ? sanitizePublicError(outcome.kind ?? 'local', outcome.error!) : outcome.error!
+}
+
+/** 计量 IR 增量 / 消息里的全部输出文本（正文、拒绝、推理、工具参数） */
+function meterIR(meter: OutputMeter, part: any): void {
+  if (!part) return
+  meter.append(part.content)
+  meter.append(part.refusal)
+  meter.append(part.reasoning_content)
+  for (const call of Array.isArray(part.tool_calls) ? part.tool_calls : []) meter.append(call?.function?.arguments)
+}
+
+/** 计量直通 SSE 事件里的输出文本 */
+function meterPassthrough(meter: OutputMeter, format: EntryFormat, data: any): void {
+  if (format === 'anthropic') {
+    const delta = data?.type === 'content_block_delta' ? data.delta : null
+    meter.append(delta?.text)
+    meter.append(delta?.thinking)
+    meter.append(delta?.partial_json)
+  } else if (format === 'responses') {
+    if (typeof data?.type === 'string' && data.type.endsWith('.delta')) meter.append(data.delta)
+  } else {
+    for (const choice of data?.choices || []) meterIR(meter, choice.delta)
+  }
 }
 
 function entryBuildResponse(format: EntryFormat, response: any, ir: any): any {
@@ -89,13 +127,16 @@ function applyUserAgent(headers: Record<string, string>, channel: Channel, rawHe
   else if (!channel.strip_headers && rawHeaders?.['user-agent']) headers['user-agent'] = String(rawHeaders['user-agent'])
 }
 
-async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: Settings): Promise<UpstreamRequest> {
+async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller): Promise<UpstreamRequest> {
   const { channel, adaptor, upstreamModel, upstreamWire, lifecycle } = state
   if (adaptor.prepareChannel) {
     await adaptor.prepareChannel(channel, settings.proxy_url || undefined, lifecycle.signal)
     lifecycle.touch()
   }
-  const meta = { entryFormat: ctx.entryFormat, channelId: channel.id, model: state.requestedModel, passthrough: state.passthrough }
+  const meta = {
+    entryFormat: ctx.entryFormat, channelId: channel.id, model: state.requestedModel, passthrough: state.passthrough,
+    source: caller.source, keyId: caller.key?.id ?? null,
+  }
   const source = state.passthrough ? ctx.rawBody : ctx.ir
   // 每次尝试独立复制；预处理与图片下载均不能回写原始请求或其他候选的输入。
   const body = structuredClone(source)
@@ -103,7 +144,7 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   if (state.pseudo) state.thinkingInject = applyPseudoThinkingRequest(body, settings, thinkingStore.lookup)
   if (preprocess) applyPreprocess(body, meta, settings)
   const images = !state.passthrough && upstreamWire === 'gemini'
-  if (images) await resolveImageUrls(body, settings, lifecycle.signal)
+  if (images) await resolveImageUrls(body, settings, lifecycle.signal, { restrictPrivate: caller.surface === 'public' })
   let changed = (!!preprocess || images) && JSON.stringify(body) !== JSON.stringify(source)
   const request = state.passthrough
     ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, ctx.stream, ctx.rawHeaders)
@@ -130,7 +171,8 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
 
 /** 四条响应路径只负责业务及元数据；请求级 finally 统一提交唯一最终日志。 */
 export async function handleRelay(ctx: RelayContext): Promise<void> {
-  const settings = getSettings()
+  const caller = ctx.caller ?? OWNER_CALLER
+  const settings = callerSettings(getSettings(), caller)
   const lifecycle = new RequestLifecycle(ctx.res, settings.request_max_duration_ms)
   const requestId = randomUUID()
   const model = ctx.ir?.model
@@ -143,7 +185,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   let headersJson: string | undefined
   const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
-  const record = (outcome: Outcome, intermediate: boolean): void => {
+  const record = (outcome: Outcome, intermediate: boolean, points: number | null = null): void => {
     safeRecordLog((): LogEntry => {
       if (settings.store_request_body) {
         rawJson ??= JSON.stringify(ctx.rawBody)
@@ -160,6 +202,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         pseudo_thinking: last?.pseudo, thinking_inject: settings.store_request_body && last?.thinkingInject?.length ? JSON.stringify(last.thinkingInject) : undefined,
         response_body: last?.response.text(), upstream_response_body: last?.upstream.text(),
         response_body_truncated: last?.response.truncated, upstream_response_body_truncated: last?.upstream.truncated,
+        source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
       }
     }, settings, requestId)
   }
@@ -167,7 +210,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   try {
     lifecycle.signal.throwIfAborted()
     if (typeof model !== 'string' || !model.trim()) throw new LocalRequestError('model is required')
-    const modelCandidates = candidatesForModel(model)
+    if (caller.key && !findRatio(settings.model_ratios, model)) throw new LocalRequestError('该模型未配置倍率', 403)
+    const modelCandidates = candidatesForModel(model, caller)
     if (!modelCandidates.length) throw new LocalRequestError(`没有可用渠道支持模型 ${model}`, 503)
     const blocker = ctx.entryFormat === 'responses' ? respConv.conversionBlocker(ctx.rawBody) : null
     const descriptions = new Map(modelCandidates.map(channel => {
@@ -195,13 +239,14 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
           upstream: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
           response: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
           pseudo: description.passthrough && matchesPseudoThinking(ctx.entryFormat, description.upstreamWire, channel.id, model, settings),
+          meter: new OutputMeter(),
         }
         last = state
         attempts++
         let response: globalThis.Response | undefined
         let retrySame = false
         try {
-          const request = await prepareRequest(ctx, state, settings)
+          const request = await prepareRequest(ctx, state, settings, caller)
           attempt.touch()
           const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
           if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
@@ -215,23 +260,23 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
             throw new UpstreamError(response.status, text)
           }
           final = ctx.stream
-            ? await pipeResponse(ctx, state, response, settings, lifecycle.signal)
+            ? await pipeResponse(ctx, state, response, settings, lifecycle.signal, caller)
             : await sendResponse(ctx, state, response, settings)
+          onAttemptSuccess(channel.id)
           return
         } catch (caught) {
           const error = attempt.signal.aborted ? attempt.signal.reason : caught
           final = { ...errorOutcome(error), usage: state.usage }
           attemptMs = attempt.elapsed
-          if (!lifecycle.signal.aborted && settings.auto_ban && shouldDisable(error, autoBanCodes)) {
+          if (!lifecycle.signal.aborted && settings.auto_ban && shouldDisable(error, autoBanCodes) && onBanSignal(channel.id, settings)) {
             banned.add(channel.id)
-            setChannelStatus(channel.id, 2)
           }
           // 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
           const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !(error instanceof LocalRequestError)
           retrySame = canContinue && !banned.has(channel.id) && shouldRetry(error) && index < settings.single_retry_times
           const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
           if (!retrySame && !nextChannel) {
-            if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
+            if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
             return
           }
           record(final, true)
@@ -246,12 +291,16 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       tried.add(channel.id)
     }
     lifecycle.signal.throwIfAborted()
-    sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
+    sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
   } catch (error) {
     final = errorOutcome(lifecycle.signal.aborted ? lifecycle.signal.reason : error)
-    if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, final.error!)
+    if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
   } finally {
-    record(final, false)
+    const points = settleRequest({
+      caller, model: typeof model === 'string' ? model : null, ratios: settings.model_ratios, usage: final.usage,
+      meter: last?.meter ?? null, estimatePrompt: () => estimateIRPrompt(ctx.ir), success: final.status === 'success',
+    })
+    record(final, false, points)
     lifecycle.dispose()
   }
 }
@@ -270,11 +319,14 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
     if (isEmptyPassthroughBody(ctx.entryFormat, json)) throw new UpstreamError(502, '上游返回空回复')
     json.model = state.requestedModel
     state.usage = passthroughUsage(ctx.entryFormat, json)
+    // 直通 JSON 不逐字段解析，usage 缺失时按整段文本保守估算
+    state.meter.append(raw)
     output = json
   } else {
     let ir = state.adaptor.parseResponse(json, state)
     if (state.pseudo) ir = splitIRResponse(ir, settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max))
     if (isEmptyIRResponse(ir)) throw new UpstreamError(502, '上游返回空回复')
+    for (const choice of ir.choices || []) meterIR(state.meter, choice.message)
     ir.model = state.requestedModel
     state.usage = ir.usage || emptyUsage()
     output = entryBuildResponse(ctx.entryFormat, ir, ctx.ir)
@@ -286,7 +338,7 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
   return { status: 'success', code: 200, usage: state.usage }
 }
 
-async function pipeResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings, requestSignal: AbortSignal): Promise<Outcome> {
+async function pipeResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings, requestSignal: AbortSignal, caller: Caller): Promise<Outcome> {
   if (!response.body) throw new UpstreamError(502, 'no response body from upstream')
   const passthrough = state.passthrough && !state.pseudo
   const decoder = passthrough ? null : state.adaptor.createStreamDecoder(state)
@@ -323,6 +375,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
       const delta = choice.delta
       if (typeof delta?.content === 'string') state.response.append(delta.content)
       if (typeof delta?.refusal === 'string') state.response.append(delta.refusal)
+      meterIR(state.meter, delta)
       if (meaningfulDelta(delta)) await open()
     }
     await emit(encoder.encode(chunk))
@@ -334,7 +387,8 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     })) {
       const data = observer.observe(event)
       if (observer.failed) {
-        if (opened && passthrough) {
+        // 公网端口不原样转发上游错误事件，统一走下方脱敏后的 encoder.fail
+        if (opened && passthrough && caller.surface !== 'public') {
           await write((event.event ? `event: ${event.event}\n` : '') + `data: ${event.data.replace(/\n/g, '\ndata: ')}\n\n`)
           errorForwarded = true
         }
@@ -343,6 +397,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
       if (passthrough) {
         state.usage = accumulateUsage(ctx.entryFormat, data, state.usage)
         state.response.append(streamDeltaText(ctx.entryFormat, data))
+        meterPassthrough(state.meter, ctx.entryFormat, data)
         if (observer.content) await open()
         await emit((event.event ? `event: ${event.event}\n` : '') + `data: ${event.data.replace(/\n/g, '\ndata: ')}\n\n`)
       } else {
@@ -361,7 +416,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   } catch (caught) {
     const error = state.lifecycle.signal.aborted ? state.lifecycle.signal.reason : caught
     if (opened && !errorForwarded && !requestSignal.aborted) {
-      try { await write(encoder.fail(errorOutcome(error).error!)) } catch {}
+      try { await write(encoder.fail(clientError(caller, errorOutcome(error)))) } catch {}
     }
     throw error
   } finally {

@@ -1,4 +1,4 @@
-import type { EntryFormat, PreprocessRule, Settings } from '../types'
+import type { CallerScope, CallerSource, EntryFormat, PreprocessRule, Settings } from '../types'
 
 export interface PreprocessMeta {
   entryFormat: EntryFormat
@@ -6,6 +6,10 @@ export interface PreprocessMeta {
   model: string
   /** 是否为同格式直通（决定操作 rawBody 还是 ir，且丢弃 thinking 仅对直通生效）*/
   passthrough: boolean
+  /** 调用来源；缺省按 owner 处理（伪思考等内部判断不传） */
+  source?: CallerSource
+  /** 调用所用 Key id；owner 为 null / 缺省 */
+  keyId?: number | null
 }
 
 const THINKING_TYPES = new Set(['thinking', 'redacted_thinking'])
@@ -45,15 +49,15 @@ function dropThinking(target: any, types: Set<string>, keepLast = 0): void {
   filterBlocks(target, b => !(types.has(b?.type) && remove-- > 0))
 }
 
-/** 规则通用限定范围（渠道 / 入口格式 / 模型），PreprocessRule / ToolFilterRule / ParamRule 共用 */
-export interface RuleScope {
+/** 规则通用限定范围（渠道 / 入口格式 / 模型 / 调用来源），PreprocessRule / ToolFilterRule / ParamRule 共用 */
+export interface RuleScope extends CallerScope {
   channelIds?: number[]
   formats?: EntryFormat[]
   models?: string[]
 }
 
-/** 规则的渠道/入口格式/模型过滤是否命中本次请求 */
-export function ruleMatchesMeta(rule: RuleScope, meta: Pick<PreprocessMeta, 'entryFormat' | 'channelId' | 'model'>): boolean {
+/** 规则的渠道/入口格式/模型/调用来源过滤是否命中本次请求 */
+export function ruleMatchesMeta(rule: RuleScope, meta: Pick<PreprocessMeta, 'entryFormat' | 'channelId' | 'model' | 'source' | 'keyId'>): boolean {
   if (rule.formats?.length && !rule.formats.includes(meta.entryFormat)) return false
   if (rule.channelIds?.length && !rule.channelIds.includes(meta.channelId)) return false
   if (rule.models?.length && !rule.models.includes(meta.model)) return false

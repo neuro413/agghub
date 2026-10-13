@@ -13,7 +13,7 @@ import { DANGEROUS_KEYS, isArrayIndex, parseSafePath } from './safePath'
  *  - 可以删掉 adaptor 自动补的字段（如 stream_options）
  */
 
-type ScopeMeta = Pick<PreprocessMeta, 'entryFormat' | 'channelId' | 'model'>
+type ScopeMeta = Pick<PreprocessMeta, 'entryFormat' | 'channelId' | 'model' | 'source' | 'keyId'>
 
 /** 各上游格式的受保护字段：消息 / 系统提示交给提示词预处理；stream 由中继决定，不允许改 */
 const PROTECTED_KEYS: Record<WireFormat, string[]> = {
