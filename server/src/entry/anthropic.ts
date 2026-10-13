@@ -8,7 +8,7 @@ export const anthropicEntry = Router()
 anthropicEntry.post('/messages', async (req, res) => {
   try {
     const { ir, stream } = anthConv.parseRequest(req.body)
-    await handleRelay({ entryFormat: 'anthropic', ir, stream, rawBody: req.body, rawHeaders: req.headers, res })
+    await handleRelay({ entryFormat: 'anthropic', ir, stream, rawBody: req.body, rawHeaders: req.headers, res, caller: res.locals.caller })
   } catch (e: any) {
     if (!res.headersSent) {
       res.status(400).json({ type: 'error', error: { type: 'invalid_request_error', message: String(e?.message || e) } })
