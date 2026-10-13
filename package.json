@@ -2,7 +2,7 @@
   "name": "agghub",
   "version": "0.1.0",
   "private": true,
-  "description": "🍊 AggHub — 轻量化 LLM 渠道聚合网关（内网个人自托管）",
+  "description": "🍊 AggHub — 轻量化 LLM 渠道聚合网关（内网自托管 + 小规模分发）",
   "type": "module",
   "workspaces": [
     "server",
