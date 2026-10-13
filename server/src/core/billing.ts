@@ -1,5 +1,7 @@
 import type { ApiKey, Caller, IRUsage, ModelRatio } from '../types'
 import { contentToText } from '../convert/ir'
+import { db } from '../db'
+import { matchesPattern, patternSpecificity } from './modelPattern'
 
 // 【签名桩】由「计费与限流」任务实现函数体；导出名称和参数类型不得修改，relay.ts 与鉴权中间件已按此调用。
 
@@ -66,21 +68,64 @@ export function localDay(ts: number): string {
 
 /** 按请求模型名查倍率：精确 > 通配符非通配部分最长 > 列表顺序；无命中返回 null */
 export function findRatio(ratios: ModelRatio[], model: string): ModelRatio | null {
-  return ratios.find(r => r.pattern === model) ?? ratios.find(r => r.pattern === '*') ?? null
+  let best: ModelRatio | null = null
+  let bestScore = -1
+  for (const ratio of ratios) {
+    if (!matchesPattern(ratio.pattern, model)) continue
+    const score = patternSpecificity(ratio.pattern)
+    // 严格大于才替换，保证具体度相同时保留列表中靠前的那条
+    if (score > bestScore) {
+      best = ratio
+      bestScore = score
+    }
+  }
+  return best
 }
 
 /** 点数公式（见方案 6.2），结果向上取整；produced=false 时不计 per_request */
-export function computePoints(_ratio: ModelRatio, _usage: BillableUsage, _produced: boolean): number {
-  return 0
+export function computePoints(ratio: ModelRatio, usage: BillableUsage, produced: boolean): number {
+  const uncached = Math.max(0, usage.prompt_tokens - usage.cache_read_tokens - usage.cache_write_tokens)
+  const raw = uncached * ratio.input
+    + usage.cache_read_tokens * ratio.cache_read
+    + usage.cache_write_tokens * ratio.cache_write
+    + usage.completion_tokens * ratio.output
+    + (produced ? ratio.per_request : 0)
+  // 先按 6 位小数四舍五入再向上取整，避免浮点误差把 6400.0000000001 抬成 6401
+  return raw > 0 ? Math.ceil(Math.round(raw * 1e6) / 1e6) : 0
 }
 
+const dailyPointsStmt = db.prepare(
+  `SELECT points FROM usage_daily WHERE account_type = 'key' AND account_id = ? AND day = ?`,
+)
+const addUsedStmt = db.prepare('UPDATE api_keys SET quota_used = quota_used + ?, last_used_at = ? WHERE id = ?')
+const upsertDailyStmt = db.prepare(
+  `INSERT INTO usage_daily (account_type, account_id, day, requests, points, prompt_tokens, completion_tokens)
+   VALUES (?, ?, ?, 1, ?, ?, ?)
+   ON CONFLICT(account_type, account_id, day) DO UPDATE SET
+     requests = requests + 1,
+     points = points + excluded.points,
+     prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+     completion_tokens = completion_tokens + excluded.completion_tokens`,
+)
+const commitTx = db.transaction((accountId: number, day: string, now: number, points: number, prompt: number, completion: number) => {
+  addUsedStmt.run(points, now, accountId)
+  upsertDailyStmt.run('key', accountId, day, points, prompt, completion)
+})
+
 /** 额度预检：总额度 quota_used < quota_total；今日 points < quota_daily；字段为 null 表示不限 */
-export function precheckQuota(_key: ApiKey, _now = Date.now()): QuotaCheck {
+export function precheckQuota(key: ApiKey, now = Date.now()): QuotaCheck {
+  if (key.quota_total != null && key.quota_used >= key.quota_total) return { ok: false, reason: 'total' }
+  if (key.quota_daily != null) {
+    const row = dailyPointsStmt.get(key.id, localDay(now)) as { points: number } | undefined
+    if ((row?.points ?? 0) >= key.quota_daily) return { ok: false, reason: 'daily' }
+  }
   return { ok: true }
 }
 
 /** 记账：一个事务里累加 api_keys.quota_used / last_used_at，并 upsert usage_daily（requests +1） */
-export function commitUsage(_account: BillingAccount, _entry: { points: number; prompt_tokens: number; completion_tokens: number }, _now = Date.now()): void {}
+export function commitUsage(account: BillingAccount, entry: { points: number; prompt_tokens: number; completion_tokens: number }, now = Date.now()): void {
+  commitTx(account.id, localDay(now), now, entry.points, entry.prompt_tokens, entry.completion_tokens)
+}
 
 export interface SettleInput {
   caller: Caller
@@ -101,6 +146,28 @@ export interface SettleInput {
  * 请求结束时调用一次：计算点数（usage 缺失时按 meter / estimatePrompt 估算），
  * Key 调用则记账。返回点数写入日志；未命中倍率返回 null。任何异常都不得抛出（内部捕获并 console.error）。
  */
-export function settleRequest(_input: SettleInput): number | null {
-  return null
+export function settleRequest(input: SettleInput): number | null {
+  try {
+    const { caller, model, ratios, usage, meter, success, estimatePrompt } = input
+    const account = accountOf(caller)
+    const produced = !!meter?.produced
+    let prompt = usage.prompt_tokens || 0
+    let completion = usage.completion_tokens || 0
+    const cacheRead = usage.prompt_tokens_details?.cached_tokens || 0
+    const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens || 0
+    // 失败（含客户端中断）或上游没报输出量时，用计量器估算的输出兜底
+    if (produced && (!success || completion === 0)) completion = Math.max(completion, meter!.estimate)
+    // 产生了输出但上游没报输入量时估算输入
+    if (produced && prompt === 0) prompt = estimatePrompt()
+    const ratio = model ? findRatio(ratios, model) : null
+    const points = ratio
+      ? computePoints(ratio, { prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite }, produced)
+      : null
+    // Key 调用无论成功失败都记账一次（requests +1），owner 不记账
+    if (account) commitUsage(account, { points: points ?? 0, prompt_tokens: prompt, completion_tokens: completion })
+    return points
+  } catch (error) {
+    console.error('[agghub] 计费记账失败:', error)
+    return null
+  }
 }

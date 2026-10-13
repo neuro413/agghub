@@ -34,10 +34,22 @@ logsRouter.get('/', (req, res) => {
     where.push('is_stream = ?')
     args.push(Number(req.query.is_stream))
   }
+  const keyId = Number(req.query.key_id)
+  if (req.query.key_id && Number.isSafeInteger(keyId) && keyId > 0) {
+    where.push('key_id = ?')
+    args.push(keyId)
+  }
+  if (req.query.source === 'owner') {
+    // 旧日志 source 为 NULL，视同 owner
+    where.push("(source = 'owner' OR source IS NULL)")
+  } else if (req.query.source === 'lan_key' || req.query.source === 'public_key') {
+    where.push('source = ?')
+    args.push(req.query.source)
+  }
   if (req.query.q) {
     const kw = `%${String(req.query.q).trim()}%`
-    where.push('(model LIKE ? OR channel_name LIKE ? OR upstream_model LIKE ? OR error_message LIKE ?)')
-    args.push(kw, kw, kw, kw)
+    where.push('(model LIKE ? OR channel_name LIKE ? OR upstream_model LIKE ? OR error_message LIKE ? OR key_name LIKE ?)')
+    args.push(kw, kw, kw, kw, kw)
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
@@ -50,7 +62,8 @@ logsRouter.get('/', (req, res) => {
               response_body_truncated, upstream_response_body_truncated,
               prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
-              retry_count, is_stream, error_message, preprocessed, pseudo_thinking
+              retry_count, is_stream, error_message, preprocessed, pseudo_thinking,
+              source, key_id, key_name, client_ip, quota_points
        FROM request_logs ${whereSql}
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     )
@@ -70,7 +83,13 @@ logsRouter.get('/facets', (_req, res) => {
        WHERE channel_id IS NOT NULL GROUP BY channel_id ORDER BY n DESC LIMIT 100`,
     )
     .all() as { channel_id: number; channel_name: string; n: number }[]
-  res.json({ models, channels })
+  const keys = db
+    .prepare(
+      `SELECT key_id, MAX(key_name) AS key_name, COUNT(*) AS n FROM request_logs
+       WHERE key_id IS NOT NULL GROUP BY key_id ORDER BY n DESC LIMIT 100`,
+    )
+    .all() as { key_id: number; key_name: string; n: number }[]
+  res.json({ models, channels, keys })
 })
 
 // 单条详情：fields 为空时只取元数据，省略时维持完整详情接口。
