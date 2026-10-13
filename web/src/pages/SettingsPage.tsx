@@ -4,26 +4,29 @@ import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Input, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
-import { IconBolt, IconCopy, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
+import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Settings } from '../types'
+import type { Settings, SystemInfo } from '../types'
 
 // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
 const KEYS: (keyof Settings)[] = [
   'single_retry_times', 'channel_retry_times', 'retry_interval_ms', 'request_timeout_ms', 'request_max_duration_ms',
   'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
+  'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
 ]
 
 export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
+  const [system, setSystem] = useState<SystemInfo | null>(null)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
     const controller = new AbortController()
     api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    api.getSystem(controller.signal).then(value => { if (!controller.signal.aborted) setSystem(value) }).catch(() => {})
     return () => controller.abort()
   }, [toast])
 
@@ -88,11 +91,11 @@ export function SettingsPage() {
         <div className="ah-set-title">
           <IconBolt size={18} /> 对外入口地址
         </div>
-        <div className="ah-set-desc">把下面地址填进客户端(SillyTavern 等)即可使用，内网默认免鉴权</div>
+        <div className="ah-set-desc">内网地址，填进客户端（SillyTavern 等）即可使用；带分发 Key 调用时按 Key 的权限和额度限制</div>
         <EndpointRow label="OpenAI 兼容" url={`${origin}/v1`} />
         <EndpointRow label="Anthropic 原生" url={`${origin}`} />
         <EndpointRow label="OpenAI Responses" url={`${origin}/v1/responses`} />
-        <SettingRow label="访问令牌" desc="可选 · 同时保护对外入口与本管理界面（Bearer / x-api-key）；留空 = 内网免鉴权">
+        <SettingRow label="管理令牌" desc="保护本管理界面和内网 /v1 匿名调用（Bearer / x-api-key）；公网端口不接受管理令牌，只接受分发 Key。留空 = 内网免鉴权">
           <Input
             value={s.access_token}
             onChange={(e) => set('access_token', e.target.value)}
@@ -100,6 +103,24 @@ export function SettingsPage() {
             type="password"
             autoComplete="off"
           />
+        </SettingRow>
+      </Card>
+
+      {/* 公网分发 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconExternal size={18} /> 公网分发
+        </div>
+        <div className="ah-set-desc">
+          {system?.public_enabled
+            ? `公网端口已开启：监听 ${system.public_host}:${system.public_port}`
+            : '公网端口未开启：设置环境变量 AGGHUB_PUBLIC_PORT 后重启生效'}
+        </div>
+        <SettingRow label="trust proxy" desc="公网端口从 X-Forwarded-For 取客户端 IP 的策略">
+          <code className="ah-mini ah-muted">{system?.trust_proxy ?? '—'}</code>
+        </SettingRow>
+        <SettingRow label="公网 Base URL" desc="仅用于在令牌页复制接入信息">
+          <Input value={s.public_base_url} onChange={(e) => set('public_base_url', e.target.value)} placeholder="https://api.example.com" />
         </SettingRow>
       </Card>
 
@@ -132,9 +153,17 @@ export function SettingsPage() {
           <Toggle checked={s.auto_ban} onChange={(v) => set('auto_ban', v)} />
         </SettingRow>
         {s.auto_ban && (
-          <SettingRow label="熔断状态码" desc="逗号分隔，命中即自动停用渠道">
-            <Input value={s.auto_ban_codes} onChange={(e) => set('auto_ban_codes', e.target.value)} placeholder="401,403" />
-          </SettingRow>
+          <>
+            <SettingRow label="熔断状态码" desc="逗号分隔，命中即自动停用渠道">
+              <Input value={s.auto_ban_codes} onChange={(e) => set('auto_ban_codes', e.target.value)} placeholder="401,403" />
+            </SettingRow>
+            <SettingRow label="连续失败次数" desc="连续命中熔断状态码达到次数才停用渠道；公网分发建议 3">
+              <Slider value={s.auto_ban_threshold} min={1} max={20} onChange={(v) => set('auto_ban_threshold', v)} suffix=" 次" />
+            </SettingRow>
+            <SettingRow label="自动恢复" desc="自动停用后多少分钟恢复启用，0 = 只能手动恢复；恢复后再命中一次会立即停用">
+              <Slider value={s.auto_ban_cooldown_minutes} min={0} max={240} step={5} onChange={(v) => set('auto_ban_cooldown_minutes', v)} suffix=" 分钟" />
+            </SettingRow>
+          </>
         )}
         <SettingRow label="HTTP 代理" desc="上游请求经此代理转发，留空不使用代理">
           <Input
@@ -182,7 +211,7 @@ export function SettingsPage() {
       </fieldset>
       <div className="ah-mini ah-faint" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
         <IconSettings size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
-        AggHub · 轻量内网渠道聚合网关
+        AggHub · 渠道聚合网关
       </div>
     </div>
   )

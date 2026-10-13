@@ -7,7 +7,7 @@ import { IconPlus } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Loading, StatusPill } from '../components/Primitives'
 import { useToast } from '../components/Toast'
-import type { EntryFormat, LogItem } from '../types'
+import type { CallerSource, EntryFormat, LogItem } from '../types'
 
 // 预处理页各规则编辑器共用的小件：选项类型 / 入口格式选项 / 多选 chips / 限定范围 / 规则列表 / 历史请求选择弹窗
 
@@ -17,6 +17,12 @@ export const FORMAT_OPTIONS: Opt[] = [
   { value: 'openai', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'responses', label: 'Responses' },
+]
+
+export const SOURCE_OPTIONS: Opt[] = [
+  { value: 'owner', label: '内网匿名' },
+  { value: 'lan_key', label: '内网 Key' },
+  { value: 'public_key', label: '公网 Key' },
 ]
 
 /** 入口格式显示名 */
@@ -73,14 +79,15 @@ export function MultiChips({
   )
 }
 
-type Scope = { formats?: EntryFormat[]; channelIds?: number[]; models?: string[] }
+type Scope = { formats?: EntryFormat[]; channelIds?: number[]; models?: string[]; sources?: CallerSource[]; keyIds?: number[] }
 
-/** 三类规则共用的限定范围：入口格式 / 渠道 / 模型，不选即不限定 */
-export function ScopeFields({ rule, onChange, channelOptions, modelOptions }: {
+/** 三类规则共用的限定范围：入口格式 / 渠道 / 模型 / 调用来源 / Key，不选即不限定 */
+export function ScopeFields({ rule, onChange, channelOptions, modelOptions, keyOptions }: {
   rule: Scope
   onChange: (patch: Scope) => void
   channelOptions: Opt[]
   modelOptions: Opt[]
+  keyOptions: Opt[]
 }) {
   return (
     <>
@@ -107,6 +114,21 @@ export function ScopeFields({ rule, onChange, channelOptions, modelOptions }: {
           empty="暂无模型（渠道未配置 models）"
         />
       </Field>
+      <Field label="调用来源（不选 = 全部）">
+        <MultiChips
+          options={SOURCE_OPTIONS}
+          selected={rule.sources ?? []}
+          onChange={(v) => onChange({ sources: v.length ? (v as CallerSource[]) : undefined })}
+        />
+      </Field>
+      <Field label="限定 Key（不选 = 全部）">
+        <MultiChips
+          options={keyOptions}
+          selected={(rule.keyIds ?? []).map(String)}
+          onChange={(v) => onChange({ keyIds: v.length ? v.map(Number) : undefined })}
+          empty="暂无 Key"
+        />
+      </Field>
     </>
   )
 }
@@ -118,6 +140,7 @@ export type RuleRowProps<T> = {
   rule: T
   channelOptions: Opt[]
   modelOptions: Opt[]
+  keyOptions: Opt[]
   expanded: boolean
   onToggleExpand: () => void
   onChange: (r: T) => void
@@ -134,6 +157,7 @@ export function RuleList<T extends { id: string }>({
   setExpanded,
   channelOptions,
   modelOptions,
+  keyOptions,
   Row,
   sortable,
   toolbar,
@@ -145,6 +169,7 @@ export function RuleList<T extends { id: string }>({
   setExpanded: Dispatch<SetStateAction<Set<string>>>
   channelOptions: Opt[]
   modelOptions: Opt[]
+  keyOptions: Opt[]
   Row: ComponentType<RuleRowProps<T>>
   sortable?: boolean
   toolbar?: ReactNode
@@ -196,6 +221,7 @@ export function RuleList<T extends { id: string }>({
               rule={r}
               channelOptions={channelOptions}
               modelOptions={modelOptions}
+              keyOptions={keyOptions}
               expanded={expanded.has(r.id)}
               onToggleExpand={() => toggle(r.id)}
               onChange={(next) => onChange(rules.map((x) => (x.id === next.id ? next : x)))}

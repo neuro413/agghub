@@ -24,6 +24,7 @@ interface FormState {
   mapping: string
   priority: number
   weight: number
+  groups: string
   region: string
   timeout: string
   ua_override: boolean
@@ -49,7 +50,7 @@ function singleRoleHint(f: FormState): string {
 function initForm(c: Channel | null): FormState {
   if (!c)
     return {
-      name: '', type: 'openai', base_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, region: '', timeout: '',
+      name: '', type: 'openai', base_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, groups: 'default', region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
       exclude_last_user: false,
     }
@@ -62,6 +63,7 @@ function initForm(c: Channel | null): FormState {
     mapping: c.model_mapping ? Object.entries(c.model_mapping).map(([k, v]) => `${k}=${v}`).join('\n') : '',
     priority: c.priority,
     weight: c.weight,
+    groups: c.groups?.length ? c.groups.join(', ') : 'default',
     region: c.region || '',
     timeout: c.timeout_ms ? String(c.timeout_ms) : '',
     ua_override: !!c.ua_override,
@@ -76,6 +78,7 @@ function initForm(c: Channel | null): FormState {
 
 function buildPayload(f: FormState): Partial<Channel> {
   const models = f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)
+  const groups = [...new Set(f.groups.split(/[,，]/).map((s) => s.trim()).filter(Boolean))]
   const mapping: Record<string, string> = {}
   f.mapping.split('\n').forEach((line) => {
     const i = line.indexOf('=')
@@ -94,6 +97,7 @@ function buildPayload(f: FormState): Partial<Channel> {
     model_mapping: Object.keys(mapping).length ? mapping : null,
     priority: f.priority,
     weight: f.weight,
+    groups: groups.length ? groups : ['default'],
     region: f.type === 'vertex' ? f.region.trim() || null : null,
     timeout_ms: f.timeout ? Number(f.timeout) : null,
     ua_override: f.ua_override,
@@ -347,6 +351,10 @@ export function ChannelModal({
             <span className="ah-mini ah-muted">最后 user 除外</span>
           </div>
         )}
+      </Field>
+
+      <Field label="分组" hint="Key 只能使用与自己分组有交集的渠道；内网匿名调用不受分组限制。多个分组用逗号分隔，例如 public, vip">
+        <Input value={f.groups} onChange={(e) => set('groups', e.target.value)} placeholder="default" />
       </Field>
 
       <div className="ah-grid2">

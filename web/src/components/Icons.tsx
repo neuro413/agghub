@@ -210,3 +210,12 @@ export const IconGrip = (p: IconProps) => (
     <circle cx="15" cy="18" r="1" />
   </S>
 )
+
+export const IconKey = (p: IconProps) => (
+  <S {...p}>
+    <circle cx="7.5" cy="16.5" r="4.5" />
+    <path d="M10.8 13.2 20 4" />
+    <path d="M16.5 7.5 19.5 10.5" />
+    <path d="M14 10 17 13" />
+  </S>
+)

@@ -155,6 +155,16 @@ function ChannelCard({
         </div>
       </div>
 
+      {(c.groups ?? []).length > 0 && (
+        <div className="ah-pp-chips">
+          {c.groups.map((g) => (
+            <span key={g} className="ah-tag">
+              {g}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="ah-chan-stat">
         <span className="ah-muted ah-mini">
           今日 <b className="ah-num">{req}</b> 次
@@ -170,6 +180,11 @@ function ChannelCard({
       <div className="ah-chan-actions">
         <Toggle checked={c.status === 1} onChange={onToggle} />
         <span className="ah-mini ah-muted">{statusText(c.status)}</span>
+        {c.status === 2 && c.ban_until != null && (
+          <span className="ah-mini ah-num" style={{ color: 'var(--warn)', fontWeight: 700 }}>
+            {Math.max(1, Math.ceil((c.ban_until - Date.now()) / 60000))} 分钟后自动恢复
+          </span>
+        )}
         <span className="sp" />
         <IconButton title="编辑" onClick={onEdit}>
           <IconEdit size={17} />

@@ -7,9 +7,10 @@ import { MiniBar } from '../charts/MiniBar'
 import { StatCard } from '../charts/StatCard'
 import { IconButton, Button } from '../components/Button'
 import { Card } from '../components/Card'
-import { IconBolt, IconCheck, IconChevronRight, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
+import { Dropdown } from '../components/Form'
+import { IconBolt, IconCheck, IconChevronRight, IconKey, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
 import { useToast } from '../components/Toast'
-import type { LogItem, Stats } from '../types'
+import type { ApiKeyView, LogItem, Stats } from '../types'
 import { StatusPill } from '../components/Primitives'
 
 const RANGES: { k: string; label: string }[] = [
@@ -21,6 +22,8 @@ const RANGES: { k: string; label: string }[] = [
 
 export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   const [range, setRange] = useState('24h')
+  const [keyId, setKeyId] = useState('')
+  const [keys, setKeys] = useState<ApiKeyView[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [logs, setLogs] = useState<LogItem[]>([])
   const [refresh, setRefresh] = useState(0)
@@ -28,20 +31,29 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
 
   const load = useCallback(async (signal: AbortSignal) => {
     try {
-      const [s, l] = await Promise.all([api.getStats(range, signal), api.listLogs({ limit: 5 }, signal)])
+      const [s, l] = await Promise.all([
+        api.getStats(range, signal, { key_id: keyId ? Number(keyId) : undefined }),
+        api.listLogs({ limit: 5 }, signal),
+      ])
       if (signal.aborted) return
       setStats(s)
       setLogs(l.items)
     } catch (e: any) {
       if (!signal.aborted) toast('err', e.message)
     }
-  }, [range, toast])
+  }, [range, keyId, toast])
 
   useEffect(() => {
     const controller = new AbortController()
     load(controller.signal)
     return () => controller.abort()
   }, [load, refresh])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    api.listKeys(controller.signal).then((value) => { if (!controller.signal.aborted) setKeys(value) }).catch(() => {})
+    return () => controller.abort()
+  }, [])
 
   const ov = stats?.overview
   const rate = Math.round((ov?.success_rate ?? 1) * 100)
@@ -54,6 +66,13 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
           <div className="ah-page-sub">请求趋势 · 渠道分布 · 调用明细</div>
         </div>
         <div className="ah-row">
+          <div style={{ width: 170 }}>
+            <Dropdown
+              value={keyId}
+              onChange={setKeyId}
+              options={[{ value: '', label: '全部 Key' }, ...keys.map((k) => ({ value: String(k.id), label: k.name }))]}
+            />
+          </div>
           <div className="ah-range">
             {RANGES.map((r) => (
               <button key={r.k} className={range === r.k ? 'is-active' : ''} onClick={() => setRange(r.k)}>
@@ -71,6 +90,7 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
         <StatCard icon={<IconBolt size={19} />} label="总请求" value={ov?.total ?? 0} sub={`成功 ${ov?.success ?? 0} · 失败 ${ov?.error ?? 0}`} />
         <StatCard icon={<IconCheck size={19} />} label="成功率" value={`${rate}%`} sub={ov && ov.total ? `${ov.success}/${ov.total}` : '暂无调用'} />
         <StatCard icon={<IconSpark size={19} />} label="总 Token" value={fmtNum(ov?.total_tokens)} sub="prompt + completion" />
+        <StatCard icon={<IconKey size={19} />} label="总点数" value={fmtNum(ov?.total_points)} sub="按模型倍率折算" />
         <StatCard icon={<IconTrend size={19} />} label="平均延迟" value={`${ov?.avg_latency ?? 0}`} sub="毫秒 / 请求" />
       </div>
 
@@ -101,6 +121,31 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
           <LineChart data={stats?.trend.map((t) => t.tokens) ?? []} />
         </Card>
       </div>
+
+      <Card className="ah-chart-card" style={{ marginBottom: 'var(--sp-5)' }}>
+        <div className="ah-chart-title">Key 分布</div>
+        {!stats?.by_key?.length ? (
+          <div className="ah-muted ah-mini" style={{ padding: '34px 0', textAlign: 'center' }}>
+            暂无数据
+          </div>
+        ) : (
+          <div className="ah-keydist">
+            {stats.by_key.map((b) => {
+              const bRate = b.count ? Math.round((b.success / b.count) * 100) : 100
+              return (
+                <div key={b.key_id} className="ah-keydist-row">
+                  <span className="ah-truncate ah-keydist-name">{b.key_name || '#' + b.key_id}</span>
+                  <span className="ah-mini ah-muted ah-num">{b.count} 次</span>
+                  <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
+                    {bRate}%
+                  </span>
+                  <span className="ah-mini ah-num">{fmtNum(b.points)} 点</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </Card>
 
       <Card className="ah-chart-card ah-logs-card">
         <div className="ah-chart-title" style={{ padding: '0 8px', marginBottom: 8 }}>

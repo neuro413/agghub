@@ -9,7 +9,7 @@ import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { parseConversation, parseTools, roleClass } from '../lib/requestBody'
 import type { ToolInfo } from '../lib/requestBody'
-import type { Channel, LogDetail, PreprocessRule, Settings, ToolFilterRule } from '../types'
+import type { ApiKeyView, Channel, LogDetail, PreprocessRule, Settings, ToolFilterRule } from '../types'
 import { ThinkingStoreModal } from './ThinkingStoreModal'
 import { ParamRuleRow, newParamRule } from './ParamRuleEditor'
 import { LogPickerModal, MultiChips, RuleList, ScopeFields, regexValid } from './preprocessShared'
@@ -47,6 +47,7 @@ export function PreprocessPage() {
   const toast = useToast()
   const [s, setS] = useState<Settings | null>(null)
   const [channels, setChannels] = useState<Channel[]>([])
+  const [keys, setKeys] = useState<ApiKeyView[]>([])
   const [subtab, setSubtab] = useState<'visual' | 'regex'>('regex')
   const [saving, setSaving] = useState(false)
   const [dirty, setDirty] = useState(false)
@@ -58,6 +59,8 @@ export function PreprocessPage() {
     const controller = new AbortController()
     api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
     api.listChannels(controller.signal).then(value => { if (!controller.signal.aborted) setChannels(value) }).catch(() => {})
+    // Key 加载失败静默处理，不影响规则编辑
+    api.listKeys(controller.signal).then(value => { if (!controller.signal.aborted) setKeys(value) }).catch(() => {})
     return () => controller.abort()
   }, [toast])
 
@@ -68,6 +71,7 @@ export function PreprocessPage() {
     return [...set].sort().map((m) => ({ value: m, label: m }))
   }, [channels])
   const channelOptions = useMemo<Opt[]>(() => channels.map((c) => ({ value: String(c.id), label: c.name })), [channels])
+  const keyOptions = useMemo<Opt[]>(() => keys.map((k) => ({ value: String(k.id), label: k.name })), [keys])
   const anthChannelOptions = useMemo<Opt[]>(
     () => channels.filter((c) => c.type === 'anthropic' || c.type === 'vertex').map((c) => ({ value: String(c.id), label: c.name })),
     [channels],
@@ -82,7 +86,7 @@ export function PreprocessPage() {
     patch('preprocess_rules', [...rules, r])
     setExpanded((prev) => new Set(prev).add(r.id))
   }
-  const lists = { expanded, setExpanded, channelOptions, modelOptions }
+  const lists = { expanded, setExpanded, channelOptions, modelOptions, keyOptions }
 
   const tagError = s && (!s.pseudo_thinking_open_tag.trim() || !s.pseudo_thinking_close_tag.trim() || s.pseudo_thinking_open_tag === s.pseudo_thinking_close_tag || s.pseudo_thinking_open_tag.length > 256 || s.pseudo_thinking_close_tag.length > 256)
     ? '伪思考开始/结束标签须非空、不同且各不超过 256 字符，请在高级设置中修正。' : ''
@@ -433,7 +437,7 @@ export function PreprocessPage() {
   )
 }
 
-function RuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<PreprocessRule>) {
+function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<PreprocessRule>) {
   const [test, setTest] = useState('')
   const reValid = regexValid(rule.pattern, rule.flags)
   const tested = test && reValid && rule.pattern ? test.replace(new RegExp(rule.pattern, rule.flags || 'g'), rule.replacement ?? '') : null
@@ -498,7 +502,7 @@ function RuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand,
           <Field label="作用角色（不选 = 全部）">
             <MultiChips options={ROLE_OPTIONS} selected={rule.roles ?? []} onChange={(v) => up({ roles: v.length ? v : undefined })} />
           </Field>
-          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} keyOptions={keyOptions} />
           <Field label="测试预览">
             <Textarea value={test} onChange={(e) => setTest(e.target.value)} placeholder="粘贴一段文本，实时查看替换效果" rows={2} />
             {test && <pre className="ah-code ah-code-block ah-pp-test-out">{reValid ? tested ?? '' : '（正则无效）'}</pre>}
@@ -623,7 +627,7 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
   )
 }
 
-function ToolFilterRuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete }: RuleRowProps<ToolFilterRule>) {
+function ToolFilterRuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onToggleExpand, onChange, onDelete }: RuleRowProps<ToolFilterRule>) {
   const toast = useToast()
   const [picking, setPicking] = useState(false)
   const [importable, setImportable] = useState<ToolInfo[] | null>(null)
@@ -703,7 +707,7 @@ function ToolFilterRuleRow({ rule, channelOptions, modelOptions, expanded, onTog
               </Button>
             </div>
           </Field>
-          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} keyOptions={keyOptions} />
         </div>
       )}
       {picking && <LogPickerModal onPick={pickLog} onClose={() => setPicking(false)} />}
