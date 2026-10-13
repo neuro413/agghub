@@ -61,6 +61,8 @@ export function ruleMatchesMeta(rule: RuleScope, meta: Pick<PreprocessMeta, 'ent
   if (rule.formats?.length && !rule.formats.includes(meta.entryFormat)) return false
   if (rule.channelIds?.length && !rule.channelIds.includes(meta.channelId)) return false
   if (rule.models?.length && !rule.models.includes(meta.model)) return false
+  if (rule.sources?.length && !rule.sources.includes(meta.source ?? 'owner')) return false
+  if (rule.keyIds?.length && (meta.keyId == null || !rule.keyIds.includes(meta.keyId))) return false
   return true
 }
 
