@@ -3,6 +3,8 @@ import { HOST, PORT, PUBLIC_HOST, PUBLIC_PORT } from './config'
 import { cleanupOldLogs } from './stats/recorder'
 import { recoverChannels } from './core/channelHealth'
 
+if (PUBLIC_PORT && PUBLIC_PORT === PORT) throw new Error('AGGHUB_PUBLIC_PORT 不能与 PORT 相同')
+
 const lan = createApp('lan')
 const onLanListening = () => {
   console.log(`🍊 AggHub 内网入口已启动: http://${HOST || 'localhost'}:${PORT}`)
@@ -11,7 +13,6 @@ if (HOST) lan.listen(PORT, HOST, onLanListening)
 else lan.listen(PORT, onLanListening)
 
 if (PUBLIC_PORT) {
-  if (PUBLIC_PORT === PORT) throw new Error('AGGHUB_PUBLIC_PORT 不能与 PORT 相同')
   createApp('public').listen(PUBLIC_PORT, PUBLIC_HOST, () => {
     console.log(`🌐 AggHub 公网入口已启动: http://${PUBLIC_HOST}:${PUBLIC_PORT}（仅 /v1，需要 API Key）`)
   })

@@ -125,6 +125,7 @@ channelsRouter.put('/:id', (req, res) => {
   const input = req.body as ChannelInput
   const err = validate({ ...existing, ...input })
   if (err) return res.status(400).json({ error: err })
+  const statusChanged = input.status !== undefined && Number(input.status) !== existing.status
 
   db.prepare(
     `UPDATE channels SET
@@ -166,11 +167,11 @@ channelsRouter.put('/:id', (req, res) => {
         ? (input.single_role_exclude_last_user ? 1 : 0)
         : existing.single_role_exclude_last_user ? 1 : 0,
     groups: input.groups !== undefined ? JSON.stringify(normalizeGroups(input.groups)) : JSON.stringify(existing.groups),
-    ban_until: input.status !== undefined ? null : existing.ban_until,
+    ban_until: statusChanged ? null : existing.ban_until,
     updated_at: Date.now(),
   })
-  // 手动改状态视为恢复：清掉熔断恢复时间与内存计数
-  if (input.status !== undefined) resetChannelHealth(id)
+  // 手动改状态视为恢复：清掉熔断恢复时间与内存计数；状态没变（如编辑名称时回传原状态）不影响自动恢复
+  if (statusChanged) resetChannelHealth(id)
   res.json(getChannelById(id))
 })
 

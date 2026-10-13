@@ -251,8 +251,9 @@ export function applyQuotaOp(id: number, op: KeyQuotaOp): ApiKey | null {
   const now = Date.now()
   if (op.op === 'reset_used') {
     db.prepare('UPDATE api_keys SET quota_used = 0, updated_at = ? WHERE id = ?').run(now, id)
-  } else {
-    const total = Math.max(0, (existing.quota_total ?? 0) + op.value)
+  } else if (existing.quota_total != null) {
+    // 不限额的 Key 增加额度没有意义，保持不限
+    const total = Math.max(0, existing.quota_total + op.value)
     db.prepare('UPDATE api_keys SET quota_total = ?, updated_at = ? WHERE id = ?').run(total, now, id)
   }
   return getKeyById(id)
