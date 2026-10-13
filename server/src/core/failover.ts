@@ -1,3 +1,4 @@
+import net from 'node:net'
 import { RequestStopped } from './requestLifecycle'
 
 export class LocalRequestError extends Error {
@@ -75,8 +76,17 @@ export function errorKind(error: unknown): ErrorKind {
   return 'network'
 }
 
-// 【签名桩】由「安全加固」任务实现；导出名称和参数类型不得修改，relay.ts 按此调用。
 /** 公网端口返回给客户端前的错误信息脱敏；日志仍记录原文 */
-export function sanitizePublicError(_kind: ErrorKind, message: string): string {
-  return message
+export function sanitizePublicError(kind: ErrorKind, message: string): string {
+  if (kind === 'network') return '上游连接失败'
+  if (kind === 'local') return message
+  // 上游错误：抹掉 URL、IP 与疑似密钥，再截断
+  let text = message
+  text = text.replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
+  text = text.replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, m => net.isIPv4(m.split(':')[0]) ? '[ip]' : m)
+  text = text.replace(/[0-9a-f]*:[0-9a-f:]*:[0-9a-f]*/gi, m => net.isIPv6(m) ? '[ip]' : m)
+  text = text.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[redacted]')
+  text = text.replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')
+  const trimmed = text.slice(0, 300).trim()
+  return trimmed || '上游返回错误'
 }
