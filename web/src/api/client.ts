@@ -1,5 +1,11 @@
 import type {
+  ApiKeyInput,
+  ApiKeyView,
+  BillingPreviewInput,
+  BillingPreviewResult,
   Channel,
+  KeyQuotaOp,
+  KeyUsageDay,
   LogDetail,
   LogBodyField,
   PartialLogDetail,
@@ -9,6 +15,7 @@ import type {
   ParamTestResult,
   Settings,
   Stats,
+  SystemInfo,
   TestResult,
   ThinkingDetail,
   ThinkingEntry,
@@ -69,12 +76,29 @@ export const api = {
   testChannel: (data: Partial<Channel>) =>
     req<TestResult>('/channels/test', { method: 'POST', body: JSON.stringify(data) }),
 
+  // ── 分发与令牌 ──
+  listKeys: (signal?: AbortSignal) => req<ApiKeyView[]>('/keys', { signal }),
+  createKey: (data: ApiKeyInput) => req<ApiKeyView>('/keys', { method: 'POST', body: JSON.stringify(data) }),
+  updateKey: (id: number, data: ApiKeyInput) => req<ApiKeyView>(`/keys/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteKey: (id: number) => req<{ ok: boolean }>(`/keys/${id}`, { method: 'DELETE' }),
+  regenerateKey: (id: number) => req<ApiKeyView>(`/keys/${id}/regenerate`, { method: 'POST' }),
+  keyQuota: (id: number, op: KeyQuotaOp) => req<ApiKeyView>(`/keys/${id}/quota`, { method: 'POST', body: JSON.stringify(op) }),
+  keyUsage: (id: number, days: number, signal?: AbortSignal) => req<KeyUsageDay[]>(`/keys/${id}/usage?days=${days}`, { signal }),
+  listGroups: (signal?: AbortSignal) => req<string[]>('/groups', { signal }),
+  getSystem: (signal?: AbortSignal) => req<SystemInfo>('/system', { signal }),
+  billingPreview: (data: BillingPreviewInput) => req<BillingPreviewResult>('/billing/preview', { method: 'POST', body: JSON.stringify(data) }),
+
   // ── 设置 ──
   getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),
   updateSettings: (data: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
 
   // ── 统计 ──
-  getStats: (range: string, signal?: AbortSignal) => req<Stats>(`/stats?range=${range}`, { signal }),
+  getStats: (range: string, signal?: AbortSignal, filters: { key_id?: number; source?: string } = {}) => {
+    const query = new URLSearchParams({ range })
+    if (filters.key_id != null) query.set('key_id', String(filters.key_id))
+    if (filters.source) query.set('source', filters.source)
+    return req<Stats>(`/stats?${query.toString()}`, { signal })
+  },
 
   // ── 日志 ──
   listLogs: (
@@ -87,6 +111,8 @@ export const api = {
       entry_format?: string
       is_stream?: string
       q?: string
+      key_id?: number
+      source?: string
     } = {},
     signal?: AbortSignal,
   ) => {
@@ -99,6 +125,8 @@ export const api = {
     if (p.entry_format) query.set('entry_format', p.entry_format)
     if (p.is_stream) query.set('is_stream', p.is_stream)
     if (p.q) query.set('q', p.q)
+    if (p.key_id != null) query.set('key_id', String(p.key_id))
+    if (p.source) query.set('source', p.source)
     return req<{ total: number; limit: number; offset: number; items: LogItem[] }>(`/logs?${query.toString()}`, { signal })
   },
   getLog: (id: number, signal?: AbortSignal) => req<LogDetail>(`/logs/${id}`, { signal }),

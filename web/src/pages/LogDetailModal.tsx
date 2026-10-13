@@ -8,12 +8,19 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
-import { prettyJson } from '../lib/format'
+import { fmtNum, prettyJson } from '../lib/format'
 import { Loading, StatusPill } from '../components/Primitives'
-import type { LogBodyField, LogItem, PartialLogDetail } from '../types'
+import type { CallerSource, LogBodyField, LogItem, PartialLogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
 
 const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|password|proxy-authorization/i
+
+/** owner / null 按内网匿名显示 */
+function sourceLabel(s: CallerSource | null): string {
+  if (s === 'lan_key') return '内网 Key'
+  if (s === 'public_key') return '公网 Key'
+  return '内网匿名'
+}
 
 function maskValue(v: string): string {
   const s = String(v)
@@ -202,6 +209,10 @@ function LogMeta({ detail }: { detail: LogItem }) {
       {detail.is_stream ? <span className="ah-tag">stream</span> : null}
       <span className="sp" style={{ flex: 1 }} />
       <span className="ah-mini ah-muted">{detail.channel_name || '—'}</span>
+      <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
+      {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}
+      {detail.client_ip && <span className="ah-mini ah-muted ah-num">IP：{detail.client_ip}</span>}
+      {detail.quota_points != null && <span className="ah-mini ah-muted ah-num">{fmtNum(detail.quota_points)} 点</span>}
       <span className="ah-mini ah-muted ah-num" title="输入 + 输出（缓存读取 + 缓存写入）；输入已含缓存读写部分">
         {detail.prompt_tokens || 0}+{detail.completion_tokens || 0}（{detail.cache_read_tokens || 0}+{detail.cache_write_tokens || 0}）token
       </span>

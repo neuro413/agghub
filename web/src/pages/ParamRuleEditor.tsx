@@ -70,7 +70,7 @@ function previewBody(body: any): string {
   return JSON.stringify(out, null, 2)
 }
 
-export function ParamRuleRow({ rule, channelOptions, modelOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<ParamRule>) {
+export function ParamRuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<ParamRule>) {
   const toast = useToast()
   const [testInput, setTestInput] = useState('')
   const [testOut, setTestOut] = useState<ParamTestResult | null>(null)
@@ -173,7 +173,7 @@ export function ParamRuleRow({ rule, channelOptions, modelOptions, expanded, onT
               </Button>
             </div>
           </Field>
-          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} />
+          <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} keyOptions={keyOptions} />
           <Field
             label="测试预览"
             hint="粘贴一份请求体 JSON 或从日志里选一条，查看本条规则应用后的参数部分。实际运行时规则作用于发往上游的最终请求体，同格式直通时与此一致"

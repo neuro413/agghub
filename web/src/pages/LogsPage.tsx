@@ -29,9 +29,17 @@ interface Filters {
   is_stream: string
   channel_id: string
   model: string
+  source: string
+  key_id: string
 }
 
-const EMPTY: Filters = { q: '', status: '', entry_format: '', is_stream: '', channel_id: '', model: '' }
+const EMPTY: Filters = { q: '', status: '', entry_format: '', is_stream: '', channel_id: '', model: '', source: '', key_id: '' }
+
+/** Key 标签：公网 / 内网前缀 + Key 名称快照 */
+function keyLabel(l: LogItem): string {
+  const prefix = l.source === 'public_key' ? '公网 ' : l.source === 'lan_key' ? '内网 ' : ''
+  return prefix + (l.key_name || '#' + l.key_id)
+}
 
 export function LogsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY)
@@ -41,7 +49,7 @@ export function LogsPage() {
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [refresh, setRefresh] = useState(0)
-  const [facets, setFacets] = useState<LogFacets>({ models: [], channels: [] })
+  const [facets, setFacets] = useState<LogFacets>({ models: [], channels: [], keys: [] })
   const [openId, setOpenId] = useState<number | null>(null)
   const toast = useToast()
 
@@ -70,6 +78,8 @@ export function LogsPage() {
         channel_id: filters.channel_id ? Number(filters.channel_id) : undefined,
         model: filters.model || undefined,
         q: filters.q || undefined,
+        source: filters.source || undefined,
+        key_id: filters.key_id ? Number(filters.key_id) : undefined,
       }, signal)
       if (signal.aborted) return
       setTotal(r.total)
@@ -130,7 +140,7 @@ export function LogsPage() {
     }
   }
 
-  const hasFilter = filters.q || filters.status || filters.entry_format || filters.is_stream || filters.channel_id || filters.model
+  const hasFilter = filters.q || filters.status || filters.entry_format || filters.is_stream || filters.channel_id || filters.model || filters.source || filters.key_id
   const page = Math.floor(offset / PAGE_SIZE) + 1
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -205,6 +215,24 @@ export function LogsPage() {
             ...facets.models.map((m) => ({ value: m.model, label: `${m.model} (${m.n})` })),
           ]}
         />
+        <Dropdown
+          value={filters.source}
+          onChange={(v) => setF('source', v)}
+          options={[
+            { value: '', label: '全部来源' },
+            { value: 'owner', label: '内网匿名' },
+            { value: 'lan_key', label: '内网 Key' },
+            { value: 'public_key', label: '公网 Key' },
+          ]}
+        />
+        <Dropdown
+          value={filters.key_id}
+          onChange={(v) => setF('key_id', v)}
+          options={[
+            { value: '', label: '全部 Key' },
+            ...facets.keys.map((k) => ({ value: String(k.key_id), label: `${k.key_name || '#' + k.key_id} (${k.n})` })),
+          ]}
+        />
         {hasFilter && (
           <Button variant="ghost" size="sm" onClick={reset}>
             重置
@@ -246,7 +274,19 @@ export function LogsPage() {
                   {l.pseudo_thinking ? <span className="ah-tag ah-tag-think" style={{ marginLeft: 6 }}>伪思考</span> : null}
                   {l.retry_count ? <span className="ah-tag ah-tag-warn" style={{ marginLeft: 6 }}>×{l.retry_count}</span> : null}
                 </span>
-                <span className="ah-mini ah-muted ah-truncate">{l.channel_name || '—'}</span>
+                <span className="ah-mini ah-muted ah-truncate">
+                  {l.channel_name || '—'}
+                  {l.key_id != null && (
+                    <span className={`ah-tag${l.source === 'public_key' ? ' ah-tag-pub' : ''}`} style={{ marginLeft: 6 }}>
+                      {keyLabel(l)}
+                    </span>
+                  )}
+                  {l.quota_points != null && (
+                    <span className="ah-mini ah-faint ah-num" style={{ marginLeft: 6 }}>
+                      {fmtNum(l.quota_points)} 点
+                    </span>
+                  )}
+                </span>
               </span>
               <span className="c-tok ah-mini ah-muted ah-num">{fmtNum(l.total_tokens)}</span>
               <span className="c-lat ah-mini ah-muted ah-num">{l.latency_ms ?? 0}ms</span>

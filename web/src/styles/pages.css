@@ -96,7 +96,7 @@
 /* ── 统计概览卡 ── */
 .ah-stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: var(--sp-4);
   margin-bottom: var(--sp-5);
 }
@@ -1099,4 +1099,159 @@
 }
 .ah-pp-test-out-lg {
   max-height: 320px;
+}
+
+/* ── 令牌页 ── */
+.ah-key-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.ah-key-list > .ah-skel {
+  height: 150px;
+}
+.ah-key-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ah-key-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--orange-50);
+  border-radius: var(--r-md);
+}
+.ah-key-secret-val {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--orange-700);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ah-key-quota {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ah-key-quota-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ah-key-quota-row > .ah-mini:first-child {
+  flex: none;
+  width: 52px;
+  font-weight: 700;
+}
+.ah-key-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: var(--fs-xs);
+  color: var(--ink-soft);
+}
+.ah-key-meta .is-err {
+  color: var(--err);
+  font-weight: 700;
+}
+.ah-tag-pub {
+  background: #e8f1fb;
+  color: #3b7fc4;
+}
+
+/* ── 统计页 · Key 分布 ── */
+.ah-keydist {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ah-keydist-row {
+  display: grid;
+  grid-template-columns: 1.6fr 0.8fr 0.7fr 0.9fr;
+  gap: 10px;
+  align-items: center;
+}
+.ah-keydist-name {
+  font-weight: 700;
+  color: var(--ink);
+}
+
+/* ── 模型倍率卡片 ── */
+.ah-ratio-card {
+  margin-top: var(--sp-4);
+}
+.ah-ratio-table {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ah-ratio-head,
+.ah-ratio-row {
+  display: grid;
+  grid-template-columns: 1.7fr repeat(5, minmax(58px, 0.8fr)) 40px;
+  gap: 8px;
+  align-items: center;
+}
+.ah-ratio-head {
+  font-size: var(--fs-xs);
+  color: var(--ink-faint);
+  font-weight: 700;
+  padding: 0 4px;
+}
+.ah-ratio-head span:not(:first-child) {
+  text-align: center;
+}
+.ah-ratio-row .ah-input {
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+.ah-ratio-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.ah-ratio-trial {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line-soft);
+}
+.ah-ratio-trial-grid {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(4, 0.9fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.ah-ratio-trial-grid .ah-input {
+  padding: 8px 10px;
+  font-size: var(--fs-sm);
+}
+.ah-ratio-trial-out {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--ok-bg);
+  color: #2f9c6c;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.ah-ratio-trial-out.is-empty {
+  background: var(--err-bg);
+  color: var(--err);
+}
+@media (max-width: 720px) {
+  .ah-ratio-head {
+    display: none;
+  }
+  .ah-ratio-row,
+  .ah-ratio-trial-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }

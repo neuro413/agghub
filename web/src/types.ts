@@ -1,5 +1,5 @@
 // 渠道 / 设置 / 规则类型与后端共用（type-only 导入，构建时擦除）
-import type { Channel as ServerChannel, LogBodyField } from '../../server/src/types'
+import type { Channel as ServerChannel, CallerSource, LogBodyField } from '../../server/src/types'
 export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
@@ -22,6 +22,7 @@ export interface StatsOverview {
   success_rate: number
   total_tokens: number
   avg_latency: number
+  total_points: number
 }
 
 export interface Stats {
@@ -29,9 +30,10 @@ export interface Stats {
   bucketMs: number
   since: number
   overview: StatsOverview
-  trend: { bucket: number; requests: number; tokens: number }[]
+  trend: { bucket: number; requests: number; tokens: number; points: number }[]
   by_channel: { channel_id: number; channel_name: string; count: number; success: number }[]
   by_model: { model: string; count: number }[]
+  by_key: { key_id: number; key_name: string | null; count: number; success: number; points: number }[]
 }
 
 export interface LogItem {
@@ -60,6 +62,13 @@ export interface LogItem {
   error_message: string | null
   preprocessed: number
   pseudo_thinking: number
+  /** 调用来源；旧日志为 null，按 owner 显示 */
+  source: CallerSource | null
+  key_id: number | null
+  key_name: string | null
+  client_ip: string | null
+  /** 本次请求折算点数；未命中倍率时为 null */
+  quota_points: number | null
 }
 
 export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }
@@ -85,6 +94,7 @@ export interface TestResult {
 export interface LogFacets {
   models: { model: string; n: number }[]
   channels: { channel_id: number; channel_name: string; n: number }[]
+  keys: { key_id: number; key_name: string | null; n: number }[]
 }
 
 export interface ThinkingEntry {
