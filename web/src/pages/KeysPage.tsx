@@ -44,7 +44,8 @@ export function KeysPage() {
       if (signal?.aborted) return
       setKeys(k)
       setGroups(g)
-      setRatios(settings.model_ratios)
+      // 内容没变时保留原数组，避免倍率卡片里未保存的编辑被其他操作的刷新覆盖
+      setRatios(prev => JSON.stringify(prev) === JSON.stringify(settings.model_ratios) ? prev : settings.model_ratios)
       setPublicBaseUrl(settings.public_base_url)
       setSystem(sys)
     } catch (e: any) {
@@ -334,9 +335,11 @@ function KeyCard({
         <Button variant="ghost" size="sm" onClick={onResetUsed}>
           重置用量
         </Button>
-        <Button variant="ghost" size="sm" onClick={onAddTotal}>
-          增加额度
-        </Button>
+        {k.quota_total != null && (
+          <Button variant="ghost" size="sm" onClick={onAddTotal}>
+            增加额度
+          </Button>
+        )}
         <Button variant="ghost" size="sm" onClick={onRegenerate}>
           重新生成
         </Button>

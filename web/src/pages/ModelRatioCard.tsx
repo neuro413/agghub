@@ -5,7 +5,6 @@ import { Card } from '../components/Card'
 import { Input } from '../components/Form'
 import { IconPlus, IconTrash } from '../components/Icons'
 import { useToast } from '../components/Toast'
-import { fmtNum } from '../lib/format'
 import { newId } from '../lib/id'
 import type { ModelRatio } from '../types'
 
@@ -115,10 +114,12 @@ export function ModelRatioCard({ ratios, onSaved }: { ratios: ModelRatio[]; onSa
 function TrialPanel() {
   const toast = useToast()
   const [model, setModel] = useState('')
-  const [prompt, setPrompt] = useState(0)
-  const [cacheRead, setCacheRead] = useState(0)
-  const [cacheWrite, setCacheWrite] = useState(0)
-  const [completion, setCompletion] = useState(0)
+  // 用字符串保存，留空时能显示占位说明；提交时按非负整数解析
+  const [prompt, setPrompt] = useState('')
+  const [cacheRead, setCacheRead] = useState('')
+  const [cacheWrite, setCacheWrite] = useState('')
+  const [completion, setCompletion] = useState('')
+  const toTokens = (v: string) => Math.max(0, Math.floor(Number(v) || 0))
   const [previewing, setPreviewing] = useState(false)
   const [result, setResult] = useState<{ pattern: string | null; points: number | null } | null>(null)
 
@@ -131,10 +132,10 @@ function TrialPanel() {
     try {
       const r = await api.billingPreview({
         model: model.trim(),
-        prompt_tokens: prompt,
-        completion_tokens: completion,
-        cache_read_tokens: cacheRead,
-        cache_write_tokens: cacheWrite,
+        prompt_tokens: toTokens(prompt),
+        completion_tokens: toTokens(completion),
+        cache_read_tokens: toTokens(cacheRead),
+        cache_write_tokens: toTokens(cacheWrite),
       })
       setResult({ pattern: r.ratio?.pattern ?? null, points: r.points })
     } catch (e: any) {
@@ -150,10 +151,10 @@ function TrialPanel() {
       <div className="ah-set-row-desc">试算使用已保存的倍率，改完倍率请先点「保存倍率」再试算。</div>
       <div className="ah-ratio-trial-grid">
         <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="模型名，如 claude-opus-4-1" />
-        <Input type="number" min={0} step="any" value={prompt} onChange={(e) => setPrompt(Number(e.target.value))} placeholder="输入 Token" />
-        <Input type="number" min={0} step="any" value={cacheRead} onChange={(e) => setCacheRead(Number(e.target.value))} placeholder="缓存读" />
-        <Input type="number" min={0} step="any" value={cacheWrite} onChange={(e) => setCacheWrite(Number(e.target.value))} placeholder="缓存写" />
-        <Input type="number" min={0} step="any" value={completion} onChange={(e) => setCompletion(Number(e.target.value))} placeholder="输出 Token" />
+        <Input type="number" min={0} step={1} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="输入 Token（含缓存）" title="输入 Token（含缓存读写）" />
+        <Input type="number" min={0} step={1} value={cacheRead} onChange={(e) => setCacheRead(e.target.value)} placeholder="其中缓存读" title="其中缓存读取" />
+        <Input type="number" min={0} step={1} value={cacheWrite} onChange={(e) => setCacheWrite(e.target.value)} placeholder="其中缓存写" title="其中缓存写入" />
+        <Input type="number" min={0} step={1} value={completion} onChange={(e) => setCompletion(e.target.value)} placeholder="输出 Token" title="输出 Token" />
         <Button variant="soft" size="sm" loading={previewing} onClick={run}>
           试算
         </Button>
@@ -162,7 +163,7 @@ function TrialPanel() {
         <div className={`ah-ratio-trial-out${result.points == null ? ' is-empty' : ''}`}>
           {result.points == null
             ? '没有命中任何倍率，Key 无法调用该模型'
-            : `命中「${result.pattern}」：${fmtNum(result.points)} 点`}
+            : `命中「${result.pattern}」：${result.points.toLocaleString()} 点`}
         </div>
       )}
     </div>
