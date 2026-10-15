@@ -755,7 +755,7 @@ function ToolImportModal({
   }
 
   return (
-    <Modal title={`选择要屏蔽的工具（${tools.length} 个）`} size="lg" onClose={onClose}>
+    <Modal title={`选择要屏蔽的工具（${tools.length} 个）`} size="lg" onClose={onClose} dismissible={false}>
       <div className="ah-pp-toolbar" style={{ marginBottom: 8 }}>
         <Button variant="ghost" size="sm" onClick={() => setSelected(newTools())}>
           全选新工具

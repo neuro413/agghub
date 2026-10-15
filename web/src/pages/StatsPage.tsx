@@ -1,4 +1,5 @@
 import { fmtNum, fmtTime } from '../lib/format'
+import { money } from '../lib/money'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { DonutChart } from '../charts/DonutChart'
@@ -90,7 +91,7 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
         <StatCard icon={<IconBolt size={19} />} label="总请求" value={ov?.total ?? 0} sub={`成功 ${ov?.success ?? 0} · 失败 ${ov?.error ?? 0}`} />
         <StatCard icon={<IconCheck size={19} />} label="成功率" value={`${rate}%`} sub={ov && ov.total ? `${ov.success}/${ov.total}` : '暂无调用'} />
         <StatCard icon={<IconSpark size={19} />} label="总 Token" value={fmtNum(ov?.total_tokens)} sub="prompt + completion" />
-        <StatCard icon={<IconKey size={19} />} label="总点数" value={fmtNum(ov?.total_points)} sub="按模型倍率折算" />
+        <StatCard icon={<IconKey size={19} />} label="总消耗" value={money(ov?.total_points)} sub="按模型定价折算" />
         <StatCard icon={<IconTrend size={19} />} label="平均延迟" value={`${ov?.avg_latency ?? 0}`} sub="毫秒 / 请求" />
       </div>
 
@@ -139,7 +140,7 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
                   <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
                     {bRate}%
                   </span>
-                  <span className="ah-mini ah-num">{fmtNum(b.points)} 点</span>
+                  <span className="ah-mini ah-num">{money(b.points)}</span>
                 </div>
               )
             })}

@@ -4,7 +4,7 @@ export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
-  UserView, UserListResult,
+  UserView, UserListResult, OpenRouterPrice,
 } from '../../server/src/types'
 
 export type Channel = ServerChannel & { today_requests?: number; today_success?: number }

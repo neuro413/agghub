@@ -69,7 +69,7 @@ export function ThinkingStoreModal({ onClose }: { onClose: () => void }) {
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
-    <Modal title="已保存思维链" size="lg" onClose={onClose}>
+    <Modal title="已保存思维链" size="lg" onClose={onClose} dismissible={false}>
       {detail ? (
         <div>
           <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>

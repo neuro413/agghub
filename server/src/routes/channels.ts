@@ -20,6 +20,8 @@ interface ChannelInput {
   name?: string
   type?: ChannelType
   base_url?: string | null
+  base_url_full?: boolean
+  models_url?: string | null
   api_key?: string
   models?: string[] | string
   model_mapping?: Record<string, string> | null
@@ -54,10 +56,27 @@ function normalizeGroups(g: string[] | string | undefined): string[] {
   return out.length ? out : ['default']
 }
 
+/** 完整地址模式只对非 Vertex 渠道生效；关闭时不保留模型列表地址 */
+function fullUrlColumns(input: ChannelInput): { base_url_full: number; models_url: string | null } {
+  const full = !!input.base_url_full && input.type !== 'vertex'
+  return { base_url_full: full ? 1 : 0, models_url: full ? input.models_url?.trim() || null : null }
+}
+
+/** 完整地址模式的模型列表地址：优先用填写的地址，否则把结尾的接口路径换成 /models */
+function modelsUrlOf(input: ChannelInput): string | null {
+  const custom = input.models_url?.trim()
+  if (custom) return custom
+  const base = trimSlash(input.base_url?.trim() || '')
+  return /\/(chat\/completions|completions|messages|responses)$/.test(base)
+    ? base.replace(/\/(chat\/completions|completions|messages|responses)$/, '/models')
+    : null
+}
+
 function validate(input: ChannelInput): string | null {
   if (!input.name || !input.name.trim()) return '渠道名称不能为空'
   if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses'
   if (normalizeModels(input.models).length === 0) return '至少配置一个模型'
+  if (input.base_url_full && input.type !== 'vertex' && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
   if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
   if (input.groups !== undefined && !normalizeGroups(input.groups).every((g) => g.length <= 32 && !g.includes(','))) {
     return '分组名须为 1～32 字符且不含逗号'
@@ -89,13 +108,14 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, api_key, models, model_mapping, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, groups, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @api_key, @models, @model_mapping, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @groups, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, groups, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @groups, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
       type: input.type!,
       base_url: input.base_url?.trim() || null,
+      ...fullUrlColumns(input),
       api_key: (input.api_key || '').trim(),
       models: JSON.stringify(normalizeModels(input.models)),
       model_mapping: input.model_mapping ? JSON.stringify(input.model_mapping) : null,
@@ -129,7 +149,7 @@ channelsRouter.put('/:id', (req, res) => {
 
   db.prepare(
     `UPDATE channels SET
-       name=@name, type=@type, base_url=@base_url, api_key=@api_key, models=@models,
+       name=@name, type=@type, base_url=@base_url, base_url_full=@base_url_full, models_url=@models_url, api_key=@api_key, models=@models,
        model_mapping=@model_mapping, priority=@priority, weight=@weight, status=@status,
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
@@ -141,6 +161,7 @@ channelsRouter.put('/:id', (req, res) => {
     name: (input.name ?? existing.name).trim(),
     type: input.type ?? existing.type,
     base_url: input.base_url !== undefined ? input.base_url?.trim() || null : existing.base_url,
+    ...fullUrlColumns({ ...existing, ...input }),
     api_key: (input.api_key ?? existing.api_key).trim(),
     models: JSON.stringify(input.models !== undefined ? normalizeModels(input.models) : existing.models),
     model_mapping:
@@ -214,12 +235,14 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
   const base = input.base_url?.trim() ? trimSlash(input.base_url.trim()) : ''
   const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
 
-  // openai / responses / anthropic：GET /v1/models
+  // openai / responses / anthropic：GET /v1/models；完整地址模式用模型列表地址
   if (input.type !== 'vertex') {
     const anthropic = input.type === 'anthropic'
     const root = base || (anthropic ? 'https://api.anthropic.com' : 'https://api.openai.com')
     const headers = anthropic ? { 'x-api-key': key, 'anthropic-version': '2023-06-01' } : { Authorization: `Bearer ${key}` }
-    const r = await fetch(withV1(root) + '/models', { headers, signal, dispatcher } as any)
+    const url = input.base_url_full && base ? modelsUrlOf(input) : withV1(root) + '/models'
+    if (!url) return { ok: false, message: '无法从完整地址推导模型列表地址，请填写「模型列表地址」' }
+    const r = await fetch(url, { headers, signal, dispatcher } as any)
     if (!r.ok) return failure(r)
     const data: any = await r.json().catch(() => ({}))
     const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined

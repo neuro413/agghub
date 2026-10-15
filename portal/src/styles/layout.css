@@ -16,8 +16,10 @@
 .pt-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .pt-brand-logo {
   display: inline-flex;
-  width: 20px;
+  min-width: 20px;
   height: 20px;
+  overflow: hidden;
+  white-space: nowrap;
   align-items: center;
   justify-content: center;
   font-size: 16px;
@@ -161,13 +163,27 @@
 .pt-auth-brand:hover { opacity: 0.8; }
 .pt-auth-logo {
   display: inline-flex;
-  width: 32px;
+  min-width: 32px;
   height: 32px;
+  overflow: hidden;
+  white-space: nowrap;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
   background: var(--muted);
   font-size: 18px;
+}
+.pt-brand-logo img,
+.pt-auth-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.pt-brand-logo:has(img) {
+  width: 20px;
+}
+.pt-auth-logo:has(img) {
+  width: 32px;
 }
 .pt-auth-brand h1 { font-size: 20px; font-weight: 500; }
 .pt-auth-main { display: flex; align-items: center; padding: 64px 32px 0; }

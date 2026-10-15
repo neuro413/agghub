@@ -13,6 +13,8 @@ export interface ChannelRow {
   name: string
   type: ChannelType
   base_url: string | null
+  base_url_full: number
+  models_url: string | null
   api_key: string
   models: string
   model_mapping: string | null
@@ -40,6 +42,10 @@ export interface Channel {
   name: string
   type: ChannelType
   base_url: string | null
+  /** 完整地址模式：base_url 原样作为请求地址，不补 /v1 和接口路径（Vertex 不支持） */
+  base_url_full: boolean
+  /** 完整地址模式下的模型列表地址，留空按 base_url 推导 */
+  models_url: string | null
   api_key: string
   models: string[]
   model_mapping: Record<string, string> | null
@@ -169,6 +175,17 @@ export interface ModelRatio {
   per_request: number
 }
 
+/** OpenRouter 模型定价（美元），Token 价格为每百万 Token */
+export interface OpenRouterPrice {
+  id: string
+  name: string
+  input: number
+  output: number
+  cache_read: number | null
+  cache_write: number | null
+  per_request: number
+}
+
 // ── 请求日志（统计 + 正文）───────────────────────────────
 export type LogBodyField = 'request_headers' | 'request_body' | 'response_body' | 'preprocessed_body' | 'thinking_inject' | 'upstream_response_body'
 
@@ -284,8 +301,16 @@ export interface Settings {
   portal_rpm: number
   /** 每用户并发上限（名下 Key 共享），0 = 不限 */
   portal_concurrency: number
-  /** 门户显示 $ 时每 1 美元对应的点数 */
+  /** 金额换算：每 1 单位金额对应的点数（内部常量，设置页不提供修改） */
   portal_points_per_usd: number
+  /** 余额符号，管理端与门户显示金额时前置 */
+  currency_symbol: string
+  /** 门户品牌名称（顶栏与登录页） */
+  portal_brand_name: string
+  /** 门户品牌图标：emoji / 文字、http(s) 图片链接，或上传后的 /api/user/brand-icon 地址 */
+  portal_brand_icon: string
+  /** 门户网页标题 */
+  portal_site_title: string
   checkin_enabled: boolean
   /** 签到奖励随机区间（点数，含两端） */
   checkin_min_points: number

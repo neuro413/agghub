@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from '../api'
-import { ago, dateTime, usd } from '../lib/format'
+import { ago, dateTime, money } from '../lib/format'
 import type { KeyStatus, PortalKey } from '../types'
 import { PageLayout } from '../components/Layout'
 import { ConfirmDialog, Dialog, Sheet } from '../components/Overlay'
@@ -208,7 +208,7 @@ export function KeysPage() {
                   <td style={{ fontWeight: 500 }}>{k.name}</td>
                   <td><Badge tone={STATUS[k.status].tone} dot>{STATUS[k.status].label}</Badge></td>
                   <td><KeyCell item={k} /></td>
-                  <td className="num mono">{usd(k.used_quota)}</td>
+                  <td className="num mono">{money(k.used_quota)}</td>
                   <td>
                     <div className="pt-cell-stack">
                       <span className="mono" style={{ fontSize: 12 }}>{dateTime(k.created_at, false)}</span>

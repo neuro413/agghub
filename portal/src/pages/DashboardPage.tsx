@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { api } from '../api'
 import { navigate } from '../router'
 import { useSession, useUser } from '../session'
-import { localDay, num, perMillion, usd } from '../lib/format'
+import { localDay, num, perMillion, money } from '../lib/format'
 import type { ModelPrice, UsageDay } from '../types'
 import { PageLayout } from '../components/Layout'
 import { Button, Card, CardHeader, CopyButton, Empty, IconBadge, Skeleton } from '../components/ui'
@@ -79,10 +79,10 @@ function SummaryCard({ usage }: { usage: UsageDay[] | null }) {
           <p className="pt-summary-desc">欢迎回来，{user.username}。以下为最近 7 天的用量。</p>
         </div>
         <div className="pt-stat-grid">
-          <StatItem icon={<IconZap size={14} />} tone="chart-1" label="今日消耗" value={usd(user.today_points)}
+          <StatItem icon={<IconZap size={14} />} tone="chart-1" label="今日消耗" value={money(user.today_points)}
             desc={`今日 ${num(user.today_requests)} 次请求`} chart={<MiniBars values={days.map(d => d.points)} tone="chart-1" />} />
-          <StatItem icon={<IconChartColumn size={14} />} tone="chart-2" label="历史消耗" value={usd(user.used_quota)}
-            desc={`近 7 天 ${usd(weekPoints)}`} chart={<Sparkline values={days.map(d => d.points)} tone="chart-2" />} />
+          <StatItem icon={<IconChartColumn size={14} />} tone="chart-2" label="历史消耗" value={money(user.used_quota)}
+            desc={`近 7 天 ${money(weekPoints)}`} chart={<Sparkline values={days.map(d => d.points)} tone="chart-2" />} />
           <StatItem icon={<IconActivity size={14} />} tone="chart-3" label="请求次数" value={num(user.request_count)}
             desc={`近 7 天 ${num(weekRequests)} 次`} chart={<MiniBars values={days.map(d => d.requests)} tone="chart-3" />} />
         </div>
@@ -92,10 +92,10 @@ function SummaryCard({ usage }: { usage: UsageDay[] | null }) {
           <span className="pt-stat-label"><IconBadge tone="success"><IconWallet size={14} /></IconBadge>剩余额度</span>
           <span className={`pt-health ${health.cls}`}><span className="pt-dot" />{health.text}</span>
         </div>
-        <div className="pt-balance mono">{usd(user.quota)}</div>
+        <div className="pt-balance mono">{money(user.quota)}</div>
         <div className="pt-balance-note">
           {status.checkin_enabled
-            ? <><IconSparkles size={14} />每日签到可领 {usd(status.checkin_min_points)} ~ {usd(status.checkin_max_points)}</>
+            ? <><IconSparkles size={14} />每日签到可领 {money(status.checkin_min_points)} ~ {money(status.checkin_max_points)}</>
             : <>额度由管理员发放，用完后请联系管理员</>}
         </div>
         <Button variant="outline" block className="pt-balance-btn" onClick={() => navigate('/console/keys')}>
@@ -147,7 +147,7 @@ function AccessCard({ models }: { models: ModelPrice[] | null }) {
                     <td className="num mono">{perMillion(m.input)}</td>
                     <td className="num mono">{perMillion(m.output)}</td>
                     <td className="num mono">{perMillion(m.cache_read)}</td>
-                    <td className="num mono">{m.per_request ? usd(m.per_request) : '-'}</td>
+                    <td className="num mono">{m.per_request ? money(m.per_request) : '-'}</td>
                   </tr>
                 ))}
               </tbody>

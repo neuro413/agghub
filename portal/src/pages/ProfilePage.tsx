@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { api } from '../api'
 import { navigate } from '../router'
 import { useSession, useUser } from '../session'
-import { date, num, usd } from '../lib/format'
+import { date, num, money } from '../lib/format'
 import { PageLayout } from '../components/Layout'
 import { useToast } from '../components/Toast'
 import { Button, Card, CardHeader, Field, IconBadge, PasswordInput } from '../components/ui'
@@ -69,8 +69,8 @@ export function ProfilePage() {
   }
 
   const stats = [
-    { label: '当前余额', value: usd(user.quota), desc: '可用于调用的剩余额度', tone: 'success', Icon: IconWalletCards },
-    { label: '历史消耗', value: usd(user.used_quota), desc: '累计已消耗额度', tone: 'info', Icon: IconChartColumn },
+    { label: '当前余额', value: money(user.quota), desc: '可用于调用的剩余额度', tone: 'success', Icon: IconWalletCards },
+    { label: '历史消耗', value: money(user.used_quota), desc: '累计已消耗额度', tone: 'info', Icon: IconChartColumn },
     { label: '请求次数', value: num(user.request_count), desc: '累计调用次数', tone: 'chart-4', Icon: IconActivity },
   ]
 

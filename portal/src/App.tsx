@@ -3,7 +3,8 @@ import { api, setUnauthorizedHandler } from './api'
 import { navigate, useLocation } from './router'
 import { SessionContext } from './session'
 import type { Session } from './session'
-import { setPointsPerUsd } from './lib/format'
+import { setMoneyConfig } from './lib/format'
+import { applyBranding } from './lib/brand'
 import type { PortalStatus, Self } from './types'
 import { ToastProvider } from './components/Toast'
 import { ConsoleLayout } from './components/Layout'
@@ -41,7 +42,8 @@ export default function App() {
     setBootError('')
     try {
       const s = await api.status()
-      setPointsPerUsd(s.points_per_usd)
+      setMoneyConfig(s.points_per_usd, s.currency_symbol)
+      applyBranding(s)
       setStatus(s)
       try { setUser(await api.self()) } catch { setUser(null) }
       setBooted(true)

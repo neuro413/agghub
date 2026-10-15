@@ -10,6 +10,7 @@ import type {
   UserView,
   LogDetail,
   LogBodyField,
+  OpenRouterPrice,
   PartialLogDetail,
   LogFacets,
   LogItem,
@@ -89,6 +90,7 @@ export const api = {
   listGroups: (signal?: AbortSignal) => req<string[]>('/groups', { signal }),
   getSystem: (signal?: AbortSignal) => req<SystemInfo>('/system', { signal }),
   billingPreview: (data: BillingPreviewInput) => req<BillingPreviewResult>('/billing/preview', { method: 'POST', body: JSON.stringify(data) }),
+  openRouterPrices: (signal?: AbortSignal) => req<OpenRouterPrice[]>('/billing/openrouter', { signal }),
 
   // ── 门户用户 ──
   listUsers: (p: { q?: string; page?: number; size?: number }, signal?: AbortSignal) => {
@@ -107,6 +109,7 @@ export const api = {
   // ── 设置 ──
   getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),
   updateSettings: (data: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  uploadBrandIcon: (data: string) => req<Settings>('/settings/brand-icon', { method: 'PUT', body: JSON.stringify({ data }) }),
 
   // ── 统计 ──
   getStats: (range: string, signal?: AbortSignal, filters: { key_id?: number; source?: string } = {}) => {

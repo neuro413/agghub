@@ -1,12 +1,11 @@
 import * as anth from '../convert/anthropic'
 import type { Channel } from '../types'
 import type { Adaptor, UpstreamRequest } from './base'
-import { trimSlash, withV1 } from './base'
+import { endpointUrl } from './base'
 
 function request(channel: Channel, body: any): UpstreamRequest {
-  const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.anthropic.com'
   return {
-    url: withV1(root) + '/messages',
+    url: endpointUrl(channel, 'https://api.anthropic.com', '/messages'),
     headers: { 'content-type': 'application/json', 'x-api-key': channel.api_key, 'anthropic-version': '2023-06-01' },
     body: JSON.stringify(body),
   }

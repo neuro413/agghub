@@ -433,6 +433,43 @@
 .ah-textarea::placeholder {
   color: var(--ink-faint);
 }
+.ah-money-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0 14px;
+  border-radius: var(--r-md);
+  border: 1.6px solid var(--line);
+  background: var(--cream);
+  transition: border-color var(--dur) var(--ease-out), background-color var(--dur) var(--ease-out),
+    box-shadow var(--dur) var(--ease-out);
+}
+.ah-money-input:focus-within {
+  border-color: var(--orange-400);
+  background: var(--white);
+  box-shadow: var(--shadow-ring);
+}
+.ah-money-sym {
+  flex-shrink: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.ah-money-input input {
+  flex: 1;
+  min-width: 0;
+  padding: 11px 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: var(--fs-base);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.ah-money-input input::placeholder {
+  color: var(--ink-faint);
+}
 .ah-select-wrap {
   position: relative;
 }

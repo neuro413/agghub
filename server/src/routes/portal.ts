@@ -86,6 +86,10 @@ portalRouter.get('/status', (req, res) => {
     checkin_min_points: s.checkin_min_points,
     checkin_max_points: s.checkin_max_points,
     points_per_usd: s.portal_points_per_usd,
+    currency_symbol: s.currency_symbol,
+    brand_name: s.portal_brand_name,
+    brand_icon: s.portal_brand_icon,
+    site_title: s.portal_site_title,
     base_url: s.public_base_url || `${req.protocol}://${req.get('host') ?? ''}`,
     log_retention_days: s.log_retention_days,
   })

@@ -17,6 +17,7 @@ import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
 import { createTokenGuard } from './core/accessToken'
+import { BRAND_ICON_PATH, serveBrandIcon } from './core/siteAssets'
 import { createAdmission, createCallerResolver } from './core/caller'
 import { sendEntryError } from './core/entryError'
 import type { Surface } from './types'
@@ -47,6 +48,9 @@ function createLanApp(): Express {
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, name: 'AggHub', ts: Date.now() })
   })
+
+  // 门户品牌图标是公开资源，放在令牌校验之前，设置页才能直接用 <img> 预览
+  app.get(BRAND_ICON_PATH, serveBrandIcon)
 
   // ── 访问令牌校验（内网默认 access_token 为空 = 不校验）──
   app.use('/api', createTokenGuard(() => getSettings().access_token))
@@ -112,6 +116,7 @@ function createPublicApp(): Express {
   mountEntries(app)
 
   // ── 用户门户：会话走 Cookie，不开放跨域 ──
+  app.get(BRAND_ICON_PATH, portalHeaders, serveBrandIcon)
   app.use('/api/user', portalHeaders, portalRouter)
   app.use(portalHeaders, express.static(PORTAL_DIST))
   app.get('*', (req, res, next) => {

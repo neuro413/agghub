@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
-import { Input, Slider } from '../components/Form'
+import { Input, PointsInput, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
-import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWarn } from '../components/Icons'
+import { setMoneyConfig } from '../lib/money'
+import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWand, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Settings, SystemInfo } from '../types'
@@ -16,17 +17,37 @@ const KEYS: (keyof Settings)[] = [
   'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys', 'portal_groups',
-  'portal_rpm', 'portal_concurrency', 'portal_points_per_usd', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
+  'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
+  'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
 ]
 
-type IntegerKey = 'portal_initial_quota' | 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
-  | 'portal_points_per_usd' | 'checkin_min_points' | 'checkin_max_points'
+type IntegerKey = 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
+type PointsKey = 'portal_initial_quota' | 'checkin_min_points' | 'checkin_max_points'
+
+/** 与后端 BRAND_ICON_MAX_BYTES 一致 */
+const BRAND_ICON_MAX_BYTES = 512 * 1024
+
+/** 图标是 http(s) 链接或上传地址时按图片显示，否则当作 emoji / 文字 */
+function isImageIcon(icon: string): boolean {
+  return /^(https?:\/\/|\/)/i.test(icon)
+}
+
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.readAsDataURL(file)
+  })
+}
 
 export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [groups, setGroups] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const iconFile = useRef<HTMLInputElement>(null)
   /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
   const loaded = useRef<Settings | null>(null)
   const toast = useToast()
@@ -61,11 +82,31 @@ export function SettingsPage() {
       setS(saved)
       // 管理 API 与 /v1 共用该令牌，保存后同步本地凭证，避免下一个请求就 401
       setStoredToken(saved.access_token)
+      setMoneyConfig(saved)
       toast('ok', '设置已保存')
     } catch (e: any) {
       toast('err', e.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  // 上传后服务端立即把图标设置指向上传地址，这里同步快照，不算作未保存的改动
+  const uploadIcon = async (file: File) => {
+    if (file.size > BRAND_ICON_MAX_BYTES) {
+      toast('err', `图标不能超过 ${BRAND_ICON_MAX_BYTES / 1024} KB`)
+      return
+    }
+    setUploading(true)
+    try {
+      const saved = await api.uploadBrandIcon(await readAsDataUrl(file))
+      if (loaded.current) loaded.current = { ...loaded.current, portal_brand_icon: saved.portal_brand_icon }
+      set('portal_brand_icon', saved.portal_brand_icon)
+      toast('ok', '图标已上传并生效')
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setUploading(false)
     }
   }
 
@@ -93,13 +134,11 @@ export function SettingsPage() {
   }
 
   const origin = window.location.origin
-  /** 点数折合金额，跟门户的显示口径一致 */
-  const usd = (points: number) => {
-    const v = points / (s.portal_points_per_usd || 1)
-    return `$${v.toFixed(v >= 1 || v === 0 ? 2 : 4)}`
-  }
   const intInput = (key: IntegerKey, label: string) => (
     <Input aria-label={label} type="number" min="0" step="1" value={s[key]} onChange={e => set(key, Number(e.target.value))} />
+  )
+  const pointsInput = (key: PointsKey, label: string) => (
+    <PointsInput aria-label={label} value={s[key]} onChange={v => set(key, v)} />
   )
 
   return (
@@ -166,8 +205,8 @@ export function SettingsPage() {
         <SettingRow label="开放注册" desc="关闭后已有用户仍可登录">
           <Toggle checked={s.portal_register_enabled} onChange={(v) => set('portal_register_enabled', v)} />
         </SettingRow>
-        <SettingRow label="新用户赠送点数" desc={`注册时发放，当前约 ${usd(s.portal_initial_quota)}`}>
-          {intInput('portal_initial_quota', '新用户赠送点数')}
+        <SettingRow label="新用户赠送额度" desc="注册时发放到用户余额">
+          {pointsInput('portal_initial_quota', '新用户赠送额度')}
         </SettingRow>
         <SettingRow label="同 IP 每日注册上限" desc="按服务器日期计，0 = 不限">
           {intInput('portal_register_ip_daily', '同 IP 每日注册上限')}
@@ -184,22 +223,59 @@ export function SettingsPage() {
         <SettingRow label="每用户并发" desc="同一用户名下所有 Key 共用，0 = 不限">
           {intInput('portal_concurrency', '每用户并发')}
         </SettingRow>
-        <SettingRow label="每 $1 对应点数" desc="门户把点数换算成美元显示，默认 500000（与 new-api 一致）">
-          {intInput('portal_points_per_usd', '每美元对应点数')}
-        </SettingRow>
         <SettingRow label="每日签到" desc="用户每天可签到一次，随机领取额度">
           <Toggle checked={s.checkin_enabled} onChange={(v) => set('checkin_enabled', v)} />
         </SettingRow>
         {s.checkin_enabled && (
           <>
-            <SettingRow label="签到最小奖励" desc={`点数，约 ${usd(s.checkin_min_points)}`}>
-              {intInput('checkin_min_points', '签到最小奖励')}
+            <SettingRow label="签到最小奖励" desc="每次签到随机发放的下限">
+              {pointsInput('checkin_min_points', '签到最小奖励')}
             </SettingRow>
-            <SettingRow label="签到最大奖励" desc={`点数，约 ${usd(s.checkin_max_points)}`}>
-              {intInput('checkin_max_points', '签到最大奖励')}
+            <SettingRow label="签到最大奖励" desc="每次签到随机发放的上限">
+              {pointsInput('checkin_max_points', '签到最大奖励')}
             </SettingRow>
           </>
         )}
+      </Card>
+
+      {/* 品牌与金额显示 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconWand size={18} /> 品牌与金额显示
+        </div>
+        <div className="ah-set-desc">门户顶栏、登录注册页和浏览器标签页显示的名称与图标；余额符号对管理端和门户同时生效</div>
+        <SettingRow label="余额符号" desc="显示金额时放在数字前，只改变显示，不做汇率换算">
+          <Input value={s.currency_symbol} onChange={(e) => set('currency_symbol', e.target.value)} placeholder="$" maxLength={8} />
+        </SettingRow>
+        <SettingRow label="站点名称" desc="门户顶栏和登录注册页的品牌名称">
+          <Input value={s.portal_brand_name} onChange={(e) => set('portal_brand_name', e.target.value)} placeholder="AggHub" maxLength={64} />
+        </SettingRow>
+        <SettingRow label="网页标题" desc="门户浏览器标签页上的标题">
+          <Input value={s.portal_site_title} onChange={(e) => set('portal_site_title', e.target.value)} placeholder="AggHub 控制台" maxLength={128} />
+        </SettingRow>
+        <SettingRow
+          label="站点图标"
+          desc={`emoji / 文字（最多 16 个字符）或图片链接，同时用作标签页图标；也可以上传 PNG / JPEG / GIF / WebP / SVG / ICO（不超过 ${BRAND_ICON_MAX_BYTES / 1024} KB，上传后立即生效）`}
+        >
+          <span className="ah-brand-preview" title="预览">
+            {isImageIcon(s.portal_brand_icon) ? <img src={s.portal_brand_icon} alt="" /> : s.portal_brand_icon || '—'}
+          </span>
+          <Input value={s.portal_brand_icon} onChange={(e) => set('portal_brand_icon', e.target.value)} placeholder="🍊" />
+          <Button variant="soft" size="sm" loading={uploading} onClick={() => iconFile.current?.click()}>
+            上传
+          </Button>
+          <input
+            ref={iconFile}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon,.ico"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) uploadIcon(file)
+            }}
+          />
+        </SettingRow>
       </Card>
 
       {/* 故障转移与重试 */}
