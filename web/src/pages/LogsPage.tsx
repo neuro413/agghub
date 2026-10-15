@@ -35,8 +35,9 @@ interface Filters {
 
 const EMPTY: Filters = { q: '', status: '', entry_format: '', is_stream: '', channel_id: '', model: '', source: '', key_id: '' }
 
-/** Key 标签：公网 / 内网前缀 + Key 名称快照 */
+/** Key 标签：公网 / 内网前缀 + Key 名称快照；门户用户显示「用户名 / Key 名」 */
 function keyLabel(l: LogItem): string {
+  if (l.source === 'user') return `${l.user_name ?? '#' + l.user_id} / ${l.key_name || '#' + l.key_id}`
   const prefix = l.source === 'public_key' ? '公网 ' : l.source === 'lan_key' ? '内网 ' : ''
   return prefix + (l.key_name || '#' + l.key_id)
 }
@@ -223,6 +224,7 @@ export function LogsPage() {
             { value: 'owner', label: '内网匿名' },
             { value: 'lan_key', label: '内网 Key' },
             { value: 'public_key', label: '公网 Key' },
+            { value: 'user', label: '门户用户' },
           ]}
         />
         <Dropdown
@@ -277,7 +279,7 @@ export function LogsPage() {
                 <span className="ah-mini ah-muted ah-truncate">
                   {l.channel_name || '—'}
                   {l.key_id != null && (
-                    <span className={`ah-tag${l.source === 'public_key' ? ' ah-tag-pub' : ''}`} style={{ marginLeft: 6 }}>
+                    <span className={`ah-tag${l.source === 'public_key' || l.source === 'user' ? ' ah-tag-pub' : ''}`} style={{ marginLeft: 6 }}>
                       {keyLabel(l)}
                     </span>
                   )}

@@ -29,7 +29,7 @@ export function normalizeAccessToken(value: unknown): string {
 const booleans = Object.keys(DEFAULT_SETTINGS).filter(key => typeof DEFAULT_SETTINGS[key as keyof Settings] === 'boolean')
 const formats = new Set(['openai', 'anthropic', 'responses'])
 const roles = new Set(['system', 'user', 'assistant', 'tool'])
-const sources = new Set(['owner', 'lan_key', 'public_key'])
+const sources = new Set(['owner', 'lan_key', 'public_key', 'user'])
 const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write', 'per_request']
 function object(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -41,7 +41,7 @@ function ids(value: any): boolean {
   return Array.isArray(value) && value.every(v => Number.isSafeInteger(v) && v > 0)
 }
 /** 跨字段校验的错误记在前者上，提交任一字段都要报告 */
-const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'] }
+const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'] }
 
 /**
  * 对合并后的完整设置校验，但只报告本次提交涉及的字段：库里遗留的旧值（如早期版本允许的更大范围）
@@ -63,6 +63,11 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   for (const key of booleans) check(typeof merged[key] === 'boolean', key, '须为布尔值')
   for (const key of ['drop_thinking_channel_ids', 'pseudo_thinking_channel_ids']) check(ids(merged[key]), key, '须为正整数渠道 ID 数组')
   for (const key of ['drop_thinking_models', 'pseudo_thinking_models']) check(strings(merged[key]), key, '须为非空字符串数组')
+  check(Array.isArray(merged.portal_groups) && merged.portal_groups.length > 0 && merged.portal_groups.every((g: any) => typeof g === 'string' && g.trim() === g && g.length >= 1 && g.length <= 32 && !g.includes(',')),
+    'portal_groups', '至少一个分组，分组名须为 1～32 字符、不含逗号和首尾空白')
+  if (Number.isSafeInteger(merged.checkin_min_points) && Number.isSafeInteger(merged.checkin_max_points)) {
+    check(merged.checkin_min_points <= merged.checkin_max_points, 'checkin_min_points', '最小奖励不能大于最大奖励')
+  }
   check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')
   try { validateThinkingTags(merged.pseudo_thinking_open_tag, merged.pseudo_thinking_close_tag) } catch (error) {

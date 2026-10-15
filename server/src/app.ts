@@ -1,7 +1,7 @@
 import express from 'express'
 import path from 'node:path'
-import type { ErrorRequestHandler, Express } from 'express'
-import { TRUST_PROXY, WEB_DIST } from './config'
+import type { ErrorRequestHandler, Express, RequestHandler } from 'express'
+import { PORTAL_DIST, TRUST_PROXY, WEB_DIST } from './config'
 import { getSettings } from './db'
 import { channelsRouter } from './routes/channels'
 import { settingsRouter } from './routes/settings'
@@ -11,6 +11,8 @@ import { thinkingRouter } from './routes/thinking'
 import { preprocessRouter } from './routes/preprocess'
 import { billingRouter } from './routes/billing'
 import { keysRouter, metaRouter } from './routes/keys'
+import { usersRouter } from './routes/users'
+import { portalRouter } from './routes/portal'
 import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
@@ -57,6 +59,7 @@ function createLanApp(): Express {
   app.use('/api/thinking', thinkingRouter)
   app.use('/api/preprocess', preprocessRouter)
   app.use('/api/keys', keysRouter)
+  app.use('/api/users', usersRouter)
   app.use('/api/billing', billingRouter)
   app.use('/api', metaRouter)
 
@@ -78,7 +81,15 @@ function createLanApp(): Express {
   return app
 }
 
-/** 组装公网 app：只有 /v1，强制 Key，先鉴权后解析请求体 */
+/** 门户页面与接口的基础安全响应头 */
+const portalHeaders: RequestHandler = (_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('Referrer-Policy', 'same-origin')
+  next()
+}
+
+/** 组装公网 app：/v1 强制 Key、先鉴权后解析请求体；/api/user 与静态页面是用户门户 */
 function createPublicApp(): Express {
   const app = express()
   app.disable('x-powered-by')
@@ -100,7 +111,16 @@ function createPublicApp(): Express {
   app.use('/v1', express.json({ limit: '50mb' }))
   mountEntries(app)
 
-  // 预留：以后在这里挂用户自助接口 /api/self
+  // ── 用户门户：会话走 Cookie，不开放跨域 ──
+  app.use('/api/user', portalHeaders, portalRouter)
+  app.use(portalHeaders, express.static(PORTAL_DIST))
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/v1')) return next()
+    res.sendFile(path.join(PORTAL_DIST, 'index.html'), (err) => {
+      if (err) res.status(404).type('text/plain').send('用户门户未构建，请先执行 npm run build')
+    })
+  })
+
   app.use((req, res) => sendEntryError(req, res, 404, 'not_found', 'not_found_error', 'not found'))
   app.use(errorHandler)
   return app

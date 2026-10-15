@@ -6,6 +6,8 @@ import type {
   Channel,
   KeyQuotaOp,
   KeyUsageDay,
+  UserListResult,
+  UserView,
   LogDetail,
   LogBodyField,
   PartialLogDetail,
@@ -87,6 +89,20 @@ export const api = {
   listGroups: (signal?: AbortSignal) => req<string[]>('/groups', { signal }),
   getSystem: (signal?: AbortSignal) => req<SystemInfo>('/system', { signal }),
   billingPreview: (data: BillingPreviewInput) => req<BillingPreviewResult>('/billing/preview', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ── 门户用户 ──
+  listUsers: (p: { q?: string; page?: number; size?: number }, signal?: AbortSignal) => {
+    const query = new URLSearchParams()
+    if (p.q) query.set('q', p.q)
+    if (p.page) query.set('page', String(p.page))
+    if (p.size) query.set('size', String(p.size))
+    return req<UserListResult>(`/users?${query.toString()}`, { signal })
+  },
+  setUserStatus: (id: number, status: number) => req<UserView>(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  adjustUserQuota: (id: number, delta: number) => req<UserView>(`/users/${id}/quota`, { method: 'POST', body: JSON.stringify({ delta }) }),
+  resetUserPassword: (id: number, password: string) => req<{ ok: boolean }>(`/users/${id}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),
+  listUserKeys: (id: number, signal?: AbortSignal) => req<ApiKeyView[]>(`/users/${id}/keys`, { signal }),
 
   // ── 设置 ──
   getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),

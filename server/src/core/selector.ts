@@ -1,5 +1,6 @@
 import { enabledChannels } from '../db'
-import type { Caller, Channel } from '../types'
+import type { Caller, Channel, ModelRatio } from '../types'
+import { findRatio } from './billing'
 import { OWNER_CALLER } from './caller'
 import { matchesPattern } from './modelPattern'
 
@@ -29,6 +30,17 @@ export function keyAllowsModel(caller: Caller, model: string): boolean {
 export function channelVisibleTo(channel: Channel, caller: Caller): boolean {
   const groups = caller.key?.groups
   return !caller.key || !!groups?.some(group => channel.groups.includes(group))
+}
+
+/** 调用方可见的模型名（升序）：Key 只看到自己分组内渠道的模型，再取模型白名单与倍率表的交集 */
+export function modelsVisibleTo(caller: Caller, ratios: ModelRatio[]): string[] {
+  const set = new Set<string>()
+  for (const c of enabledChannels()) {
+    if (!channelVisibleTo(c, caller)) continue
+    for (const m of c.models) set.add(m)
+    if (c.model_mapping) for (const k of Object.keys(c.model_mapping)) set.add(k)
+  }
+  return [...set].filter(id => keyAllowsModel(caller, id) && (!caller.key || findRatio(ratios, id))).sort()
 }
 
 /** 所有能服务该模型、且对调用方可见的启用渠道；Key 白名单不允许的模型视同无渠道 */

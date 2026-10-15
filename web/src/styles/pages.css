@@ -1255,3 +1255,80 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ── 用户页 ── */
+.ah-user-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 220px;
+}
+.ah-user-search svg {
+  position: absolute;
+  left: 12px;
+  color: var(--ink-faint);
+  pointer-events: none;
+}
+.ah-user-search .ah-input {
+  padding-left: 36px;
+}
+.ah-user-row .u-name,
+.ah-logt-head .u-name {
+  flex: 1;
+  min-width: 140px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.u-num {
+  width: 92px;
+  flex: none;
+  text-align: right;
+}
+.u-num.u-sm {
+  width: 56px;
+}
+.u-num.is-neg {
+  color: var(--err);
+  font-weight: 700;
+}
+.u-time {
+  width: 104px;
+  flex: none;
+}
+.u-act {
+  width: 250px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.ah-user-chev {
+  flex: none;
+  color: var(--ink-faint);
+  transform: rotate(-90deg);
+  transition: transform var(--dur) var(--ease-out);
+}
+.ah-user-chev.is-open {
+  transform: rotate(0deg);
+}
+.ah-user-keys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px var(--sp-3) 10px 34px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--orange-50);
+}
+.ah-user-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.ah-user-key .ah-key-secret-val {
+  flex: none;
+}

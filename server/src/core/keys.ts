@@ -61,9 +61,37 @@ export function getKeyById(id: number): ApiKey | null {
   return row ? rowToApiKey(row) : null
 }
 
+/** 管理员发的 Key；门户用户的 Key 在用户管理里查看 */
 export function listKeys(): ApiKey[] {
-  const rows = db.prepare('SELECT * FROM api_keys ORDER BY id ASC').all() as ApiKeyRow[]
+  const rows = db.prepare('SELECT * FROM api_keys WHERE user_id IS NULL ORDER BY id ASC').all() as ApiKeyRow[]
   return rows.map(rowToApiKey)
+}
+
+export function listUserKeys(userId: number): ApiKey[] {
+  const rows = db.prepare('SELECT * FROM api_keys WHERE user_id = ? ORDER BY id DESC').all(userId) as ApiKeyRow[]
+  return rows.map(rowToApiKey)
+}
+
+/** 只返回属于该用户的 Key */
+export function getUserKey(userId: number, id: number): ApiKey | null {
+  const row = db.prepare('SELECT * FROM api_keys WHERE id = ? AND user_id = ?').get(id, userId) as ApiKeyRow | undefined
+  return row ? rowToApiKey(row) : null
+}
+
+export function countUserKeys(userId: number): number {
+  return db.prepare('SELECT COUNT(*) FROM api_keys WHERE user_id = ?').pluck().get(userId) as number
+}
+
+/** 门户用户自建 Key：分组、限流等在调用时按门户设置覆盖，这里只存名称和过期时间 */
+export function createUserKey(userId: number, name: string, expiresAt: number | null): ApiKey {
+  const now = Date.now()
+  const info = db
+    .prepare(
+      `INSERT INTO api_keys (name, key, enabled, groups, models, quota_used, expires_at, user_id, created_at, updated_at)
+       VALUES (?, ?, 1, '[]', '[]', 0, ?, ?, ?, ?)`,
+    )
+    .run(name, generateKey(), expiresAt, userId, now, now)
+  return getKeyById(Number(info.lastInsertRowid))!
 }
 
 /** 附带今日用量；没有当天记录时两项为 0 */

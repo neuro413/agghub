@@ -4,7 +4,7 @@ import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Input, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
-import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconWarn } from '../components/Icons'
+import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Settings, SystemInfo } from '../types'
@@ -15,11 +15,17 @@ const KEYS: (keyof Settings)[] = [
   'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
   'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
+  'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys', 'portal_groups',
+  'portal_rpm', 'portal_concurrency', 'portal_points_per_usd', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
 ]
+
+type IntegerKey = 'portal_initial_quota' | 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
+  | 'portal_points_per_usd' | 'checkin_min_points' | 'checkin_max_points'
 
 export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
   const [system, setSystem] = useState<SystemInfo | null>(null)
+  const [groups, setGroups] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const toast = useToast()
 
@@ -27,6 +33,7 @@ export function SettingsPage() {
     const controller = new AbortController()
     api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
     api.getSystem(controller.signal).then(value => { if (!controller.signal.aborted) setSystem(value) }).catch(() => {})
+    api.listGroups(controller.signal).then(value => { if (!controller.signal.aborted) setGroups(value) }).catch(() => {})
     return () => controller.abort()
   }, [toast])
 
@@ -72,6 +79,14 @@ export function SettingsPage() {
   }
 
   const origin = window.location.origin
+  /** 点数折合金额，跟门户的显示口径一致 */
+  const usd = (points: number) => {
+    const v = points / (s.portal_points_per_usd || 1)
+    return `$${v.toFixed(v >= 1 || v === 0 ? 2 : 4)}`
+  }
+  const intInput = (key: IntegerKey, label: string) => (
+    <Input aria-label={label} type="number" min="0" step="1" value={s[key]} onChange={e => set(key, Number(e.target.value))} />
+  )
 
   return (
     <div className="ah-fade-up">
@@ -119,9 +134,58 @@ export function SettingsPage() {
         <SettingRow label="trust proxy" desc="公网端口从 X-Forwarded-For 取客户端 IP 的策略">
           <code className="ah-mini ah-muted">{system?.trust_proxy ?? '—'}</code>
         </SettingRow>
-        <SettingRow label="公网 Base URL" desc="仅用于在令牌页复制接入信息">
+        <SettingRow label="公网 Base URL" desc="用于令牌页复制接入信息和门户里显示的接入地址；留空时门户按用户访问的地址显示">
           <Input value={s.public_base_url} onChange={(e) => set('public_base_url', e.target.value)} placeholder="https://api.example.com" />
         </SettingRow>
+      </Card>
+
+      {/* 用户门户 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconUsers size={18} /> 用户门户
+        </div>
+        <div className="ah-set-desc">
+          {system?.public_enabled
+            ? '公网端口上的自助门户：用户名密码注册登录、自建 Key、签到领额度、查看调用记录；用户 Key 直接扣用户余额'
+            : '门户随公网端口一起开放，当前公网端口未开启'}
+        </div>
+        <SettingRow label="开放注册" desc="关闭后已有用户仍可登录">
+          <Toggle checked={s.portal_register_enabled} onChange={(v) => set('portal_register_enabled', v)} />
+        </SettingRow>
+        <SettingRow label="新用户赠送点数" desc={`注册时发放，当前约 ${usd(s.portal_initial_quota)}`}>
+          {intInput('portal_initial_quota', '新用户赠送点数')}
+        </SettingRow>
+        <SettingRow label="同 IP 每日注册上限" desc="按服务器日期计，0 = 不限">
+          {intInput('portal_register_ip_daily', '同 IP 每日注册上限')}
+        </SettingRow>
+        <SettingRow label="可用分组" desc={`门户用户只能使用这些分组的渠道，逗号分隔；现有分组：${groups.join('、') || '—'}`}>
+          <GroupsInput value={s.portal_groups} onChange={(v) => set('portal_groups', v)} />
+        </SettingRow>
+        <SettingRow label="每用户 Key 上限" desc="每个用户最多可以创建的 Key 数">
+          {intInput('portal_max_keys', '每用户 Key 上限')}
+        </SettingRow>
+        <SettingRow label="每用户 RPM" desc="同一用户名下所有 Key 共用，0 = 不限">
+          {intInput('portal_rpm', '每用户 RPM')}
+        </SettingRow>
+        <SettingRow label="每用户并发" desc="同一用户名下所有 Key 共用，0 = 不限">
+          {intInput('portal_concurrency', '每用户并发')}
+        </SettingRow>
+        <SettingRow label="每 $1 对应点数" desc="门户把点数换算成美元显示，默认 500000（与 new-api 一致）">
+          {intInput('portal_points_per_usd', '每美元对应点数')}
+        </SettingRow>
+        <SettingRow label="每日签到" desc="用户每天可签到一次，随机领取额度">
+          <Toggle checked={s.checkin_enabled} onChange={(v) => set('checkin_enabled', v)} />
+        </SettingRow>
+        {s.checkin_enabled && (
+          <>
+            <SettingRow label="签到最小奖励" desc={`点数，约 ${usd(s.checkin_min_points)}`}>
+              {intInput('checkin_min_points', '签到最小奖励')}
+            </SettingRow>
+            <SettingRow label="签到最大奖励" desc={`点数，约 ${usd(s.checkin_max_points)}`}>
+              {intInput('checkin_max_points', '签到最大奖励')}
+            </SettingRow>
+          </>
+        )}
       </Card>
 
       {/* 故障转移与重试 */}
@@ -226,6 +290,21 @@ function SettingRow({ label, desc, children }: { label: string; desc?: string; c
       </div>
       <div className="ah-set-row-control">{children}</div>
     </div>
+  )
+}
+
+/** 逗号分隔的分组输入；保留用户正在输入的原文，只把解析结果交给上层 */
+function GroupsInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  const [text, setText] = useState(value.join(', '))
+  return (
+    <Input
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        onChange([...new Set(e.target.value.split(/[,，]/).map(g => g.trim()).filter(Boolean))])
+      }}
+      placeholder="public"
+    />
   )
 }
 

@@ -1,0 +1,52 @@
+/* 数值取自 new-api 浅色主题（oklch 换算为近似 hex），圆角按其 --radius: 1rem 的比例档位 */
+:root {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --primary: #3ea4ec;
+  --primary-hover: #65b6f0;
+  --primary-fg: #ffffff;
+  --secondary: #eeeeee;
+  --secondary-fg: #004c9f;
+  --muted: #f5f5f5;
+  --muted-fg: #606060;
+  --accent: #eaf4fe;
+  --sidebar: #fefefe;
+  --sidebar-accent: #eaf4fe;
+  --sidebar-accent-fg: #0276ea;
+  --border: #e8e8e8;
+  --ring: #42a6ff;
+  --ring-soft: rgba(66, 166, 255, 0.5);
+  --table-header: #fbfbfb;
+  --row-hover: #fafafa;
+
+  --destructive: #e7000b;
+  --success: #009966;
+  --warning: #d08700;
+  --info: #0084d1;
+  --neutral: #a1a1a1;
+  --chart-1: #35a9ff;
+  --chart-2: #00a9b3;
+  --chart-3: #9095e8;
+  --chart-4: #d068d8;
+  --chart-5: #20b46b;
+
+  --radius-sm: 9.6px;
+  --radius-md: 12.8px;
+  --radius-lg: 16px;
+  --radius-xl: 22.4px;
+  --radius-2xl: 28.8px;
+  --radius-pill: 999px;
+
+  --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-hover: 0 4px 12px rgb(0 0 0 / 0.06);
+  --ring-card: 0 0 0 1px rgba(10, 10, 10, 0.1);
+
+  --header-h: 48px;
+  --sidebar-w: 208px;
+  --sidebar-w-icon: 62px;
+
+  --font-sans: "Public Sans", -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}

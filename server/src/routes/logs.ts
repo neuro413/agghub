@@ -5,6 +5,9 @@ import type { LogBodyField } from '../types'
 
 export const logsRouter = Router()
 
+/** 门户用户名（当前名称；用户已删除时为 null） */
+const USER_NAME = '(SELECT username FROM users WHERE users.id = request_logs.user_id) AS user_name'
+
 // 列表（不含大正文，节省流量；展开时再取详情）
 logsRouter.get('/', (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 50, 200)
@@ -42,7 +45,7 @@ logsRouter.get('/', (req, res) => {
   if (req.query.source === 'owner') {
     // 旧日志 source 为 NULL，视同 owner
     where.push("(source = 'owner' OR source IS NULL)")
-  } else if (req.query.source === 'lan_key' || req.query.source === 'public_key') {
+  } else if (req.query.source === 'lan_key' || req.query.source === 'public_key' || req.query.source === 'user') {
     where.push('source = ?')
     args.push(req.query.source)
   }
@@ -63,7 +66,7 @@ logsRouter.get('/', (req, res) => {
               prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
               retry_count, is_stream, error_message, preprocessed, pseudo_thinking,
-              source, key_id, key_name, client_ip, quota_points
+              source, key_id, key_name, client_ip, quota_points, user_id, ${USER_NAME}
        FROM request_logs ${whereSql}
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     )
@@ -101,7 +104,7 @@ logsRouter.get('/:id', (req, res) => {
     if (names.some(field => !LOG_BODY_FIELDS.includes(field as LogBodyField))) return res.status(400).json({ error: '未知日志正文字段' })
     fields = [...new Set(names)] as LogBodyField[]
   }
-  const row = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(Number(req.params.id))
+  const row = db.prepare(`SELECT *, ${USER_NAME} FROM request_logs WHERE id = ?`).get(Number(req.params.id))
   if (!row) return res.status(404).json({ error: 'not found' })
   res.json(hydrateLogRow(row, fields))
 })

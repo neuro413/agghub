@@ -7,10 +7,15 @@ export type Admission =
   | { ok: false; reason: 'rpm' | 'concurrency'; retryAfterSeconds: number }
 
 const WINDOW_MS = 60_000
-/** keyId → 最近 60 秒内被放行请求的时间戳（升序） */
-const windows = new Map<number, number[]>()
-/** keyId → 进行中的请求数 */
-const active = new Map<number, number>()
+/** 计数桶 → 最近 60 秒内被放行请求的时间戳（升序） */
+const windows = new Map<string, number[]>()
+/** 计数桶 → 进行中的请求数 */
+const active = new Map<string, number>()
+
+/** 门户用户名下的 Key 共用一个桶，其余按 Key 计 */
+function bucketOf(key: ApiKey): string {
+  return key.user_id != null ? `u${key.user_id}` : `k${key.id}`
+}
 
 /**
  * 生成接口进入时调用：先查 RPM（滑动 60 秒窗口），再占并发名额。
@@ -18,33 +23,34 @@ const active = new Map<number, number>()
  * rpm / concurrency 为 null 表示不限。
  */
 export function admitRequest(key: ApiKey, now = Date.now()): Admission {
+  const bucket = bucketOf(key)
   if (key.rpm != null) {
-    const kept = (windows.get(key.id) ?? []).filter(t => t > now - WINDOW_MS)
-    if (kept.length) windows.set(key.id, kept)
-    else windows.delete(key.id)
+    const kept = (windows.get(bucket) ?? []).filter(t => t > now - WINDOW_MS)
+    if (kept.length) windows.set(bucket, kept)
+    else windows.delete(bucket)
     if (kept.length >= key.rpm) {
       // 最早一条过期后即可再放行
       const retryAfterSeconds = Math.max(1, Math.ceil((kept[0] + WINDOW_MS - now) / 1000))
       return { ok: false, reason: 'rpm', retryAfterSeconds }
     }
   }
-  if (key.concurrency != null && (active.get(key.id) ?? 0) >= key.concurrency) {
+  if (key.concurrency != null && (active.get(bucket) ?? 0) >= key.concurrency) {
     return { ok: false, reason: 'concurrency', retryAfterSeconds: 1 }
   }
   // 两项都通过后才记录；被拒绝的请求不占名额
   if (key.rpm != null) {
-    const stamps = windows.get(key.id) ?? []
+    const stamps = windows.get(bucket) ?? []
     stamps.push(now)
-    windows.set(key.id, stamps)
+    windows.set(bucket, stamps)
   }
-  active.set(key.id, (active.get(key.id) ?? 0) + 1)
+  active.set(bucket, (active.get(bucket) ?? 0) + 1)
   let released = false
   const release = () => {
     if (released) return
     released = true
-    const remaining = (active.get(key.id) ?? 1) - 1
-    if (remaining > 0) active.set(key.id, remaining)
-    else active.delete(key.id)
+    const remaining = (active.get(bucket) ?? 1) - 1
+    if (remaining > 0) active.set(bucket, remaining)
+    else active.delete(bucket)
   }
   return { ok: true, release }
 }

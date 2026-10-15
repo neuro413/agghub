@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS channels (
   updated_at    INTEGER NOT NULL
 );
 
--- 分发 Key：明文存储；user_id 预留给以后的用户系统
+-- 分发 Key：明文存储；user_id 非空表示门户用户自己创建的 Key
 CREATE TABLE IF NOT EXISTS api_keys (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT    NOT NULL,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   last_used_at  INTEGER
 );
 
--- 按账户的每日用量，与请求日志独立（日志过期清理不影响额度）；account_type 现在只有 'key'
+-- 按账户的每日用量，与请求日志独立（日志过期清理不影响额度）；account_type 为 'key' 或 'user'
 CREATE TABLE IF NOT EXISTS usage_daily (
   account_type      TEXT    NOT NULL,
   account_id        INTEGER NOT NULL,
@@ -71,6 +71,41 @@ CREATE TABLE IF NOT EXISTS usage_daily (
   prompt_tokens     INTEGER NOT NULL DEFAULT 0,
   completion_tokens INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (account_type, account_id, day)
+);
+
+-- 门户用户：quota 为剩余点数（请求结束才扣费，可能透支为负），status 1 启用 / 2 停用
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT    NOT NULL,
+  status        INTEGER NOT NULL DEFAULT 1,
+  quota         INTEGER NOT NULL DEFAULT 0,
+  used_quota    INTEGER NOT NULL DEFAULT 0,
+  request_count INTEGER NOT NULL DEFAULT 0,
+  register_ip   TEXT,
+  created_at    INTEGER NOT NULL,
+  last_login_at INTEGER,
+  last_login_ip TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_users_register ON users(register_ip, created_at);
+
+-- 门户会话：只存令牌的 SHA-256
+CREATE TABLE IF NOT EXISTS user_sessions (
+  token_hash TEXT    PRIMARY KEY,
+  user_id    INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  ip         TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
+
+-- 每日签到：主键兜底并发重复签到
+CREATE TABLE IF NOT EXISTS user_checkins (
+  user_id    INTEGER NOT NULL,
+  day        TEXT    NOT NULL,
+  points     INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (user_id, day)
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -144,8 +179,11 @@ addMissingColumns('request_logs', [
   ['key_name', 'TEXT'],
   ['client_ip', 'TEXT'],
   ['quota_points', 'INTEGER'],
+  ['user_id', 'INTEGER'],
 ])
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')
+db.exec('CREATE INDEX IF NOT EXISTS idx_logs_user ON request_logs(user_id, created_at)')
+db.exec('CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)')
 
 function encodeSetting(value: unknown): string {
   return typeof value === 'boolean' ? (value ? '1' : '0') : typeof value === 'object' ? JSON.stringify(value) : String(value)

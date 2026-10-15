@@ -4,6 +4,7 @@ export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
+  UserView, UserListResult,
 } from '../../server/src/types'
 
 export type Channel = ServerChannel & { today_requests?: number; today_success?: number }
@@ -69,6 +70,9 @@ export interface LogItem {
   client_ip: string | null
   /** 本次请求折算点数；未命中倍率时为 null */
   quota_points: number | null
+  /** 门户用户 id 与当前用户名（用户已删除时用户名为 null） */
+  user_id: number | null
+  user_name: string | null
 }
 
 export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }

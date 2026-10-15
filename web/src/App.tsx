@@ -7,6 +7,7 @@ import { TopNav, type TabKey } from './components/TopNav'
 import { ToastProvider } from './components/Toast'
 import { ChannelsPage } from './pages/ChannelsPage'
 import { KeysPage } from './pages/KeysPage'
+import { UsersPage } from './pages/UsersPage'
 import { StatsPage } from './pages/StatsPage'
 import { LogsPage } from './pages/LogsPage'
 import { PreprocessPage } from './pages/PreprocessPage'
@@ -62,6 +63,7 @@ export default function App() {
         <main className="ah-main">
           {tab === 'channels' && <ChannelsPage />}
           {tab === 'keys' && <KeysPage />}
+          {tab === 'users' && <UsersPage />}
           {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} />}
           {tab === 'logs' && <LogsPage />}
           {tab === 'preprocess' && <PreprocessPage />}

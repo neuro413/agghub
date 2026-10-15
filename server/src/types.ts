@@ -69,8 +69,8 @@ export interface Channel {
 /** 请求从哪个监听器进入：内网 app / 公网 app */
 export type Surface = 'lan' | 'public'
 
-/** 调用来源：内网匿名或管理令牌 / 内网带 Key / 公网带 Key（预留以后的 'user'） */
-export type CallerSource = 'owner' | 'lan_key' | 'public_key'
+/** 调用来源：内网匿名或管理令牌 / 内网带 Key / 公网带 Key / 门户用户的 Key（不区分端口） */
+export type CallerSource = 'owner' | 'lan_key' | 'public_key' | 'user'
 
 /** api_keys 数据库原始行 */
 export interface ApiKeyRow {
@@ -131,10 +131,29 @@ export interface ApiKey {
 export interface Caller {
   surface: Surface
   source: CallerSource
-  /** source 为 lan_key / public_key 时存在 */
+  /** source 为 lan_key / public_key / user 时存在；user 时为按门户设置覆盖后的有效 Key */
   key: ApiKey | null
+  /** source 为 user 时存在：Key 所属的门户用户 */
+  user?: PortalUser | null
   /** 客户端 IP（已去掉 ::ffff: 前缀），未知时为空串 */
   ip: string
+}
+
+// ── 门户用户 ───────────────────────────────────────────
+/** users 数据库行；quota 为剩余点数，请求结束才扣费，可能透支为负 */
+export interface PortalUser {
+  id: number
+  username: string
+  password_hash: string
+  /** 1 启用 / 2 停用 */
+  status: number
+  quota: number
+  used_quota: number
+  request_count: number
+  register_ip: string | null
+  created_at: number
+  last_login_at: number | null
+  last_login_ip: string | null
 }
 
 /** 模型倍率：点数 = 未缓存输入×input + 缓存读×cache_read + 缓存写×cache_write + 输出×output + per_request */
@@ -198,6 +217,8 @@ export interface LogRow {
   client_ip: string | null
   /** 本次请求折算点数；未命中倍率时为 null */
   quota_points: number | null
+  /** 门户用户 id；删除 Key 后仍可按用户查询 */
+  user_id: number | null
 }
 
 // ── 设置 ───────────────────────────────────────────────
@@ -249,6 +270,26 @@ export interface Settings {
   auto_ban_cooldown_minutes: number
   /** 仅用于显示：给分发用户的公网 Base URL */
   public_base_url: string
+  // 用户门户
+  portal_register_enabled: boolean
+  /** 新用户赠送点数 */
+  portal_initial_quota: number
+  /** 同一 IP 每天最多注册数，0 = 不限 */
+  portal_register_ip_daily: number
+  /** 每个用户最多 Key 数 */
+  portal_max_keys: number
+  /** 门户用户可用的渠道分组 */
+  portal_groups: string[]
+  /** 每用户每分钟请求数上限（名下 Key 共享），0 = 不限 */
+  portal_rpm: number
+  /** 每用户并发上限（名下 Key 共享），0 = 不限 */
+  portal_concurrency: number
+  /** 门户显示 $ 时每 1 美元对应的点数 */
+  portal_points_per_usd: number
+  checkin_enabled: boolean
+  /** 签到奖励随机区间（点数，含两端） */
+  checkin_min_points: number
+  checkin_max_points: number
 }
 
 /** 规则「调用来源」作用域，三类规则共用 */
@@ -470,4 +511,27 @@ export interface BillingPreviewInput {
 export interface BillingPreviewResult {
   ratio: ModelRatio | null
   points: number | null
+}
+
+// ── 门户用户管理 API 契约（内网管理端）──────────────────
+/** GET /api/users 列表项，不含密码哈希 */
+export interface UserView {
+  id: number
+  username: string
+  status: number
+  quota: number
+  used_quota: number
+  request_count: number
+  register_ip: string | null
+  created_at: number
+  last_login_at: number | null
+  last_login_ip: string | null
+  key_count: number
+}
+
+export interface UserListResult {
+  items: UserView[]
+  total: number
+  page: number
+  size: number
 }

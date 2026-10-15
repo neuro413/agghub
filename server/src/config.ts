@@ -17,6 +17,8 @@ if (process.env.AGGHUB_TESTING === '1' && DATA_DIR.toLowerCase() === path.join(P
 export const DB_PATH = path.join(DATA_DIR, 'agghub.db')
 /** 前端构建产物（生产托管）*/
 export const WEB_DIST = path.resolve(PROJECT_ROOT, 'web', 'dist')
+/** 用户门户构建产物，只在公网端口托管 */
+export const PORTAL_DIST = path.resolve(PROJECT_ROOT, 'portal', 'dist')
 /** 网关端口（默认 3210，避开常见代理端口）*/
 export const PORT = Number(process.env.PORT) || 3210
 /** 内网监听地址；不设则监听所有网卡 */
@@ -79,6 +81,19 @@ export const DEFAULT_SETTINGS: Settings = {
   auto_ban_threshold: 1,
   auto_ban_cooldown_minutes: 0,
   public_base_url: '',
+  portal_register_enabled: true,
+  portal_initial_quota: 0,
+  portal_register_ip_daily: 3,
+  portal_max_keys: 10,
+  /** 默认只开放 public 分组，避免门户用户用到私人渠道 */
+  portal_groups: ['public'],
+  portal_rpm: 0,
+  portal_concurrency: 0,
+  /** 与 new-api 的 QuotaPerUnit 一致 */
+  portal_points_per_usd: 500000,
+  checkin_enabled: false,
+  checkin_min_points: 50000,
+  checkin_max_points: 250000,
 }
 
 /** 整数设置的取值范围（保存时校验） */
@@ -89,4 +104,7 @@ export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> =
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
   image_max_bytes: [1, 100 * 1024 * 1024],
   auto_ban_threshold: [1, 100], auto_ban_cooldown_minutes: [0, 10_080],
+  portal_initial_quota: [0, 1_000_000_000_000], portal_register_ip_daily: [0, 10_000], portal_max_keys: [1, 1000],
+  portal_rpm: [0, 100_000], portal_concurrency: [0, 100_000], portal_points_per_usd: [1, 1_000_000_000_000],
+  checkin_min_points: [0, 1_000_000_000_000], checkin_max_points: [0, 1_000_000_000_000],
 }

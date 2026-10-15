@@ -1,9 +1,8 @@
 import { Router } from 'express'
 import { handleRelay } from '../core/relay'
 import * as oaiConv from '../convert/openai'
-import { enabledChannels, getSettings } from '../db'
-import { channelVisibleTo, keyAllowsModel } from '../core/selector'
-import { findRatio } from '../core/billing'
+import { getSettings } from '../db'
+import { modelsVisibleTo } from '../core/selector'
 import { OWNER_CALLER } from '../core/caller'
 import type { Caller } from '../types'
 
@@ -24,16 +23,7 @@ openaiEntry.post('/chat/completions', async (req, res) => {
 // 按调用方过滤：Key 只能看到自己分组内渠道的模型，再取模型白名单与倍率表的交集
 openaiEntry.get('/models', (req, res) => {
   const caller: Caller = res.locals.caller ?? OWNER_CALLER
-  const ratios = getSettings().model_ratios
-  const set = new Set<string>()
-  for (const c of enabledChannels()) {
-    if (!channelVisibleTo(c, caller)) continue
-    for (const m of c.models) set.add(m)
-    if (c.model_mapping) for (const k of Object.keys(c.model_mapping)) set.add(k)
-  }
-  const data = [...set]
-    .filter(id => keyAllowsModel(caller, id) && (!caller.key || findRatio(ratios, id)))
-    .sort()
+  const data = modelsVisibleTo(caller, getSettings().model_ratios)
     .map((id) => ({ id, object: 'model', created: 0, owned_by: 'agghub' }))
   res.json({ object: 'list', data })
 })

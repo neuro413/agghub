@@ -203,6 +203,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         response_body: last?.response.text(), upstream_response_body: last?.upstream.text(),
         response_body_truncated: last?.response.truncated, upstream_response_body_truncated: last?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
+        user_id: caller.user?.id ?? null,
       }
     }, settings, requestId)
   }

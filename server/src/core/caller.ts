@@ -1,6 +1,8 @@
 import type { Request, RequestHandler } from 'express'
 import type { Caller, Settings, Surface } from '../types'
+import { getSettings } from '../db'
 import { getKeyByToken } from './keys'
+import { effectivePortalKey, getUserById, USER_ENABLED } from './users'
 import { extractToken, safeEqual } from './accessToken'
 import { sendEntryError } from './entryError'
 import { precheckQuota } from './billing'
@@ -86,6 +88,17 @@ export function createCallerResolver(surface: Surface, getAdminToken: () => stri
       if (key.expires_at != null && key.expires_at <= now) {
         return sendEntryError(req, res, 403, 'key_expired', 'permission_error', 'API Key 已过期')
       }
+      // 门户用户的 Key：账号状态优先，分组与限流取门户设置
+      if (key.user_id != null) {
+        const user = getUserById(key.user_id)
+        if (!user) {
+          if (surface === 'public') recordAuthFailure(ip, now)
+          return sendEntryError(req, res, 401, 'invalid_api_key', 'authentication_error', 'API Key 无效')
+        }
+        if (user.status !== USER_ENABLED) return sendEntryError(req, res, 403, 'user_disabled', 'permission_error', '账号已停用')
+        res.locals.caller = { surface, source: 'user', key: effectivePortalKey(key, getSettings()), user, ip } as Caller
+        return next()
+      }
       res.locals.caller = { surface, source: surface === 'public' ? 'public_key' : 'lan_key', key, ip } as Caller
       return next()
     }
@@ -110,6 +123,9 @@ export function createAdmission(): RequestHandler {
   return (req, res, next): void => {
     const caller = res.locals.caller as Caller | undefined
     if (!caller?.key) return next()
+    if (caller.user && caller.user.quota <= 0) {
+      return sendEntryError(req, res, 429, 'insufficient_quota', 'rate_limit_error', '余额不足')
+    }
     const quota = precheckQuota(caller.key)
     if (!quota.ok) {
       return sendEntryError(req, res, 429, 'insufficient_quota', 'rate_limit_error', quota.reason === 'daily' ? '今日额度已用完' : '额度已用完')

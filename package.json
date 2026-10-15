@@ -6,18 +6,20 @@
   "type": "module",
   "workspaces": [
     "server",
-    "web"
+    "web",
+    "portal"
   ],
   "scripts": {
-    "dev": "concurrently -n server,web -c yellow,green \"npm:dev:*\"",
+    "dev": "concurrently -n server,web,portal -c yellow,green,cyan \"npm:dev:*\"",
     "dev:server": "npm -w server run dev",
     "dev:web": "npm -w web run dev",
-    "build": "npm -w web run build",
+    "dev:portal": "npm -w portal run dev",
+    "build": "npm -w web run build && npm -w portal run build",
     "start": "npm -w server run start",
     "test": "node scripts/run-tests.mjs",
     "logs:storage": "node --import tsx scripts/compact-logs.ts",
     "test:e2e": "node --import tsx scripts/run-e2e.ts",
-    "typecheck": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json && tsc -p server/tsconfig.test.json && tsc -p tsconfig.tools.json"
+    "typecheck": "tsc -p server/tsconfig.json && tsc -p web/tsconfig.json && tsc -p portal/tsconfig.json && tsc -p server/tsconfig.test.json && tsc -p tsconfig.tools.json"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

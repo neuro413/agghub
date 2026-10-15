@@ -23,6 +23,7 @@ export const SOURCE_OPTIONS: Opt[] = [
   { value: 'owner', label: '内网匿名' },
   { value: 'lan_key', label: '内网 Key' },
   { value: 'public_key', label: '公网 Key' },
+  { value: 'user', label: '门户用户' },
 ]
 
 /** 入口格式显示名 */

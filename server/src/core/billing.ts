@@ -3,13 +3,10 @@ import { contentToText } from '../convert/ir'
 import { db } from '../db'
 import { matchesPattern, patternSpecificity } from './modelPattern'
 
-// 【签名桩】由「计费与限流」任务实现函数体；导出名称和参数类型不得修改，relay.ts 与鉴权中间件已按此调用。
-
-/** 计费账户：现在只有 Key；预留以后的 { type: 'user', id } */
-export interface BillingAccount {
-  type: 'key'
-  id: number
-}
+/** 计费账户：管理员发的 Key 扣 Key 自身额度；门户用户的 Key 扣用户余额，同时累计到 Key 上 */
+export type BillingAccount =
+  | { type: 'key'; id: number }
+  | { type: 'user'; id: number; keyId: number }
 
 export interface BillableUsage {
   /** 含缓存读写在内的输入总量（IR 语义） */
@@ -57,6 +54,7 @@ export function estimateIRPrompt(ir: any): number {
 
 /** Caller 对应的计费账户；owner 没有账户（只记录点数不扣费） */
 export function accountOf(caller: Caller): BillingAccount | null {
+  if (caller.user && caller.key) return { type: 'user', id: caller.user.id, keyId: caller.key.id }
   return caller.key ? { type: 'key', id: caller.key.id } : null
 }
 
@@ -111,6 +109,13 @@ const commitTx = db.transaction((accountId: number, day: string, now: number, po
   addUsedStmt.run(points, now, accountId)
   upsertDailyStmt.run('key', accountId, day, points, prompt, completion)
 })
+const chargeUserStmt = db.prepare('UPDATE users SET quota = quota - ?, used_quota = used_quota + ?, request_count = request_count + 1 WHERE id = ?')
+const commitUserTx = db.transaction((userId: number, keyId: number, day: string, now: number, points: number, prompt: number, completion: number) => {
+  chargeUserStmt.run(points, points, userId)
+  addUsedStmt.run(points, now, keyId)
+  upsertDailyStmt.run('user', userId, day, points, prompt, completion)
+  upsertDailyStmt.run('key', keyId, day, points, prompt, completion)
+})
 
 /** 额度预检：总额度 quota_used < quota_total；今日 points < quota_daily；字段为 null 表示不限 */
 export function precheckQuota(key: ApiKey, now = Date.now()): QuotaCheck {
@@ -122,9 +127,13 @@ export function precheckQuota(key: ApiKey, now = Date.now()): QuotaCheck {
   return { ok: true }
 }
 
-/** 记账：一个事务里累加 api_keys.quota_used / last_used_at，并 upsert usage_daily（requests +1） */
+/**
+ * 记账：一个事务里累加 api_keys.quota_used / last_used_at，并 upsert usage_daily（requests +1）；
+ * 用户账户另外扣 users.quota、累加 used_quota / request_count，用户与 Key 各记一条每日用量。
+ */
 export function commitUsage(account: BillingAccount, entry: { points: number; prompt_tokens: number; completion_tokens: number }, now = Date.now()): void {
-  commitTx(account.id, localDay(now), now, entry.points, entry.prompt_tokens, entry.completion_tokens)
+  if (account.type === 'user') commitUserTx(account.id, account.keyId, localDay(now), now, entry.points, entry.prompt_tokens, entry.completion_tokens)
+  else commitTx(account.id, localDay(now), now, entry.points, entry.prompt_tokens, entry.completion_tokens)
 }
 
 export interface SettleInput {

@@ -19,6 +19,7 @@ const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|passw
 function sourceLabel(s: CallerSource | null): string {
   if (s === 'lan_key') return '内网 Key'
   if (s === 'public_key') return '公网 Key'
+  if (s === 'user') return '门户用户'
   return '内网匿名'
 }
 
@@ -210,6 +211,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       <span className="sp" style={{ flex: 1 }} />
       <span className="ah-mini ah-muted">{detail.channel_name || '—'}</span>
       <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
+      {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
       {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}
       {detail.client_ip && <span className="ah-mini ah-muted ah-num">IP：{detail.client_ip}</span>}
       {detail.quota_points != null && <span className="ah-mini ah-muted ah-num">{fmtNum(detail.quota_points)} 点</span>}
