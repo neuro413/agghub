@@ -7,7 +7,8 @@ import { IconCopy, IconEdit, IconExternal, IconKey, IconPlus, IconRefresh, IconT
 import { useToast } from '../components/Toast'
 import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
-import { fmtNum, fmtTime } from '../lib/format'
+import { fmtTime } from '../lib/format'
+import { currencySymbol, money, toPoints } from '../lib/money'
 import type { ApiKeyView, ModelRatio, SystemInfo } from '../types'
 import { KeyModal } from './KeyModal'
 import { ModelRatioCard } from './ModelRatioCard'
@@ -91,11 +92,11 @@ export function KeysPage() {
   }
 
   const addTotal = async (k: ApiKeyView) => {
-    const raw = window.prompt('增加多少总额度点数？（可填负数减少）')
+    const raw = window.prompt(`增加多少总额度？（单位 ${currencySymbol()}，可填负数减少）`)
     if (raw == null) return
-    const value = Number(raw.trim())
-    if (raw.trim() === '' || !Number.isInteger(value)) {
-      toast('err', '请输入整数')
+    const value = toPoints(Number(raw.trim()))
+    if (raw.trim() === '' || !Number.isSafeInteger(value) || value === 0) {
+      toast('err', '请输入非零金额')
       return
     }
     try {
@@ -135,7 +136,7 @@ export function KeysPage() {
       <div className="ah-page-head">
         <div>
           <div className="ah-page-title">令牌</div>
-          <div className="ah-page-sub">分发 Key · 额度 · 模型倍率</div>
+          <div className="ah-page-sub">分发 Key · 额度 · 模型定价</div>
         </div>
         <div className="ah-row">
           <IconButton title="刷新" onClick={refresh}>
@@ -283,10 +284,10 @@ function KeyCard({
         <div className="ah-key-quota-row">
           <span className="ah-mini ah-muted">总额度</span>
           {k.quota_total == null ? (
-            <span className="ah-mini ah-num">已用 {fmtNum(k.quota_used)} · 不限</span>
+            <span className="ah-mini ah-num">已用 {money(k.quota_used)} · 不限</span>
           ) : (
             <span className="ah-mini ah-num">
-              {fmtNum(k.quota_used)} / {fmtNum(k.quota_total)}
+              {money(k.quota_used)} / {money(k.quota_total)}
             </span>
           )}
         </div>
@@ -302,11 +303,11 @@ function KeyCard({
           <span className="ah-mini ah-muted">今日</span>
           {k.quota_daily == null ? (
             <span className="ah-mini ah-num">
-              今日 {fmtNum(k.today_points)} · 不限 · {k.today_requests} 次
+              今日 {money(k.today_points)} · 不限 · {k.today_requests} 次
             </span>
           ) : (
             <span className="ah-mini ah-num">
-              {fmtNum(k.today_points)} / {fmtNum(k.quota_daily)} · {k.today_requests} 次
+              {money(k.today_points)} / {money(k.quota_daily)} · {k.today_requests} 次
             </span>
           )}
         </div>

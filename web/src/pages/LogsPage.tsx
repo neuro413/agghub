@@ -1,4 +1,5 @@
 import { clampOffset, fmtNum, fmtTime } from '../lib/format'
+import { money } from '../lib/money'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
@@ -285,7 +286,7 @@ export function LogsPage() {
                   )}
                   {l.quota_points != null && (
                     <span className="ah-mini ah-faint ah-num" style={{ marginLeft: 6 }}>
-                      {fmtNum(l.quota_points)} 点
+                      {money(l.quota_points)}
                     </span>
                   )}
                 </span>

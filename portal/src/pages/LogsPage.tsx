@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { useSession } from '../session'
-import { dateTime, num, seconds, usd } from '../lib/format'
+import { dateTime, num, seconds, money } from '../lib/format'
 import type { LogPage, PortalKey } from '../types'
 import { PageLayout } from '../components/Layout'
 import { Pagination } from '../components/Pagination'
@@ -109,7 +109,7 @@ export function LogsPage() {
                       )}
                     </div>
                   </td>
-                  <td className="num"><span className="pt-chip pt-chip-strong">{usd(log.quota_points)}</span></td>
+                  <td className="num"><span className="pt-chip pt-chip-strong">{money(log.quota_points)}</span></td>
                   <td className="num mono" style={{ fontSize: 12 }}>{seconds(log.latency_ms)}</td>
                   <td>
                     {log.status === 'success'

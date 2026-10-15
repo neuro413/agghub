@@ -3,7 +3,8 @@ import type { ReactNode } from 'react'
 import { api } from '../api'
 import { Link, navigate } from '../router'
 import { useSession, useUser } from '../session'
-import { usd } from '../lib/format'
+import { isImageIcon } from '../lib/brand'
+import { money } from '../lib/format'
 import { Button } from './ui'
 import { IconFileText, IconKeyRound, IconLayoutDashboard, IconLogOut, IconPanelLeft, IconUser } from './Icons'
 
@@ -24,6 +25,13 @@ const NAV = [
 
 const COLLAPSE_KEY = 'agh_portal_sidebar'
 const mobileQuery = window.matchMedia('(max-width: 767px)')
+
+/** 品牌图标：链接按图片显示，否则当作 emoji / 文字；留空不显示 */
+export function BrandLogo({ className }: { className: string }) {
+  const icon = useSession().status.brand_icon
+  if (!icon) return null
+  return <span className={className}>{isImageIcon(icon) ? <img src={icon} alt="" /> : icon}</span>
+}
 
 function UserMenu() {
   const user = useUser()
@@ -51,7 +59,7 @@ function UserMenu() {
             <span className="pt-avatar-btn" style={{ width: 28, height: 28, fontSize: 12 }}>{initial}</span>
             <div>
               <div className="name">{user.username}</div>
-              <div className="quota">余额 <span className="mono">{usd(user.quota)}</span></div>
+              <div className="quota">余额 <span className="mono">{money(user.quota)}</span></div>
             </div>
           </div>
           <div className="pt-menu-sep" />
@@ -64,6 +72,7 @@ function UserMenu() {
 }
 
 export function ConsoleLayout({ path, children }: { path: string; children: ReactNode }) {
+  const { status } = useSession()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => setMobileOpen(false), [path])
@@ -79,8 +88,8 @@ export function ConsoleLayout({ path, children }: { path: string; children: Reac
       <header className="pt-header">
         <Button variant="ghost" size="icon" onClick={toggle} aria-label="切换侧边栏"><IconPanelLeft /></Button>
         <Link to="/console" className="pt-brand">
-          <span className="pt-brand-logo">🍊</span>
-          AggHub
+          <BrandLogo className="pt-brand-logo" />
+          {status.brand_name}
         </Link>
         <span className="spacer" />
         <UserMenu />

@@ -19,6 +19,8 @@ interface FormState {
   name: string
   type: ChannelType
   base_url: string
+  base_url_full: boolean
+  models_url: string
   api_key: string
   models: string
   mapping: string
@@ -36,6 +38,17 @@ interface FormState {
   exclude_last_user: boolean
 }
 
+const FULL_PLACEHOLDER: Record<Exclude<ChannelType, 'vertex'>, string> = {
+  openai: 'https://example.com/api/paas/v4/chat/completions',
+  anthropic: 'https://example.com/api/anthropic/messages',
+  responses: 'https://example.com/openai/responses',
+}
+
+function baseUrlHint(f: FormState): string {
+  if (f.type === 'vertex' || !f.base_url_full) return '自定义反代地址，会自动补 /v1 和接口路径；留空用官方默认'
+  return '填写完整的请求地址，原样请求不做任何拼接；拉取模型与测试连接使用下方的模型列表地址'
+}
+
 function singleRoleHint(f: FormState): string {
   if (!f.single_role) return '上游只接受单一角色消息时开启：把对话历史按原顺序打包成 JSON 文本发送'
   if (f.single_role_mode === 'system')
@@ -50,7 +63,7 @@ function singleRoleHint(f: FormState): string {
 function initForm(c: Channel | null): FormState {
   if (!c)
     return {
-      name: '', type: 'openai', base_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, groups: 'default', region: '', timeout: '',
+      name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, groups: 'default', region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
       exclude_last_user: false,
     }
@@ -58,6 +71,8 @@ function initForm(c: Channel | null): FormState {
     name: c.name,
     type: c.type,
     base_url: c.base_url || '',
+    base_url_full: c.base_url_full,
+    models_url: c.models_url || '',
     api_key: c.api_key,
     models: c.models.join('\n'),
     mapping: c.model_mapping ? Object.entries(c.model_mapping).map(([k, v]) => `${k}=${v}`).join('\n') : '',
@@ -92,6 +107,8 @@ function buildPayload(f: FormState): Partial<Channel> {
     name: f.name.trim(),
     type: f.type,
     base_url: f.base_url.trim() || null,
+    base_url_full: f.type !== 'vertex' && f.base_url_full,
+    models_url: f.type !== 'vertex' && f.base_url_full ? f.models_url.trim() || null : null,
     api_key: f.api_key.trim(),
     models,
     model_mapping: Object.keys(mapping).length ? mapping : null,
@@ -185,6 +202,7 @@ export function ChannelModal({
     <Modal
       title={channel ? '编辑渠道' : '新增渠道'}
       onClose={onClose}
+      dismissible={false}
       footer={
         <>
           <Button variant="ghost" icon={<IconTest size={17} />} loading={testing} onClick={test}>
@@ -238,8 +256,26 @@ export function ChannelModal({
         )}
       </Field>
 
-      <Field label="Base URL" hint="自定义反代地址；留空用官方默认">
-        <Input value={f.base_url} onChange={(e) => set('base_url', e.target.value)} placeholder={PLACEHOLDER[f.type]} />
+      <Field label="Base URL" hint={baseUrlHint(f)}>
+        <Input
+          value={f.base_url}
+          onChange={(e) => set('base_url', e.target.value)}
+          placeholder={f.type !== 'vertex' && f.base_url_full ? FULL_PLACEHOLDER[f.type] : PLACEHOLDER[f.type]}
+        />
+        {f.type !== 'vertex' && (
+          <div className="ah-row" style={{ marginTop: 8 }}>
+            <Toggle checked={f.base_url_full} onChange={(v) => set('base_url_full', v)} />
+            <span className="ah-mini ah-muted">完整地址（不附加 /v1 与接口路径）</span>
+          </div>
+        )}
+        {f.type !== 'vertex' && f.base_url_full && (
+          <Input
+            value={f.models_url}
+            onChange={(e) => set('models_url', e.target.value)}
+            placeholder="模型列表地址（可选）：留空时把结尾的接口路径换成 /models"
+            style={{ marginTop: 8 }}
+          />
+        )}
       </Field>
 
       <Field label="渠道超时（毫秒）" hint="仅对本渠道生效；留空 = 跟随设置页的全局「请求超时」">

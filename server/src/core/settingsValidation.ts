@@ -30,9 +30,23 @@ const booleans = Object.keys(DEFAULT_SETTINGS).filter(key => typeof DEFAULT_SETT
 const formats = new Set(['openai', 'anthropic', 'responses'])
 const roles = new Set(['system', 'user', 'assistant', 'tool'])
 const sources = new Set(['owner', 'lan_key', 'public_key', 'user'])
-const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write', 'per_request']
+const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write']
+/** 按次点数的上限与额度一致，Token 倍率 100 万已相当于每百万 Token 上百万美元 */
+const PER_REQUEST_MAX = 1_000_000_000_000
 function object(value: any): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+function text(value: any, max: number): boolean {
+  return typeof value === 'string' && !!value.trim() && value.length <= max
+}
+/** 品牌图标：上传后的门户地址、http(s) 图片链接，或不超过 16 字符的 emoji / 文字 */
+function brandIcon(value: any): boolean {
+  if (typeof value !== 'string') return false
+  if (value.startsWith('/api/user/brand-icon')) return value.length <= 128
+  if (/^https?:\/\//i.test(value)) {
+    try { return value.length <= 2048 && !!new URL(value) } catch { return false }
+  }
+  return [...value].length <= 16
 }
 function strings(value: any): boolean {
   return Array.isArray(value) && value.every(v => typeof v === 'string' && v.length > 0)
@@ -68,6 +82,10 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   if (Number.isSafeInteger(merged.checkin_min_points) && Number.isSafeInteger(merged.checkin_max_points)) {
     check(merged.checkin_min_points <= merged.checkin_max_points, 'checkin_min_points', '最小奖励不能大于最大奖励')
   }
+  check(text(merged.currency_symbol, 8), 'currency_symbol', '须为 1～8 字符的非空文本')
+  check(text(merged.portal_brand_name, 64), 'portal_brand_name', '须为 1～64 字符的非空文本')
+  check(text(merged.portal_site_title, 128), 'portal_site_title', '须为 1～128 字符的非空文本')
+  check(brandIcon(merged.portal_brand_icon), 'portal_brand_icon', '须为图片链接或不超过 16 字符的 emoji / 文字')
   check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')
   try { validateThinkingTags(merged.pseudo_thinking_open_tag, merged.pseudo_thinking_close_tag) } catch (error) {
@@ -105,6 +123,8 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       for (const field of RATIO_FIELDS) {
         check(typeof ratio[field] === 'number' && Number.isFinite(ratio[field]) && ratio[field] >= 0 && ratio[field] <= 1_000_000, `${at}.${field}`, '须为 0～1000000 的数字')
       }
+      check(typeof ratio.per_request === 'number' && Number.isFinite(ratio.per_request) && ratio.per_request >= 0 && ratio.per_request <= PER_REQUEST_MAX,
+        `${at}.per_request`, `须为 0～${PER_REQUEST_MAX} 的数字`)
     })
   }
   for (const key of ['preprocess_rules', 'tool_filter_rules', 'param_rules']) {

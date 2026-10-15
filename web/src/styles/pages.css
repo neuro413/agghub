@@ -350,6 +350,26 @@
   align-items: center;
   gap: 10px;
 }
+.ah-brand-preview {
+  flex: none;
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--cream);
+  border: 1.6px solid var(--line);
+  font-size: 18px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ah-brand-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
 .ah-endpoint {
   display: flex;
   align-items: center;
@@ -1185,6 +1205,12 @@
 .ah-ratio-card {
   margin-top: var(--sp-4);
 }
+.ah-ratio-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
 .ah-ratio-table {
   display: flex;
   flex-direction: column;
@@ -1193,7 +1219,7 @@
 .ah-ratio-head,
 .ah-ratio-row {
   display: grid;
-  grid-template-columns: 1.7fr repeat(5, minmax(58px, 0.8fr)) 40px;
+  grid-template-columns: minmax(160px, 1.6fr) repeat(5, minmax(84px, 0.8fr)) 40px;
   gap: 8px;
   align-items: center;
 }
@@ -1206,10 +1232,43 @@
 .ah-ratio-head span:not(:first-child) {
   text-align: center;
 }
+.ah-ratio-head em {
+  margin-left: 3px;
+  font-style: normal;
+  font-weight: 600;
+  opacity: 0.75;
+}
 .ah-ratio-row .ah-input {
   padding: 8px 10px;
   font-size: var(--fs-sm);
   font-variant-numeric: tabular-nums;
+}
+.ah-ratio-row .ah-money-input,
+.ah-price-import-row .ah-money-input {
+  padding: 0 10px;
+}
+.ah-ratio-row .ah-money-input input,
+.ah-price-import-row .ah-money-input input {
+  padding: 8px 0;
+  font-size: var(--fs-sm);
+}
+.ah-ratio-pattern {
+  position: relative;
+}
+.ah-ratio-pattern .ah-input {
+  padding-right: 52px;
+}
+.ah-ratio-pattern .ah-tag {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ah-ratio-dirty {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--warn);
 }
 .ah-ratio-actions {
   display: flex;
@@ -1254,22 +1313,84 @@
   .ah-ratio-trial-grid {
     grid-template-columns: 1fr 1fr;
   }
+  .ah-ratio-pattern {
+    grid-column: 1 / -1;
+  }
+}
+
+/* 导入模型定价弹窗 */
+.ah-price-import-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: 10px;
+}
+.ah-price-import-search .ah-input {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  font-size: var(--fs-sm);
+}
+.ah-price-import-table {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.ah-price-import-head,
+.ah-price-import-row {
+  display: grid;
+  grid-template-columns: 22px minmax(180px, 1.6fr) repeat(5, minmax(84px, 0.75fr));
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+}
+.ah-price-import-head {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+.ah-price-import-head span:not(:nth-child(2)) {
+  text-align: center;
+}
+.ah-price-import-row.is-selected {
+  background: var(--orange-50);
+}
+.ah-price-import-head input,
+.ah-price-import-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--orange-500);
+  cursor: pointer;
+}
+.ah-price-import-model {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 600;
+  cursor: pointer;
+}
+.ah-price-import-model .is-none {
+  color: var(--err);
 }
 
 /* ── 用户页 ── */
-.ah-user-search {
+.ah-user-search,
+.ah-price-import-search {
   position: relative;
   display: flex;
   align-items: center;
   width: 220px;
 }
-.ah-user-search svg {
+.ah-user-search svg,
+.ah-price-import-search svg {
   position: absolute;
   left: 12px;
   color: var(--ink-faint);
   pointer-events: none;
 }
-.ah-user-search .ah-input {
+.ah-user-search .ah-input,
+.ah-price-import-search .ah-input {
   padding-left: 36px;
 }
 .ah-user-row .u-name,

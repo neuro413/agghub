@@ -6,6 +6,12 @@ export interface PortalStatus {
   checkin_min_points: number
   checkin_max_points: number
   points_per_usd: number
+  /** 余额符号，金额显示时前置 */
+  currency_symbol: string
+  brand_name: string
+  /** emoji / 文字，或图片地址 */
+  brand_icon: string
+  site_title: string
   base_url: string
   log_retention_days: number
 }

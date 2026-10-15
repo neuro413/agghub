@@ -113,6 +113,14 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL
 );
 
+-- 站点资源（门户上传的品牌图标等），不放进 settings，避免每次读设置都带上大文件
+CREATE TABLE IF NOT EXISTS site_assets (
+  name       TEXT PRIMARY KEY,
+  mime       TEXT    NOT NULL,
+  data       BLOB    NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 -- 日志行只存元数据，正文以 *_ref 存 blobs 的块 id（块表由 stats/blobstore 建立）
 CREATE TABLE IF NOT EXISTS request_logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -172,6 +180,8 @@ addMissingColumns('channels', [
   ['single_role_exclude_last_user', 'INTEGER NOT NULL DEFAULT 0'],
   ['groups', `TEXT NOT NULL DEFAULT '["default"]'`],
   ['ban_until', 'INTEGER'],
+  ['base_url_full', 'INTEGER NOT NULL DEFAULT 0'],
+  ['models_url', 'TEXT'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -249,6 +259,8 @@ export function rowToChannel(r: ChannelRow): Channel {
     name: r.name,
     type: r.type,
     base_url: r.base_url,
+    base_url_full: !!r.base_url_full,
+    models_url: r.models_url ?? null,
     api_key: r.api_key,
     models: safeArray(r.models),
     model_mapping: safeObject(r.model_mapping),

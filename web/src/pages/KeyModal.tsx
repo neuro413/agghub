@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
-import { Dropdown, Field, Input, Textarea } from '../components/Form'
+import { Dropdown, Field, Input, MoneyInput, Textarea } from '../components/Form'
 import { IconCopy } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { copyText } from '../lib/clipboard'
+import { amountText, toPoints } from '../lib/money'
 import type { ApiKeyInput, ApiKeyView } from '../types'
 import { MultiChips } from './preprocessShared'
 
@@ -53,8 +54,8 @@ function initForm(k: ApiKeyView | null, groups: string[]): FormState {
     models: k.models.join('\n'),
     rpm: k.rpm != null ? String(k.rpm) : '',
     concurrency: k.concurrency != null ? String(k.concurrency) : '',
-    quotaTotal: k.quota_total != null ? String(k.quota_total) : '',
-    quotaDaily: k.quota_daily != null ? String(k.quota_daily) : '',
+    quotaTotal: k.quota_total != null ? amountText(k.quota_total) : '',
+    quotaDaily: k.quota_daily != null ? amountText(k.quota_daily) : '',
     expires: k.expires_at != null ? toLocalInput(k.expires_at) : '',
     logBodies: k.log_bodies == null ? '' : k.log_bodies ? 'true' : 'false',
     note: k.note ?? '',
@@ -62,6 +63,7 @@ function initForm(k: ApiKeyView | null, groups: string[]): FormState {
 }
 
 const isNonNegInt = (v: string) => /^\d+$/.test(v.trim())
+const isNonNegAmount = (v: string) => Number.isFinite(Number(v)) && Number(v) >= 0
 
 export function KeyModal({
   keyItem,
@@ -91,11 +93,15 @@ export function KeyModal({
     for (const [label, v] of [
       ['RPM', f.rpm],
       ['并发上限', f.concurrency],
-      ['总额度', f.quotaTotal],
-      ['每日额度', f.quotaDaily],
     ] as const) {
       if (v.trim() === '') continue
       if (!isNonNegInt(v)) return `${label}必须是不小于 0 的整数`
+    }
+    for (const [label, v] of [
+      ['总额度', f.quotaTotal],
+      ['每日额度', f.quotaDaily],
+    ] as const) {
+      if (v.trim() !== '' && !isNonNegAmount(v)) return `${label}必须是不小于 0 的金额`
     }
     if (f.rpm.trim() !== '' && Number(f.rpm) < 1) return 'RPM 若填写必须 ≥ 1'
     if (f.concurrency.trim() !== '' && Number(f.concurrency) < 1) return '并发上限若填写必须 ≥ 1'
@@ -109,6 +115,7 @@ export function KeyModal({
       return
     }
     const parseOptInt = (v: string): number | null => (v.trim() === '' ? null : parseInt(v, 10))
+    const parseOptAmount = (v: string): number | null => (v.trim() === '' ? null : toPoints(Number(v)))
     const input: ApiKeyInput = {
       name: f.name.trim(),
       enabled: f.enabled,
@@ -116,8 +123,8 @@ export function KeyModal({
       models: f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean),
       rpm: parseOptInt(f.rpm),
       concurrency: parseOptInt(f.concurrency),
-      quota_total: parseOptInt(f.quotaTotal),
-      quota_daily: parseOptInt(f.quotaDaily),
+      quota_total: parseOptAmount(f.quotaTotal),
+      quota_daily: parseOptAmount(f.quotaDaily),
       log_bodies: f.logBodies === '' ? null : f.logBodies === 'true',
       expires_at: f.expires ? new Date(f.expires).getTime() : null,
       note: f.note.trim() || null,
@@ -147,6 +154,7 @@ export function KeyModal({
     <Modal
       title={keyItem ? '编辑 Key' : '新建 Key'}
       onClose={onClose}
+      dismissible={false}
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
@@ -198,11 +206,11 @@ export function KeyModal({
       </div>
 
       <div className="ah-grid2">
-        <Field label="总额度（点）" hint="留空 = 不限">
-          <Input type="number" min={0} value={f.quotaTotal} onChange={(e) => set('quotaTotal', e.target.value)} placeholder="留空不限" />
+        <Field label="总额度" hint="留空 = 不限">
+          <MoneyInput value={f.quotaTotal} onChange={(e) => set('quotaTotal', e.target.value)} placeholder="留空不限" />
         </Field>
-        <Field label="每日额度（点）" hint="服务器本地时间 0 点重置；留空 = 不限">
-          <Input type="number" min={0} value={f.quotaDaily} onChange={(e) => set('quotaDaily', e.target.value)} placeholder="留空不限" />
+        <Field label="每日额度" hint="服务器本地时间 0 点重置；留空 = 不限">
+          <MoneyInput value={f.quotaDaily} onChange={(e) => set('quotaDaily', e.target.value)} placeholder="留空不限" />
         </Field>
       </div>
 

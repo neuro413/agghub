@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api'
 import { useSession } from '../session'
-import { localDay, usd } from '../lib/format'
+import { localDay, money } from '../lib/format'
 import type { CheckinInfo } from '../types'
 import { useToast } from '../components/Toast'
 import { Button, IconBadge, Skeleton } from '../components/ui'
@@ -55,7 +55,7 @@ export function CheckinCard() {
     setBusy(true)
     try {
       const result = await api.checkin()
-      toast('success', `签到成功，获得 ${usd(result.points)}`)
+      toast('success', `签到成功，获得 ${money(result.points)}`)
       setMonth(today.slice(0, 7))
       await Promise.all([load(), refreshUser()])
     } catch (e) {
@@ -80,8 +80,8 @@ export function CheckinCard() {
           </div>
           <p className="pt-checkin-sub">
             {info?.checked_in_today
-              ? todayPoints != null ? `今日获得 ${usd(todayPoints)}` : '今日已签到，明天再来'
-              : `每天签到一次，随机获得 ${usd(info?.min_points ?? 0)} ~ ${usd(info?.max_points ?? 0)} 额度`}
+              ? todayPoints != null ? `今日获得 ${money(todayPoints)}` : '今日已签到，明天再来'
+              : `每天签到一次，随机获得 ${money(info?.min_points ?? 0)} ~ ${money(info?.max_points ?? 0)} 额度`}
           </p>
         </div>
         <Button size="sm" onClick={checkin} loading={busy} disabled={!info || info.checked_in_today}>
@@ -91,8 +91,8 @@ export function CheckinCard() {
 
       <div className="pt-checkin-stats">
         <div><div className="v">{info?.total_checkins ?? '-'}</div><div className="k">累计签到</div></div>
-        <div><div className="v mono">{info ? usd(info.month_points) : '-'}</div><div className="k">本月获得</div></div>
-        <div><div className="v mono">{info ? usd(info.total_points) : '-'}</div><div className="k">累计获得</div></div>
+        <div><div className="v mono">{info ? money(info.month_points) : '-'}</div><div className="k">本月获得</div></div>
+        <div><div className="v mono">{info ? money(info.total_points) : '-'}</div><div className="k">累计获得</div></div>
       </div>
 
       <div className="pt-calendar">
@@ -110,7 +110,7 @@ export function CheckinCard() {
               const points = records.get(cell.day)
               const cls = ['pt-calendar-day', cell.day === today && 'is-today', !cell.inMonth && 'is-outside', points != null && 'is-checked'].filter(Boolean).join(' ')
               return (
-                <div key={cell.day} className={cls} title={points != null ? `+${usd(points)}` : undefined}>
+                <div key={cell.day} className={cls} title={points != null ? `+${money(points)}` : undefined}>
                   {cell.date}
                   {points != null && <span className="pt-calendar-dot" />}
                 </div>

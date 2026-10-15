@@ -8,16 +8,19 @@ export function Modal({
   children,
   footer,
   size = 'md',
+  dismissible = true,
 }: {
   title: string
   onClose: () => void
   children: ReactNode
   footer?: ReactNode
   size?: 'md' | 'lg' | 'xl'
+  /** false 时点遮罩、按 Esc 都不关闭，只能用右上角 X 或底部按钮关闭（用于有未保存输入的弹窗） */
+  dismissible?: boolean
 }) {
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (dismissible && e.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', h)
     // 打开时锁定背景滚动
@@ -27,7 +30,7 @@ export function Modal({
       window.removeEventListener('keydown', h)
       document.body.style.overflow = prev
     }
-  }, [onClose])
+  }, [onClose, dismissible])
 
   return createPortal(
     <div
@@ -35,7 +38,7 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       onClick={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        if (dismissible && e.target === e.currentTarget) onClose()
       }}
     >
       <div className={`ah-modal is-${size}`}>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react'
+import { amountText, currencySymbol, toPoints } from '../lib/money'
 import { IconChevron, IconCheck } from './Icons'
 
 export function Field({
@@ -27,6 +28,39 @@ export function Field({
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input className="ah-input" {...props} />
+}
+
+/** 金额输入框：左侧显示余额符号 */
+export function MoneyInput(props: InputHTMLAttributes<HTMLInputElement>) {
+  return (
+    <div className="ah-money-input">
+      <span className="ah-money-sym">{currencySymbol()}</span>
+      <input type="number" min={0} step="any" {...props} />
+    </div>
+  )
+}
+
+/** 以点数为值的金额输入框：保留正在输入的文本，只把换算后的整数点数交给上层 */
+export function PointsInput({
+  value,
+  onChange,
+  ...rest
+}: { value: number; onChange: (points: number) => void } & Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'>) {
+  const [text, setText] = useState(() => amountText(value))
+  // 外部改值（如保存后回写）时同步；与当前文本等价时保留原文本，避免打断输入
+  useEffect(() => {
+    setText((t) => (toPoints(Number(t) || 0) === value ? t : amountText(value)))
+  }, [value])
+  return (
+    <MoneyInput
+      {...rest}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value)
+        onChange(toPoints(Number(e.target.value) || 0))
+      }}
+    />
+  )
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {

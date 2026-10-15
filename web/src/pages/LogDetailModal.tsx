@@ -8,7 +8,8 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
-import { fmtNum, prettyJson } from '../lib/format'
+import { prettyJson } from '../lib/format'
+import { money } from '../lib/money'
 import { Loading, StatusPill } from '../components/Primitives'
 import type { CallerSource, LogBodyField, LogItem, PartialLogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
@@ -214,7 +215,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
       {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}
       {detail.client_ip && <span className="ah-mini ah-muted ah-num">IP：{detail.client_ip}</span>}
-      {detail.quota_points != null && <span className="ah-mini ah-muted ah-num">{fmtNum(detail.quota_points)} 点</span>}
+      {detail.quota_points != null && <span className="ah-mini ah-muted ah-num">{money(detail.quota_points)}</span>}
       <span className="ah-mini ah-muted ah-num" title="输入 + 输出（缓存读取 + 缓存写入）；输入已含缓存读写部分">
         {detail.prompt_tokens || 0}+{detail.completion_tokens || 0}（{detail.cache_read_tokens || 0}+{detail.cache_write_tokens || 0}）token
       </span>

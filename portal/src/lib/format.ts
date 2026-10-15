@@ -1,26 +1,28 @@
-// 点数 → $：比例来自 /status，启动时设置一次
-let pointsPerUsd = 500000
+// 点数 → 金额：换算比例和余额符号来自 /status，启动时设置一次
+let pointsPerUnit = 500000
+let symbol = '$'
 
-export function setPointsPerUsd(value: number): void {
-  if (value > 0) pointsPerUsd = value
+export function setMoneyConfig(perUnit: number, currencySymbol: string): void {
+  if (perUnit > 0) pointsPerUnit = perUnit
+  if (currencySymbol) symbol = currencySymbol
 }
 
-/** 金额：≥1 保留 2 位，≥0.01 保留 4 位，更小的保留 6 位；负数（透支）显示 -$ */
-export function usd(points: number | null | undefined): string {
-  const value = (points ?? 0) / pointsPerUsd
+/** 金额：≥1 保留 2 位，≥0.01 保留 4 位，更小的保留 6 位；负数（透支）显示在符号前 */
+export function money(points: number | null | undefined): string {
+  const value = (points ?? 0) / pointsPerUnit
   const abs = Math.abs(value)
-  if (abs === 0) return '$0.00'
+  if (abs === 0) return `${symbol}0.00`
   const digits = abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6
   const text = abs.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
-  if (Number(text.replace(/,/g, '')) === 0) return value < 0 ? '-<$0.000001' : '<$0.000001'
-  return `${value < 0 ? '-' : ''}$${text}`
+  if (Number(text.replace(/,/g, '')) === 0) return `${value < 0 ? '-' : ''}<${symbol}0.000001`
+  return `${value < 0 ? '-' : ''}${symbol}${text}`
 }
 
-/** 每 Token 倍率 → 每百万 Token 的美元价格 */
+/** 每 Token 倍率 → 每百万 Token 的价格 */
 export function perMillion(ratio: number): string {
-  const value = (ratio * 1_000_000) / pointsPerUsd
+  const value = (ratio * 1_000_000) / pointsPerUnit
   if (value === 0) return '免费'
-  return `$${value >= 100 ? value.toFixed(0) : value >= 1 ? value.toFixed(2) : value.toFixed(4)}`
+  return `${symbol}${value >= 100 ? value.toFixed(0) : value >= 1 ? value.toFixed(2) : value.toFixed(4)}`
 }
 
 export function num(value: number | null | undefined): string {

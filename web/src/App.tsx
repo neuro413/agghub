@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { setStoredToken, setUnauthorizedHandler } from './api/client'
+import { api, setStoredToken, setUnauthorizedHandler } from './api/client'
+import { setMoneyConfig } from './lib/money'
 import { Button } from './components/Button'
 import { Field, Input } from './components/Form'
 import { Modal } from './components/Modal'
@@ -53,22 +54,27 @@ function TokenGate() {
 export default function App() {
   const [tab, setTab] = useState<TabKey>('channels')
   const [needToken, setNeedToken] = useState(false)
+  // 金额换算比例和符号来自设置，读到之后再渲染页面；失败（如需要令牌）时按默认值继续
+  const [moneyReady, setMoneyReady] = useState(false)
   useEffect(() => {
     setUnauthorizedHandler(() => setNeedToken(true))
+    api.getSettings().then(setMoneyConfig, () => {}).finally(() => setMoneyReady(true))
   }, [])
   return (
     <ToastProvider>
       <div className="ah-app">
         <TopNav tab={tab} onTab={setTab} />
-        <main className="ah-main">
-          {tab === 'channels' && <ChannelsPage />}
-          {tab === 'keys' && <KeysPage />}
-          {tab === 'users' && <UsersPage />}
-          {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} />}
-          {tab === 'logs' && <LogsPage />}
-          {tab === 'preprocess' && <PreprocessPage />}
-          {tab === 'settings' && <SettingsPage />}
-        </main>
+        {moneyReady && (
+          <main className="ah-main">
+            {tab === 'channels' && <ChannelsPage />}
+            {tab === 'keys' && <KeysPage />}
+            {tab === 'users' && <UsersPage />}
+            {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} />}
+            {tab === 'logs' && <LogsPage />}
+            {tab === 'preprocess' && <PreprocessPage />}
+            {tab === 'settings' && <SettingsPage />}
+          </main>
+        )}
         {needToken && <TokenGate />}
       </div>
     </ToastProvider>

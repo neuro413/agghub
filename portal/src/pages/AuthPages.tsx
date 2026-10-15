@@ -4,17 +4,19 @@ import { api } from '../api'
 import { Link, navigate } from '../router'
 import { useSession } from '../session'
 import { useToast } from '../components/Toast'
+import { BrandLogo } from '../components/Layout'
 import { Button, Field, Input, PasswordInput } from '../components/ui'
 import { IconCircleAlert, IconLogIn, IconUserPlus } from '../components/Icons'
 
 const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/
 
 function AuthLayout({ title, sub, children }: { title: string; sub: ReactNode; children: ReactNode }) {
+  const { status } = useSession()
   return (
     <div className="pt-auth">
       <Link to="/login" className="pt-auth-brand">
-        <span className="pt-auth-logo">🍊</span>
-        <h1>AggHub</h1>
+        <BrandLogo className="pt-auth-logo" />
+        <h1>{status.brand_name}</h1>
       </Link>
       <div className="pt-auth-main">
         <div className="pt-auth-col">

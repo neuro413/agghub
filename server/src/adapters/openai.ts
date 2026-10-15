@@ -1,14 +1,13 @@
 import * as oai from '../convert/openai'
 import type { Channel } from '../types'
 import type { Adaptor, UpstreamRequest } from './base'
-import { trimSlash, withV1 } from './base'
+import { endpointUrl } from './base'
 
 function request(channel: Channel, body: any, stream: boolean): UpstreamRequest {
-  const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
   body.stream = stream
   if (stream) body.stream_options = { include_usage: true }
   return {
-    url: withV1(root) + '/chat/completions',
+    url: endpointUrl(channel, 'https://api.openai.com', '/chat/completions'),
     headers: { 'content-type': 'application/json', authorization: `Bearer ${channel.api_key}` },
     body: JSON.stringify(body),
   }

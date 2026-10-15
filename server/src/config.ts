@@ -91,6 +91,10 @@ export const DEFAULT_SETTINGS: Settings = {
   portal_concurrency: 0,
   /** 与 new-api 的 QuotaPerUnit 一致 */
   portal_points_per_usd: 500000,
+  currency_symbol: '$',
+  portal_brand_name: 'AggHub',
+  portal_brand_icon: '🍊',
+  portal_site_title: 'AggHub 控制台',
   checkin_enabled: false,
   checkin_min_points: 50000,
   checkin_max_points: 250000,

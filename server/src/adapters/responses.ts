@@ -1,12 +1,11 @@
 import * as conv from '../convert/responses'
 import type { Channel } from '../types'
 import type { Adaptor, UpstreamRequest } from './base'
-import { trimSlash, withV1 } from './base'
+import { endpointUrl } from './base'
 
 function request(channel: Channel, body: any): UpstreamRequest {
-  const root = channel.base_url?.trim() ? trimSlash(channel.base_url) : 'https://api.openai.com'
   return {
-    url: withV1(root) + '/responses',
+    url: endpointUrl(channel, 'https://api.openai.com', '/responses'),
     headers: { 'content-type': 'application/json', authorization: `Bearer ${channel.api_key}` },
     body: JSON.stringify(body),
   }
