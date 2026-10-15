@@ -98,7 +98,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
 /** 整数设置的取值范围（保存时校验） */
 export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> = {
-  single_retry_times: [0, 20], channel_retry_times: [0, 100], retry_interval_ms: [0, 300_000],
+  single_retry_times: [0, 100], channel_retry_times: [0, 20], retry_interval_ms: [0, 300_000],
   request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000],
   log_retention_days: [1, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],

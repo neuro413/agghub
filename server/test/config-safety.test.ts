@@ -115,10 +115,10 @@ test('设置结构拒绝 NaN、非整数、错误数组、危险操作，合法�
 })
 
 test('库里遗留的越界值只在提交该字段时报错，不阻止其他页面保存', () => {
-  const stale = { ...getSettings(), single_retry_times: 100, pseudo_thinking_open_tag: '' }
+  const stale = { ...getSettings(), single_retry_times: 101, pseudo_thinking_open_tag: '' }
   const patch = { strip_top_p: true, preprocess_rules: [], tool_filter_rules: [], param_rules: [] }
   assert.deepEqual(validateSettingsPatch(stale, patch), patch)
-  assert.throws(() => validateSettingsPatch(stale, { single_retry_times: 100 }), /single_retry_times/)
+  assert.throws(() => validateSettingsPatch(stale, { single_retry_times: 101 }), /single_retry_times/)
   // 跨字段：只提交结束标签也要报告开始标签的问题
   assert.throws(() => validateSettingsPatch(stale, { pseudo_thinking_close_tag: '</x>' }), /pseudo_thinking_open_tag/)
   assert.throws(() => validateSettingsPatch(stale, { constructor: 1 }), /constructor: 未知设置字段/)

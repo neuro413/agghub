@@ -108,12 +108,13 @@ export function Slider({
   onChange: (v: number) => void
   suffix?: string
 }) {
-  const clamp = (n: number) => Math.min(max, Math.max(min, n))
-  const [text, setText] = useState(String(value))
+  // 这些滑块对应的设置都是整数，取整后回传，避免手输小数被服务端校验拒绝
+  const clamp = (n: number) => Math.min(max, Math.max(min, Math.round(n)))
+  const [text, setText] = useState(String(clamp(value)))
   const focused = useRef(false)
   // 拖动滑块改变外部 value 时，输入框未聚焦则同步显示
   useEffect(() => {
-    if (!focused.current) setText(String(value))
+    if (!focused.current) setText(String(clamp(value)))
   }, [value])
   return (
     <div className="ah-slider-row">

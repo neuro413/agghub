@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
@@ -27,11 +27,17 @@ export function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [groups, setGroups] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
+  /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
+  const loaded = useRef<Settings | null>(null)
   const toast = useToast()
 
   useEffect(() => {
     const controller = new AbortController()
-    api.getSettings(controller.signal).then(value => { if (!controller.signal.aborted) setS(value) }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
+    api.getSettings(controller.signal).then(value => {
+      if (controller.signal.aborted) return
+      loaded.current = value
+      setS(value)
+    }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
     api.getSystem(controller.signal).then(value => { if (!controller.signal.aborted) setSystem(value) }).catch(() => {})
     api.listGroups(controller.signal).then(value => { if (!controller.signal.aborted) setGroups(value) }).catch(() => {})
     return () => controller.abort()
@@ -41,9 +47,17 @@ export function SettingsPage() {
 
   const save = async () => {
     if (!s) return
+    // 只提交真正改动过的字段：服务端只校验本次提交涉及的字段，把加载时的旧值原样回写，
+    // 会被自身校验拦下（早期版本允许的越界值），导致整页怎么都保存不了
+    const changed = KEYS.filter((k) => !Object.is(s[k], loaded.current?.[k]))
+    if (!changed.length) {
+      toast('ok', '没有改动，无需保存')
+      return
+    }
     setSaving(true)
     try {
-      const saved = await api.updateSettings(Object.fromEntries(KEYS.map((k) => [k, s[k]])))
+      const saved = await api.updateSettings(Object.fromEntries(changed.map((k) => [k, s[k]])))
+      loaded.current = saved
       setS(saved)
       // 管理 API 与 /v1 共用该令牌，保存后同步本地凭证，避免下一个请求就 401
       setStoredToken(saved.access_token)
@@ -195,10 +209,10 @@ export function SettingsPage() {
         </div>
         <div className="ah-set-desc">请求失败时如何自动重试、切换渠道与熔断坏渠道</div>
         <SettingRow label="单渠道重试次数" desc="同一个渠道请求失败后，最多在本渠道重试几次">
-          <Slider value={s.single_retry_times} min={0} max={20} onChange={(v) => set('single_retry_times', v)} suffix=" 次" />
+          <Slider value={s.single_retry_times} min={0} max={100} onChange={(v) => set('single_retry_times', v)} suffix=" 次" />
         </SettingRow>
         <SettingRow label="多渠道重试次数" desc="本渠道重试用尽后，最多再切换到下几个渠道继续重试">
-          <Slider value={s.channel_retry_times} min={0} max={10} onChange={(v) => set('channel_retry_times', v)} suffix=" 个" />
+          <Slider value={s.channel_retry_times} min={0} max={20} onChange={(v) => set('channel_retry_times', v)} suffix=" 个" />
         </SettingRow>
         <SettingRow label="失败间隔" desc="每次请求失败后，等待多久再发起下一次重试">
           <Slider value={Math.round(s.retry_interval_ms / 1000)} min={0} max={30} onChange={(v) => set('retry_interval_ms', v * 1000)} suffix=" 秒" />
@@ -207,7 +221,7 @@ export function SettingsPage() {
           <Slider
             value={Math.round(s.request_timeout_ms / 1000)}
             min={5}
-            max={600}
+            max={900}
             step={5}
             onChange={(v) => set('request_timeout_ms', v * 1000)}
             suffix=" 秒"

@@ -9,3 +9,6 @@ data/backups/
 .DS_Store
 .env
 CLAUDE.md
+kill_port_3210.bat
+start.bat
+start_public_3211.bat
