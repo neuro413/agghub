@@ -18,6 +18,7 @@ export interface ChannelRow {
   api_key: string
   models: string
   model_mapping: string | null
+  model_alias: string | null
   priority: number
   weight: number
   status: number
@@ -29,8 +30,6 @@ export interface ChannelRow {
   single_role: string | null
   single_role_merge_system: number
   single_role_exclude_last_user: number
-  /** JSON 字符串数组 */
-  groups: string
   ban_until: number | null
   created_at: number
   updated_at: number
@@ -49,6 +48,8 @@ export interface Channel {
   api_key: string
   models: string[]
   model_mapping: Record<string, string> | null
+  /** 模型专属名：模型列表原名 → 专属名；设了专属名的模型只能用专属名路由到本渠道，原名不再匹配 */
+  model_alias: Record<string, string> | null
   priority: number
   weight: number
   status: ChannelStatus
@@ -63,8 +64,6 @@ export interface Channel {
   single_role_merge_system: boolean
   /** system 模式下最后一条 user 消息不打包，原样作为随后的 user 消息 */
   single_role_exclude_last_user: boolean
-  /** 渠道分组；Key 只能使用与自身分组有交集的渠道，owner 不受限 */
-  groups: string[]
   /** 自动熔断的恢复时间（毫秒时间戳），null = 需手动恢复 */
   ban_until: number | null
   created_at: number
@@ -107,7 +106,7 @@ export interface ApiKey {
   /** 明文 Key：sk-agh- + 40 位 base62 */
   key: string
   enabled: boolean
-  /** 可用渠道分组（至少一个） */
+  /** 分组名：管理员发的 Key 可多个（至少一个），门户用户的 Key 只有一个 */
   groups: string[]
   /** 模型白名单，支持 * 通配符；空 = 不限 */
   models: string[]
@@ -160,6 +159,46 @@ export interface PortalUser {
   created_at: number
   last_login_at: number | null
   last_login_ip: string | null
+  /** 管理员分配的专属分组；公开分组不必分配 */
+  groups: string[]
+}
+
+// ── 分组 ───────────────────────────────────────────────
+/** 分组：限定可用的渠道和模型，按分组倍率计费；Key 与用户按名称引用 */
+export interface ChannelGroup {
+  name: string
+  description: string
+  /** 分组倍率：点数 × ratio */
+  ratio: number
+  /** 公开分组：所有门户用户都能选，无须分配 */
+  is_public: boolean
+  /** 允许的渠道 id */
+  channel_ids: number[]
+  /** 允许的模型（渠道对外的模型名），逐个列出 */
+  models: string[]
+  /** 越小越靠前 */
+  sort: number
+  created_at: number
+  updated_at: number
+}
+
+/** GET /api/groups 列表项 */
+export interface ChannelGroupView extends ChannelGroup {
+  /** 分配了该分组的用户数（公开分组的默认可用不计） */
+  user_count: number
+  /** 引用该分组的 Key 数 */
+  key_count: number
+}
+
+/** POST /api/groups 与 PUT /api/groups/:name 的请求体；PUT 只更新出现的字段 */
+export interface ChannelGroupInput {
+  name?: string
+  description?: string
+  ratio?: number
+  is_public?: boolean
+  channel_ids?: number[]
+  models?: string[]
+  sort?: number
 }
 
 /** 模型倍率：点数 = 未缓存输入×input + 缓存读×cache_read + 缓存写×cache_write + 输出×output + per_request */
@@ -236,6 +275,8 @@ export interface LogRow {
   quota_points: number | null
   /** 门户用户 id；删除 Key 后仍可按用户查询 */
   user_id: number | null
+  /** 本次请求命中的分组（计费所用）；owner 调用为 null */
+  group_name: string | null
 }
 
 // ── 设置 ───────────────────────────────────────────────
@@ -263,8 +304,6 @@ export interface Settings {
   drop_thinking_models: string[]
   /** 单独去除 redacted_thinking 块（不影响普通 thinking） */
   drop_redacted_thinking: boolean
-  /** 从请求中去除 top_p 参数（对所有方向生效） */
-  strip_top_p: boolean
   preprocess_rules: PreprocessRule[]
   tool_filter_rules: ToolFilterRule[]
   param_rules: ParamRule[]
@@ -295,8 +334,6 @@ export interface Settings {
   portal_register_ip_daily: number
   /** 每个用户最多 Key 数 */
   portal_max_keys: number
-  /** 门户用户可用的渠道分组 */
-  portal_groups: string[]
   /** 每用户每分钟请求数上限（名下 Key 共享），0 = 不限 */
   portal_rpm: number
   /** 每用户并发上限（名下 Key 共享），0 = 不限 */
@@ -315,6 +352,10 @@ export interface Settings {
   /** 签到奖励随机区间（点数，含两端） */
   checkin_min_points: number
   checkin_max_points: number
+  /** 门户通知（Markdown），空串不显示 */
+  portal_notice: string
+  /** 门户是否显示公告 */
+  portal_announcements_enabled: boolean
 }
 
 /** 规则「调用来源」作用域，三类规则共用 */
@@ -552,6 +593,7 @@ export interface UserView {
   last_login_at: number | null
   last_login_ip: string | null
   key_count: number
+  groups: string[]
 }
 
 export interface UserListResult {
@@ -559,4 +601,29 @@ export interface UserListResult {
   total: number
   page: number
   size: number
+}
+
+/** 公告类型，决定门户上的颜色点 */
+export type AnnouncementType = 'default' | 'ongoing' | 'success' | 'warning' | 'error'
+
+/** 门户公告 */
+export interface Announcement {
+  id: number
+  /** Markdown */
+  content: string
+  /** 附加说明，显示在内容下方 */
+  extra: string
+  type: AnnouncementType
+  /** 发布时间；晚于当前时间的为定时发布，到点前门户不显示 */
+  publish_at: number
+  created_at: number
+  updated_at: number
+}
+
+/** POST /api/announcements 与 PUT /api/announcements/:id 的请求体；PUT 只更新出现的字段 */
+export interface AnnouncementInput {
+  content?: string
+  extra?: string
+  type?: AnnouncementType
+  publish_at?: number
 }

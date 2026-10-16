@@ -59,7 +59,6 @@ export const DEFAULT_SETTINGS: Settings = {
   drop_thinking_channel_ids: [],
   drop_thinking_models: [],
   drop_redacted_thinking: false,
-  strip_top_p: false,
   preprocess_rules: [],
   tool_filter_rules: [],
   param_rules: [],
@@ -85,8 +84,6 @@ export const DEFAULT_SETTINGS: Settings = {
   portal_initial_quota: 0,
   portal_register_ip_daily: 3,
   portal_max_keys: 10,
-  /** 默认只开放 public 分组，避免门户用户用到私人渠道 */
-  portal_groups: ['public'],
   portal_rpm: 0,
   portal_concurrency: 0,
   /** 与 new-api 的 QuotaPerUnit 一致 */
@@ -98,6 +95,8 @@ export const DEFAULT_SETTINGS: Settings = {
   checkin_enabled: false,
   checkin_min_points: 50000,
   checkin_max_points: 250000,
+  portal_notice: '',
+  portal_announcements_enabled: true,
 }
 
 /** 整数设置的取值范围（保存时校验） */

@@ -99,7 +99,12 @@ export function LogsPage() {
                       <span className="pt-cell-sub">{FORMAT_LABEL[log.entry_format] ?? log.entry_format} · {log.is_stream ? '流式' : '非流式'}</span>
                     </div>
                   </td>
-                  <td><span className="pt-chip"><IconKeyRound size={12} />{log.key_name ?? '已删除'}</span></td>
+                  <td>
+                    <div className="pt-cell-stack">
+                      <span className="pt-chip"><IconKeyRound size={12} />{log.key_name ?? '已删除'}</span>
+                      {log.group_name && <span className="pt-cell-sub">分组 {log.group_name}</span>}
+                    </div>
+                  </td>
                   <td><span className="pt-chip mono">{log.model ?? '-'}</span></td>
                   <td>
                     <div className="pt-cell-stack">

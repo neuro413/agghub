@@ -88,7 +88,7 @@ export function createCallerResolver(surface: Surface, getAdminToken: () => stri
       if (key.expires_at != null && key.expires_at <= now) {
         return sendEntryError(req, res, 403, 'key_expired', 'permission_error', 'API Key 已过期')
       }
-      // 门户用户的 Key：账号状态优先，分组与限流取门户设置
+      // 门户用户的 Key：账号状态优先，分组须仍对该用户可用，限流取门户设置
       if (key.user_id != null) {
         const user = getUserById(key.user_id)
         if (!user) {
@@ -96,7 +96,9 @@ export function createCallerResolver(surface: Surface, getAdminToken: () => stri
           return sendEntryError(req, res, 401, 'invalid_api_key', 'authentication_error', 'API Key 无效')
         }
         if (user.status !== USER_ENABLED) return sendEntryError(req, res, 403, 'user_disabled', 'permission_error', '账号已停用')
-        res.locals.caller = { surface, source: 'user', key: effectivePortalKey(key, getSettings()), user, ip } as Caller
+        const effective = effectivePortalKey(key, user, getSettings())
+        if (!effective) return sendEntryError(req, res, 403, 'group_unavailable', 'permission_error', '令牌分组不可用，请在令牌管理里重新选择分组')
+        res.locals.caller = { surface, source: 'user', key: effective, user, ip } as Caller
         return next()
       }
       res.locals.caller = { surface, source: surface === 'public' ? 'public_key' : 'lan_key', key, ip } as Caller

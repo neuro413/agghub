@@ -228,3 +228,25 @@ export const IconUsers = (p: IconProps) => (
     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
   </S>
 )
+
+export const IconLayers = (p: IconProps) => (
+  <S {...p}>
+    <path d="m12 2.5 9.5 5-9.5 5-9.5-5z" />
+    <path d="m2.5 12 9.5 5 9.5-5" />
+    <path d="m2.5 16.5 9.5 5 9.5-5" />
+  </S>
+)
+
+export const IconBell = (p: IconProps) => (
+  <S {...p}>
+    <path d="M10.268 21a2 2 0 0 0 3.464 0" />
+    <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" />
+  </S>
+)
+
+export const IconMegaphone = (p: IconProps) => (
+  <S {...p}>
+    <path d="m3 11 18-5v12L3 14v-3z" />
+    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </S>
+)

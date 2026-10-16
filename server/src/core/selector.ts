@@ -1,23 +1,19 @@
 import { enabledChannels } from '../db'
-import type { Caller, Channel, ModelRatio } from '../types'
+import type { Caller, Channel, ChannelGroup, ModelRatio } from '../types'
 import { findRatio } from './billing'
 import { OWNER_CALLER } from './caller'
+import { channelModelNames, channelSupportsModel, listedModel } from './channelModels'
+import { listGroups } from './groups'
 import { matchesPattern } from './modelPattern'
 
-/** 渠道是否支持该模型（直接列出 或 通过 model_mapping 的别名 key）*/
-function channelSupportsModel(channel: Channel, model: string): boolean {
-  if (channel.models.includes(model)) return true
-  if (channel.model_mapping && Object.hasOwn(channel.model_mapping, model)) return true
-  return false
-}
-
-/** 把请求模型解析为上游真实模型名 */
+/** 把请求模型解析为上游真实模型名：专属名先换回原名，再按 model_mapping 映射 */
 export function resolveUpstreamModel(channel: Channel, requestedModel: string): string {
-  if (channel.model_mapping && Object.hasOwn(channel.model_mapping, requestedModel)) {
-    const mapped = channel.model_mapping[requestedModel]
+  const model = listedModel(channel, requestedModel) ?? requestedModel
+  if (channel.model_mapping && Object.hasOwn(channel.model_mapping, model)) {
+    const mapped = channel.model_mapping[model]
     if (typeof mapped === 'string' && mapped) return mapped
   }
-  return requestedModel
+  return model
 }
 
 /** Key 是否允许使用该模型：白名单为空不限，否则须命中其中一条（支持 * 通配符） */
@@ -26,27 +22,49 @@ export function keyAllowsModel(caller: Caller, model: string): boolean {
   return !models?.length || models.some(pattern => matchesPattern(pattern, model))
 }
 
-/** 渠道是否对该调用方可见：owner 不受限；Key 须与渠道分组有交集 */
-export function channelVisibleTo(channel: Channel, caller: Caller): boolean {
-  const groups = caller.key?.groups
-  return !caller.key || !!groups?.some(group => channel.groups.includes(group))
+/** 调用方 Key 引用的分组（已删除的忽略）；owner 返回 null，表示不受分组限制 */
+function callerGroups(caller: Caller): ChannelGroup[] | null {
+  if (!caller.key) return null
+  const names = caller.key.groups
+  return listGroups().filter(g => names.includes(g.name))
 }
 
-/** 调用方可见的模型名（升序）：Key 只看到自己分组内渠道的模型，再取模型白名单与倍率表的交集 */
+/** 分组是否允许该渠道以该模型名服务：渠道和模型都须在分组里勾选 */
+function groupAllows(group: ChannelGroup, channel: Channel, model: string): boolean {
+  return group.channel_ids.includes(channel.id) && group.models.includes(model)
+}
+
+/** 调用方可见的模型名（升序）：Key 只看到所属分组允许的渠道 × 模型，再取模型白名单与倍率表的交集 */
 export function modelsVisibleTo(caller: Caller, ratios: ModelRatio[]): string[] {
+  const groups = callerGroups(caller)
   const set = new Set<string>()
   for (const c of enabledChannels()) {
-    if (!channelVisibleTo(c, caller)) continue
-    for (const m of c.models) set.add(m)
-    if (c.model_mapping) for (const k of Object.keys(c.model_mapping)) set.add(k)
+    for (const m of channelModelNames(c)) {
+      if (!groups || groups.some(g => groupAllows(g, c, m))) set.add(m)
+    }
   }
   return [...set].filter(id => keyAllowsModel(caller, id) && (!caller.key || findRatio(ratios, id))).sort()
 }
 
-/** 所有能服务该模型、且对调用方可见的启用渠道；Key 白名单不允许的模型视同无渠道 */
+/** 所有能服务该模型、且调用方分组允许的启用渠道；Key 白名单不允许的模型视同无渠道 */
 export function candidatesForModel(model: string, caller: Caller = OWNER_CALLER): Channel[] {
   if (!keyAllowsModel(caller, model)) return []
-  return enabledChannels().filter((c) => channelVisibleTo(c, caller) && channelSupportsModel(c, model))
+  const groups = callerGroups(caller)
+  return enabledChannels().filter((c) => channelSupportsModel(c, model) && (!groups || groups.some(g => groupAllows(g, c, model))))
+}
+
+/** 每个候选渠道计费所用的分组：Key 有多个分组同时允许时取倍率最低的；owner 返回空表 */
+export function candidateGroups(caller: Caller, channels: Channel[], model: string): Map<number, ChannelGroup> {
+  const out = new Map<number, ChannelGroup>()
+  const groups = callerGroups(caller)
+  if (!groups) return out
+  for (const channel of channels) {
+    for (const group of groups) {
+      const current = out.get(channel.id)
+      if (groupAllows(group, channel, model) && (!current || group.ratio < current.ratio)) out.set(channel.id, group)
+    }
+  }
+  return out
 }
 
 /**

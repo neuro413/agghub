@@ -116,7 +116,7 @@ test('设置结构拒绝 NaN、非整数、错误数组、危险操作，合法�
 
 test('库里遗留的越界值只在提交该字段时报错，不阻止其他页面保存', () => {
   const stale = { ...getSettings(), single_retry_times: 101, pseudo_thinking_open_tag: '' }
-  const patch = { strip_top_p: true, preprocess_rules: [], tool_filter_rules: [], param_rules: [] }
+  const patch = { drop_redacted_thinking: true, preprocess_rules: [], tool_filter_rules: [], param_rules: [] }
   assert.deepEqual(validateSettingsPatch(stale, patch), patch)
   assert.throws(() => validateSettingsPatch(stale, { single_retry_times: 101 }), /single_retry_times/)
   // 跨字段：只提交结束标签也要报告开始标签的问题
@@ -127,7 +127,17 @@ test('库里遗留的越界值只在提交该字段时报错，不阻止其他�
 test('D02: 模型映射不识别继承属性', () => {
   db.prepare(`INSERT INTO channels(name,type,models,model_mapping,created_at,updated_at) VALUES ('test','openai','[]','{}',0,0)`).run()
   assert.equal(candidatesForModel('toString').length, 0)
-  assert.equal(resolveUpstreamModel({ model_mapping: {} } as any, 'toString'), 'toString')
+  assert.equal(resolveUpstreamModel({ models: [], model_mapping: {} } as any, 'toString'), 'toString')
+})
+
+test('模型专属名：原名不再路由到该渠道，专属名换回原名请求上游', () => {
+  db.prepare(`INSERT INTO channels(name,type,models,model_alias,created_at,updated_at)
+    VALUES ('alias','openai','["alias-src","alias-keep"]','{"alias-src":"alias-dedicated"}',0,0)`).run()
+  assert.equal(candidatesForModel('alias-src').length, 0)
+  assert.equal(candidatesForModel('alias-keep').length, 1)
+  const [channel] = candidatesForModel('alias-dedicated')
+  assert.equal(channel?.name, 'alias')
+  assert.equal(resolveUpstreamModel(channel, 'alias-dedicated'), 'alias-src')
 })
 
 test('D01/D02/D16/D26: 实际设置及预览接口验证原子失败与规范化结果', async () => {

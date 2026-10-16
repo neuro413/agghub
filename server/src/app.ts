@@ -12,6 +12,8 @@ import { preprocessRouter } from './routes/preprocess'
 import { billingRouter } from './routes/billing'
 import { keysRouter, metaRouter } from './routes/keys'
 import { usersRouter } from './routes/users'
+import { groupsRouter } from './routes/groups'
+import { announcementsRouter } from './routes/announcements'
 import { portalRouter } from './routes/portal'
 import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
@@ -64,6 +66,8 @@ function createLanApp(): Express {
   app.use('/api/preprocess', preprocessRouter)
   app.use('/api/keys', keysRouter)
   app.use('/api/users', usersRouter)
+  app.use('/api/groups', groupsRouter)
+  app.use('/api/announcements', announcementsRouter)
   app.use('/api/billing', billingRouter)
   app.use('/api', metaRouter)
 

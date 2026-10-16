@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
 import { getProxyAgent } from '../core/proxy'
 import { resetChannelHealth } from '../core/channelHealth'
+import { removeChannelFromGroups } from '../core/groups'
 import { trimSlash, withV1 } from '../adapters/base'
 import type { ChannelRow, ChannelType, SingleRoleMode } from '../types'
 
@@ -25,6 +26,7 @@ interface ChannelInput {
   api_key?: string
   models?: string[] | string
   model_mapping?: Record<string, string> | null
+  model_alias?: Record<string, string> | null
   priority?: number
   weight?: number
   status?: number
@@ -36,7 +38,6 @@ interface ChannelInput {
   single_role?: SingleRoleMode | null
   single_role_merge_system?: boolean
   single_role_exclude_last_user?: boolean
-  groups?: string[] | string
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -45,15 +46,22 @@ function normalizeModels(m: string[] | string | undefined): string[] {
   return []
 }
 
-/** 数组或逗号/换行分隔的字符串 → 去空去重；为空时归入 default */
-function normalizeGroups(g: string[] | string | undefined): string[] {
-  const list = Array.isArray(g) ? g.map((x) => String(x)) : typeof g === 'string' ? g.split(/[,\n]/) : []
-  const out: string[] = []
-  for (const item of list) {
-    const name = item.trim()
-    if (name && !out.includes(name)) out.push(name)
+/** 专属名只保留模型列表里的模型，去掉空值和与原名相同的项 */
+function normalizeAlias(input: ChannelInput): Record<string, string> | null {
+  const alias = input.model_alias
+  if (!alias || typeof alias !== 'object' || Array.isArray(alias)) return null
+  const models = normalizeModels(input.models)
+  const out: Record<string, string> = {}
+  for (const [model, name] of Object.entries(alias)) {
+    const value = String(name ?? '').trim()
+    if (models.includes(model) && value && value !== model) out[model] = value
   }
-  return out.length ? out : ['default']
+  return Object.keys(out).length ? out : null
+}
+
+function aliasColumn(input: ChannelInput): string | null {
+  const alias = normalizeAlias(input)
+  return alias && JSON.stringify(alias)
 }
 
 /** 完整地址模式只对非 Vertex 渠道生效；关闭时不保留模型列表地址 */
@@ -75,12 +83,14 @@ function modelsUrlOf(input: ChannelInput): string | null {
 function validate(input: ChannelInput): string | null {
   if (!input.name || !input.name.trim()) return '渠道名称不能为空'
   if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses'
-  if (normalizeModels(input.models).length === 0) return '至少配置一个模型'
+  const models = normalizeModels(input.models)
+  if (models.length === 0) return '至少配置一个模型'
+  const aliases = Object.values(normalizeAlias(input) ?? {})
+  if (new Set(aliases).size !== aliases.length || aliases.some((name) => models.includes(name))) {
+    return '模型专属名不能重复，也不能与模型列表中的模型同名'
+  }
   if (input.base_url_full && input.type !== 'vertex' && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
   if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
-  if (input.groups !== undefined && !normalizeGroups(input.groups).every((g) => g.length <= 32 && !g.includes(','))) {
-    return '分组名须为 1～32 字符且不含逗号'
-  }
   return null
 }
 
@@ -108,8 +118,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, groups, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @groups, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -119,6 +129,7 @@ channelsRouter.post('/', (req, res) => {
       api_key: (input.api_key || '').trim(),
       models: JSON.stringify(normalizeModels(input.models)),
       model_mapping: input.model_mapping ? JSON.stringify(input.model_mapping) : null,
+      model_alias: aliasColumn(input),
       priority: Number.isFinite(input.priority) ? Number(input.priority) : 0,
       weight: Number.isFinite(input.weight) ? Number(input.weight) : 1,
       status: input.status === 0 ? 0 : 1,
@@ -130,7 +141,6 @@ channelsRouter.post('/', (req, res) => {
       single_role: input.single_role || null,
       single_role_merge_system: input.single_role_merge_system ? 1 : 0,
       single_role_exclude_last_user: input.single_role_exclude_last_user ? 1 : 0,
-      groups: JSON.stringify(normalizeGroups(input.groups)),
       created_at: now,
       updated_at: now,
     })
@@ -150,10 +160,10 @@ channelsRouter.put('/:id', (req, res) => {
   db.prepare(
     `UPDATE channels SET
        name=@name, type=@type, base_url=@base_url, base_url_full=@base_url_full, models_url=@models_url, api_key=@api_key, models=@models,
-       model_mapping=@model_mapping, priority=@priority, weight=@weight, status=@status,
+       model_mapping=@model_mapping, model_alias=@model_alias, priority=@priority, weight=@weight, status=@status,
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
-       groups=@groups, ban_until=@ban_until,
+       ban_until=@ban_until,
        updated_at=@updated_at
      WHERE id=@id`,
   ).run({
@@ -172,6 +182,7 @@ channelsRouter.put('/:id', (req, res) => {
         : existing.model_mapping
           ? JSON.stringify(existing.model_mapping)
           : null,
+    model_alias: aliasColumn({ ...existing, ...input }),
     priority: input.priority !== undefined ? Number(input.priority) : existing.priority,
     weight: input.weight !== undefined ? Number(input.weight) : existing.weight,
     status: input.status !== undefined ? Number(input.status) : existing.status,
@@ -187,7 +198,6 @@ channelsRouter.put('/:id', (req, res) => {
       input.single_role_exclude_last_user !== undefined
         ? (input.single_role_exclude_last_user ? 1 : 0)
         : existing.single_role_exclude_last_user ? 1 : 0,
-    groups: input.groups !== undefined ? JSON.stringify(normalizeGroups(input.groups)) : JSON.stringify(existing.groups),
     ban_until: statusChanged ? null : existing.ban_until,
     updated_at: Date.now(),
   })
@@ -199,6 +209,7 @@ channelsRouter.put('/:id', (req, res) => {
 channelsRouter.delete('/:id', (req, res) => {
   const id = Number(req.params.id)
   db.prepare('DELETE FROM channels WHERE id = ?').run(id)
+  removeChannelFromGroups(id)
   resetChannelHealth(id)
   res.json({ ok: true })
 })

@@ -5,11 +5,15 @@ import { db } from '../src/db'
 import { sanitizePublicError } from '../src/core/failover'
 import { ruleMatchesMeta } from '../src/core/preprocess'
 import { handleRelay } from '../src/core/relay'
+import { createGroup } from '../src/core/groups'
 import type { ApiKey, Caller } from '../src/types'
 import { FakeResponse, reset, channel, logs } from './helpers/relay'
 
 const originalFetch = globalThis.fetch
-beforeEach(reset)
+beforeEach(() => {
+  reset()
+  db.exec('DELETE FROM channel_groups')
+})
 afterEach(() => { globalThis.fetch = originalFetch })
 after(() => db.close())
 
@@ -53,7 +57,8 @@ function runRelay() {
 }
 
 test('公网集成：上游错误脱敏返回，日志保留原文', async () => {
-  channel('openai')
+  const channelId = channel('openai')
+  createGroup({ name: 'default', channel_ids: [channelId], models: ['alias'] })
   globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'bad gateway at http://10.0.0.5:8080/v1' } }), { status: 500 })) as typeof fetch
   const { res, run } = runRelay()
   await run()
@@ -62,7 +67,8 @@ test('公网集成：上游错误脱敏返回，日志保留原文', async () =>
 })
 
 test('公网集成：网络错误统一为连接失败', async () => {
-  channel('openai')
+  const channelId = channel('openai')
+  createGroup({ name: 'default', channel_ids: [channelId], models: ['alias'] })
   globalThis.fetch = (async () => { throw new Error('connect ECONNREFUSED 10.0.0.5:8080') }) as typeof fetch
   const { res, run } = runRelay()
   await run()

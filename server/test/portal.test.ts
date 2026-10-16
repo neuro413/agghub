@@ -7,6 +7,7 @@ import { createApp } from '../src/app'
 import { localDay } from '../src/core/billing'
 import { resetAuthFailures } from '../src/core/caller'
 import { resetLimiter } from '../src/core/limiter'
+import { createGroup } from '../src/core/groups'
 import { getUserByName, setUserStatus } from '../src/core/users'
 import { channel, jsonResponse, oaiBody, reset } from './helpers/relay'
 
@@ -31,7 +32,7 @@ after(async () => {
 })
 beforeEach(() => {
   reset()
-  db.exec('DELETE FROM users; DELETE FROM user_sessions; DELETE FROM user_checkins; DELETE FROM api_keys; DELETE FROM usage_daily')
+  db.exec('DELETE FROM users; DELETE FROM user_sessions; DELETE FROM user_checkins; DELETE FROM api_keys; DELETE FROM usage_daily; DELETE FROM channel_groups; DELETE FROM announcements')
   resetAuthFailures()
   resetLimiter()
 })
@@ -119,14 +120,15 @@ test('用户 Key 调用扣用户余额，调用记录只能看到自己的', asy
   const alice = await signup('alice')
   const bob = await signup('bob')
   const aliceId = getUserByName('alice')!.id
-  db.prepare(`UPDATE channels SET groups = '["public"]' WHERE id = ?`).run(channel('openai'))
+  const channelId = channel('openai')
+  createGroup({ name: 'public', is_public: true, channel_ids: [channelId], models: ['alias'] })
 
-  const created = await call('/api/user/keys', { method: 'POST', cookie: alice, body: { name: '测试' } })
+  const created = await call('/api/user/keys', { method: 'POST', cookie: alice, body: { name: '测试', group: 'public' } })
   assert.equal(created.json.success, true)
   const fullKey: string = created.json.data.full_key
   assert.ok(fullKey.startsWith('sk-agh-'))
   assert.ok(created.json.data.key.includes('**********'))
-  assert.match((await call('/api/user/keys', { method: 'POST', cookie: alice, body: { name: '第二个' } })).json.message, /最多/)
+  assert.match((await call('/api/user/keys', { method: 'POST', cookie: alice, body: { name: '第二个', group: 'public' } })).json.message, /最多/)
   assert.equal((await call(`/api/user/keys/${created.json.data.id}/key`, { method: 'POST', cookie: bob })).json.success, false)
 
   const auth = { authorization: `Bearer ${fullKey}` }
@@ -161,4 +163,85 @@ test('用户 Key 调用扣用户余额，调用记录只能看到自己的', asy
   assert.equal(disabled.status, 403)
   assert.equal(((await disabled.json()) as any).error.type, 'user_disabled')
   assert.equal((await call('/api/user/self', { cookie: alice })).status, 401)
+})
+
+test('/pricing 返回可用分组与模型基础价格', async () => {
+  const cookie = await signup('alice')
+  // 渠道对外暴露 alias 与 other；倍率表只命中 alias
+  const c1 = channel('openai', 0, { other: 'other' })
+  setSettings({
+    model_ratios: [{ id: 'alias', pattern: 'alias', input: 3, output: 4, cache_read: 5, cache_write: 6, per_request: 7 }],
+  })
+  // 分组倍率为 2，不应影响返回的基础价格
+  createGroup({ name: 'public', is_public: true, ratio: 2, channel_ids: [c1], models: ['alias', 'other'] })
+
+  const res = await call('/api/user/pricing', { cookie })
+  assert.equal(res.json.success, true)
+  assert.deepEqual(res.json.data.groups, [{ name: 'public', description: '', ratio: 2 }])
+  // other 不命中倍率表，被过滤掉
+  assert.deepEqual(res.json.data.models, [
+    { model: 'alias', input: 3, output: 4, cache_read: 5, cache_write: 6, per_request: 7, groups: ['public'] },
+  ])
+})
+
+test('/pricing 多分组时汇总能用该模型的分组', async () => {
+  const cookie = await signup('alice')
+  const c1 = channel('openai')
+  createGroup({ name: 'a', is_public: true, channel_ids: [c1], models: ['alias'], sort: 1 })
+  createGroup({ name: 'b', is_public: true, channel_ids: [c1], models: ['alias'], sort: 2 })
+
+  const res = await call('/api/user/pricing', { cookie })
+  assert.deepEqual(res.json.data.models[0].groups, ['a', 'b'])
+})
+
+test('/pricing 不显示非公开且未分配的分组', async () => {
+  const cookie = await signup('alice')
+  const c1 = channel('openai')
+  const c2 = channel('anthropic', 1)
+  createGroup({ name: 'public', is_public: true, channel_ids: [c1], models: ['alias'] })
+  createGroup({ name: 'vip', is_public: false, channel_ids: [c2], models: ['alias'] })
+
+  const before = await call('/api/user/pricing', { cookie })
+  assert.deepEqual(before.json.data.groups.map((g: any) => g.name), ['public'])
+  assert.deepEqual(before.json.data.models[0].groups, ['public'])
+
+  // 分配给用户后 vip 才出现
+  db.prepare('UPDATE users SET groups = ? WHERE id = ?').run(JSON.stringify(['vip']), getUserByName('alice')!.id)
+  const after = await call('/api/user/pricing', { cookie })
+  assert.deepEqual(after.json.data.groups.map((g: any) => g.name), ['public', 'vip'])
+  assert.deepEqual(after.json.data.models[0].groups, ['public', 'vip'])
+})
+
+test('/pricing 需要登录', async () => {
+  assert.equal((await call('/api/user/pricing')).status, 401)
+})
+
+test('/notices 返回 trim 后的通知与已发布公告', async () => {
+  const cookie = await signup('alice')
+  setSettings({ portal_notice: '  站点通知  ' })
+  const now = Date.now()
+  const insert = db.prepare('INSERT INTO announcements (content, extra, type, publish_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+  insert.run('较早公告', '', 'default', now - 5000, now, now)
+  insert.run('最新公告', '备注', 'warning', now - 1000, now, now)
+  insert.run('定时公告', '', 'default', now + 100_000, now, now)
+
+  const res = await call('/api/user/notices', { cookie })
+  assert.equal(res.json.data.notice, '站点通知')
+  // 定时公告不返回，其余按发布时间倒序
+  assert.deepEqual(res.json.data.announcements.map((a: any) => a.content), ['最新公告', '较早公告'])
+  const latest = res.json.data.announcements[0]
+  assert.deepEqual(Object.keys(latest).sort(), ['content', 'extra', 'id', 'publish_at', 'type', 'updated_at'])
+  assert.equal(latest.extra, '备注')
+  assert.equal(latest.type, 'warning')
+})
+
+test('/notices 关闭公告开关时 announcements 为空数组', async () => {
+  const cookie = await signup('alice')
+  setSettings({ portal_notice: '通知', portal_announcements_enabled: false })
+  db.prepare('INSERT INTO announcements (content, extra, type, publish_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run('已发布公告', '', 'default', Date.now() - 1000, Date.now(), Date.now())
+
+  const res = await call('/api/user/notices', { cookie })
+  assert.equal(res.json.data.notice, '通知')
+  assert.deepEqual(res.json.data.announcements, [])
 })

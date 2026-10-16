@@ -259,7 +259,6 @@ export function dropThinkingScope(settings: Settings): RuleScope {
  * 调用方须传入克隆体以保留请求日志中的客户端原始请求体。
  */
 export function applyPreprocess(target: any, meta: PreprocessMeta, settings: Settings): void {
-  if (settings.strip_top_p) delete target.top_p
   if (meta.passthrough && meta.entryFormat === 'anthropic') {
     if (settings.drop_thinking && ruleMatchesMeta(dropThinkingScope(settings), meta)) dropThinking(target, THINKING_TYPES, settings.drop_thinking_keep_last)
     if (settings.drop_redacted_thinking) dropThinking(target, REDACTED_TYPES)

@@ -4,6 +4,8 @@ import { db, getSettings } from '../db'
 import { blockedSeconds, clientIp, recordAuthFailure } from '../core/caller'
 import { checkin, checkinStatus } from '../core/checkin'
 import { findRatio, localDay } from '../core/billing'
+import { PORTAL_ANNOUNCEMENTS, publishedAnnouncements } from '../core/announcements'
+import { userGroups } from '../core/groups'
 import { countUserKeys, createUserKey, deleteKey, getUserKey, listUserKeys, updateKey } from '../core/keys'
 import { modelsVisibleTo } from '../core/selector'
 import { sanitizePublicError } from '../core/failover'
@@ -37,13 +39,17 @@ function maskKey(key: string): string {
   return `${key.slice(0, 11)}**********${key.slice(-4)}`
 }
 
-function keyView(key: ApiKey, now = Date.now()) {
+/** usable 为用户当前可用的分组名，用来标出分组已失效的 Key */
+function keyView(key: ApiKey, usable: string[], now = Date.now()) {
   const expired = key.expires_at != null && key.expires_at <= now
+  const group = key.groups[0] ?? null
   return {
     id: key.id,
     name: key.name,
     key: maskKey(key.key),
     status: expired ? 'expired' : key.enabled ? 'enabled' : 'disabled',
+    group,
+    group_available: !!group && usable.includes(group),
     used_quota: key.quota_used,
     expires_at: key.expires_at,
     created_at: key.created_at,
@@ -68,6 +74,7 @@ function selfView(user: PortalUser) {
 }
 
 const currentUser = (res: Response) => res.locals.user as PortalUser
+const usableNames = (user: PortalUser) => userGroups(user).map(g => g.name)
 
 portalRouter.use((req, res, next) => {
   res.setHeader('Cache-Control', 'no-store')
@@ -154,6 +161,16 @@ portalRouter.get('/self', (_req, res) => {
   ok(res, selfView(currentUser(res)))
 })
 
+/** 通知与已发布的最近公告；关闭公告时公告为空数组 */
+portalRouter.get('/notices', (_req, res) => {
+  const s = getSettings()
+  const announcements = s.portal_announcements_enabled ? publishedAnnouncements(PORTAL_ANNOUNCEMENTS) : []
+  ok(res, {
+    notice: s.portal_notice.trim(),
+    announcements: announcements.map(({ id, content, extra, type, publish_at, updated_at }) => ({ id, content, extra, type, publish_at, updated_at })),
+  })
+})
+
 portalRouter.post('/password', wrap(async (req, res) => {
   const user = currentUser(res)
   const { old_password, new_password } = req.body ?? {}
@@ -178,38 +195,62 @@ portalRouter.get('/usage', (req, res) => {
   ok(res, rows)
 })
 
-portalRouter.get('/models', (req, res) => {
+/** 用户可选的分组（公开 + 分配），按排序 */
+portalRouter.get('/groups', (_req, res) => {
+  ok(res, userGroups(currentUser(res)).map(g => ({ name: g.name, description: g.description, ratio: g.ratio })))
+})
+
+/** 模型列表：用户可用分组，以及每个模型的基础价格（未乘分组倍率）和能用它的分组 */
+portalRouter.get('/pricing', (req, res) => {
   const s = getSettings()
   const user = currentUser(res)
-  // 用一个占位 Key 套上门户设置，与实际调用时的可见范围一致
-  const placeholder: ApiKey = {
-    id: 0, name: '', key: '', enabled: true, groups: [], models: [], rpm: null, concurrency: null, quota_total: null,
-    quota_used: 0, quota_daily: null, log_bodies: null, expires_at: null, note: null, user_id: user.id,
-    created_at: 0, updated_at: 0, last_used_at: null,
+  const groups = userGroups(user)
+  const ip = clientIp(req)
+  const modelGroups = new Map<string, string[]>()
+  for (const group of groups) {
+    // 用一个占位 Key 套上门户设置，与实际调用时的可见范围一致
+    const placeholder: ApiKey = {
+      id: 0, name: '', key: '', enabled: true, groups: [group.name], models: [], rpm: null, concurrency: null, quota_total: null,
+      quota_used: 0, quota_daily: null, log_bodies: null, expires_at: null, note: null, user_id: user.id,
+      created_at: 0, updated_at: 0, last_used_at: null,
+    }
+    const key = effectivePortalKey(placeholder, user, s)
+    if (!key) continue
+    const caller: Caller = { surface: 'public', source: 'user', key, user, ip }
+    for (const model of modelsVisibleTo(caller, s.model_ratios)) {
+      const names = modelGroups.get(model)
+      if (names) names.push(group.name)
+      else modelGroups.set(model, [group.name])
+    }
   }
-  const caller: Caller = { surface: 'public', source: 'user', key: effectivePortalKey(placeholder, s), user, ip: clientIp(req) }
-  const data = modelsVisibleTo(caller, s.model_ratios).map(model => {
-    const ratio = findRatio(s.model_ratios, model)!
-    return { model, input: ratio.input, output: ratio.output, cache_read: ratio.cache_read, cache_write: ratio.cache_write, per_request: ratio.per_request }
+  ok(res, {
+    groups: groups.map(g => ({ name: g.name, description: g.description, ratio: g.ratio })),
+    models: [...modelGroups.keys()].sort().map(model => {
+      const { input, output, cache_read, cache_write, per_request } = findRatio(s.model_ratios, model)!
+      return { model, input, output, cache_read, cache_write, per_request, groups: modelGroups.get(model)! }
+    }),
   })
-  ok(res, data)
 })
 
 // ── 令牌 ──
 portalRouter.get('/keys', (_req, res) => {
-  ok(res, listUserKeys(currentUser(res).id).map(k => keyView(k)))
+  const user = currentUser(res)
+  const usable = usableNames(user)
+  ok(res, listUserKeys(user.id).map(k => keyView(k, usable)))
 })
 
 portalRouter.post('/keys', (req, res) => {
   const user = currentUser(res)
-  const { name, expires_at } = req.body ?? {}
+  const { name, group, expires_at } = req.body ?? {}
   const trimmed = typeof name === 'string' ? name.trim() : ''
   if (!trimmed || trimmed.length > 50) return fail(res, '名称须为 1～50 个字符')
+  const usable = usableNames(user)
+  if (typeof group !== 'string' || !usable.includes(group)) return fail(res, '请选择可用的分组')
   if (expires_at != null && !(Number.isSafeInteger(expires_at) && expires_at > Date.now())) return fail(res, '过期时间须晚于当前时间')
   const max = getSettings().portal_max_keys
   if (countUserKeys(user.id) >= max) return fail(res, `最多只能创建 ${max} 个令牌`)
-  const key = createUserKey(user.id, trimmed, expires_at ?? null)
-  ok(res, { ...keyView(key), full_key: key.key }, '令牌已创建')
+  const key = createUserKey(user.id, trimmed, group, expires_at ?? null)
+  ok(res, { ...keyView(key, usable), full_key: key.key }, '令牌已创建')
 })
 
 portalRouter.post('/keys/:id/key', (req, res) => {
@@ -218,12 +259,17 @@ portalRouter.post('/keys/:id/key', (req, res) => {
   ok(res, { key: key.key })
 })
 
+/** 可单独改启用状态或分组 */
 portalRouter.put('/keys/:id', (req, res) => {
+  const user = currentUser(res)
   const id = validId(req.params.id)
-  if (!getUserKey(currentUser(res).id, id)) return fail(res, '令牌不存在')
-  const enabled = req.body?.enabled
-  if (typeof enabled !== 'boolean') return fail(res, 'enabled 须为布尔值')
-  ok(res, keyView(updateKey(id, { enabled })!))
+  if (!getUserKey(user.id, id)) return fail(res, '令牌不存在')
+  const { enabled, group } = req.body ?? {}
+  const usable = usableNames(user)
+  if (enabled !== undefined && typeof enabled !== 'boolean') return fail(res, 'enabled 须为布尔值')
+  if (group !== undefined && (typeof group !== 'string' || !usable.includes(group))) return fail(res, '请选择可用的分组')
+  if (enabled === undefined && group === undefined) return fail(res, '没有要修改的内容')
+  ok(res, keyView(updateKey(id, { enabled, groups: group === undefined ? undefined : [group] })!, usable))
 })
 
 portalRouter.delete('/keys/:id', (req, res) => {
@@ -254,7 +300,7 @@ portalRouter.get('/logs', (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, created_at, key_id, key_name, model, entry_format, is_stream, status, status_code, latency_ms,
-              prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, quota_points, error_message
+              prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens, quota_points, error_message, group_name
        FROM request_logs WHERE ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     )
     .all(...args, size, (page - 1) * size) as { error_message: string | null }[]

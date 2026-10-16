@@ -7,18 +7,21 @@ import { IconChannels, IconEdit, IconPlus, IconTrash } from '../components/Icons
 import { Badge, StatusDot, statusText } from '../components/Primitives'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Channel } from '../types'
+import type { Channel, ChannelGroupView } from '../types'
 import { ChannelModal } from './ChannelModal'
 
 export function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
+  const [groups, setGroups] = useState<ChannelGroupView[]>([])
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<Channel | 'new' | null>(null)
   const toast = useToast()
 
   const load = useCallback(async () => {
     try {
-      setChannels(await api.listChannels())
+      const [list, groupList] = await Promise.all([api.listChannels(), api.listGroups()])
+      setChannels(list)
+      setGroups(groupList)
     } catch (e: any) {
       toast('err', e.message)
     } finally {
@@ -92,6 +95,7 @@ export function ChannelsPage() {
             <ChannelCard
               key={c.id}
               c={c}
+              groups={groups.filter((g) => g.channel_ids.includes(c.id)).map((g) => g.name)}
               onToggle={() => toggleStatus(c)}
               onEdit={() => setEditing(c)}
               onDelete={() => del(c)}
@@ -117,11 +121,14 @@ export function ChannelsPage() {
 
 function ChannelCard({
   c,
+  groups,
   onToggle,
   onEdit,
   onDelete,
 }: {
   c: Channel
+  /** 勾选了本渠道的分组 */
+  groups: string[]
   onToggle: () => void
   onEdit: () => void
   onDelete: () => void
@@ -155,9 +162,9 @@ function ChannelCard({
         </div>
       </div>
 
-      {(c.groups ?? []).length > 0 && (
-        <div className="ah-pp-chips">
-          {c.groups.map((g) => (
+      {groups.length > 0 && (
+        <div className="ah-pp-chips" title="勾选了本渠道的分组，在「分组」页修改">
+          {groups.map((g) => (
             <span key={g} className="ah-tag">
               {g}
             </span>

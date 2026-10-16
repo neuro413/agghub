@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import type { Request } from 'express'
 import { db } from '../db'
 import type { PortalUser } from '../types'
-import { USER_ENABLED } from './users'
+import { rowToUser, USER_ENABLED } from './users'
 
 export const SESSION_COOKIE = 'agh_session'
 const SESSION_TTL_MS = 30 * 86_400_000
@@ -22,12 +22,12 @@ export function createSession(userId: number, ip: string, now = Date.now()): str
 /** 会话有效且用户启用时返回用户；停用的用户立即失去全部会话 */
 export function sessionUser(token: string, now = Date.now()): PortalUser | null {
   if (!token) return null
-  const user = db
+  const user = rowToUser(db
     .prepare(
       `SELECT users.* FROM user_sessions JOIN users ON users.id = user_sessions.user_id
        WHERE user_sessions.token_hash = ? AND user_sessions.expires_at > ?`,
     )
-    .get(hashToken(token), now) as PortalUser | undefined
+    .get(hashToken(token), now) as any)
   return user && user.status === USER_ENABLED ? user : null
 }
 

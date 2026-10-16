@@ -36,7 +36,7 @@ export interface UsageDay {
   completion_tokens: number
 }
 
-/** 模型倍率：每 Token 点数，per_request 为每次点数 */
+/** 模型基础价格（未乘分组倍率）：每 Token 点数，per_request 为每次点数 */
 export interface ModelPrice {
   model: string
   input: number
@@ -44,9 +44,43 @@ export interface ModelPrice {
   cache_read: number
   cache_write: number
   per_request: number
+  /** 用户可用分组中能调用该模型的分组 */
+  groups: string[]
+}
+
+export interface PricingData {
+  groups: PortalGroup[]
+  models: ModelPrice[]
+}
+
+export type AnnouncementType = 'default' | 'ongoing' | 'success' | 'warning' | 'error'
+
+export interface Announcement {
+  id: number
+  /** Markdown */
+  content: string
+  extra: string
+  type: AnnouncementType
+  publish_at: number
+  updated_at: number
+}
+
+export interface Notices {
+  /** Markdown，空串表示没有通知 */
+  notice: string
+  /** 已发布的最近公告，管理员关闭公告时为空 */
+  announcements: Announcement[]
 }
 
 export type KeyStatus = 'enabled' | 'disabled' | 'expired'
+
+/** 用户可选的分组 */
+export interface PortalGroup {
+  name: string
+  description: string
+  /** 分组倍率：扣费 = 模型价格 × ratio */
+  ratio: number
+}
 
 export interface PortalKey {
   id: number
@@ -54,6 +88,9 @@ export interface PortalKey {
   /** 脱敏后的 Key */
   key: string
   status: KeyStatus
+  group: string | null
+  /** 分组被删除或不再对当前用户开放时为 false，此时令牌无法调用 */
+  group_available: boolean
   used_quota: number
   expires_at: number | null
   created_at: number
@@ -79,6 +116,8 @@ export interface LogItem {
   cache_write_tokens: number
   quota_points: number | null
   error_message: string | null
+  /** 计费所用分组 */
+  group_name: string | null
 }
 
 export interface LogPage {

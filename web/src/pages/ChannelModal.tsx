@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api/client'
-import { Button } from '../components/Button'
-import { Dropdown, Field, Input, Slider, Textarea } from '../components/Form'
-import { IconCheck, IconPlus, IconRefresh, IconTest } from '../components/Icons'
+import { Button, IconButton } from '../components/Button'
+import { Dropdown, Field, Input, Select, Slider, Textarea } from '../components/Form'
+import { IconCheck, IconPlus, IconRefresh, IconTest, IconTrash } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
@@ -15,6 +15,12 @@ const PLACEHOLDER: Record<ChannelType, string> = {
   responses: 'https://api.openai.com（留空用官方）',
 }
 
+/** 模型专属名的一行：模型列表原名 → 专属名 */
+interface AliasRow {
+  model: string
+  alias: string
+}
+
 interface FormState {
   name: string
   type: ChannelType
@@ -24,9 +30,9 @@ interface FormState {
   api_key: string
   models: string
   mapping: string
+  aliases: AliasRow[]
   priority: number
   weight: number
-  groups: string
   region: string
   timeout: string
   ua_override: boolean
@@ -63,7 +69,7 @@ function singleRoleHint(f: FormState): string {
 function initForm(c: Channel | null): FormState {
   if (!c)
     return {
-      name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', priority: 0, weight: 1, groups: 'default', region: '', timeout: '',
+      name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
       exclude_last_user: false,
     }
@@ -76,9 +82,9 @@ function initForm(c: Channel | null): FormState {
     api_key: c.api_key,
     models: c.models.join('\n'),
     mapping: c.model_mapping ? Object.entries(c.model_mapping).map(([k, v]) => `${k}=${v}`).join('\n') : '',
+    aliases: c.model_alias ? Object.entries(c.model_alias).map(([model, alias]) => ({ model, alias })) : [],
     priority: c.priority,
     weight: c.weight,
-    groups: c.groups?.length ? c.groups.join(', ') : 'default',
     region: c.region || '',
     timeout: c.timeout_ms ? String(c.timeout_ms) : '',
     ua_override: !!c.ua_override,
@@ -93,7 +99,6 @@ function initForm(c: Channel | null): FormState {
 
 function buildPayload(f: FormState): Partial<Channel> {
   const models = f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean)
-  const groups = [...new Set(f.groups.split(/[,，]/).map((s) => s.trim()).filter(Boolean))]
   const mapping: Record<string, string> = {}
   f.mapping.split('\n').forEach((line) => {
     const i = line.indexOf('=')
@@ -103,6 +108,11 @@ function buildPayload(f: FormState): Partial<Channel> {
       if (k && v) mapping[k] = v
     }
   })
+  // 已从模型列表移除的模型，其专属名一并丢弃
+  const aliases: Record<string, string> = {}
+  for (const { model, alias } of f.aliases) {
+    if (models.includes(model) && alias.trim()) aliases[model] = alias.trim()
+  }
   return {
     name: f.name.trim(),
     type: f.type,
@@ -112,9 +122,9 @@ function buildPayload(f: FormState): Partial<Channel> {
     api_key: f.api_key.trim(),
     models,
     model_mapping: Object.keys(mapping).length ? mapping : null,
+    model_alias: Object.keys(aliases).length ? aliases : null,
     priority: f.priority,
     weight: f.weight,
-    groups: groups.length ? groups : ['default'],
     region: f.type === 'vertex' ? f.region.trim() || null : null,
     timeout_ms: f.timeout ? Number(f.timeout) : null,
     ua_override: f.ua_override,
@@ -144,6 +154,10 @@ export function ChannelModal({
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
 
   const currentModels = (): Set<string> => new Set(f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))
+
+  const listedModels = [...currentModels()]
+  const freeModels = listedModels.filter((m) => !f.aliases.some((a) => a.model === m))
+  const setAlias = (i: number, row: AliasRow): void => set('aliases', f.aliases.map((a, j) => (j === i ? row : a)))
 
   const addModel = (m: string): void => {
     const cur = currentModels()
@@ -324,6 +338,48 @@ export function ChannelModal({
       </Field>
 
       <Field
+        label="模型专属名"
+        hint="可选 · 给列表中的模型换一个专属名：只有专属名会路由到本渠道，原名的请求不再分配到这里，适合把不稳定的渠道单独隔离出来按需调用"
+      >
+        {f.aliases.length > 0 && (
+          <div className="ah-alias-list">
+            {f.aliases.map((a, i) => (
+              <div className="ah-alias-row" key={i}>
+                <Select value={a.model} onChange={(e) => setAlias(i, { ...a, model: e.target.value })}>
+                  {listedModels
+                    .filter((m) => m === a.model || freeModels.includes(m))
+                    .map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                </Select>
+                <span className="ah-alias-arrow">→</span>
+                <Input
+                  value={a.alias}
+                  onChange={(e) => setAlias(i, { ...a, alias: e.target.value })}
+                  placeholder="专属名，例如 gpt-4o-backup"
+                  spellCheck={false}
+                />
+                <IconButton title="删除专属名" danger onClick={() => set('aliases', f.aliases.filter((_, j) => j !== i))}>
+                  <IconTrash size={14} />
+                </IconButton>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          size="sm"
+          variant="soft"
+          icon={<IconPlus size={15} />}
+          disabled={!freeModels.length}
+          onClick={() => set('aliases', [...f.aliases, { model: freeModels[0], alias: '' }])}
+        >
+          添加专属名
+        </Button>
+      </Field>
+
+      <Field
         label="UA 覆写"
         hint={f.ua_override ? '请求此渠道时，把客户端 User-Agent 覆写为下方自定义值' : '关闭时透传客户端原始 User-Agent'}
       >
@@ -387,10 +443,6 @@ export function ChannelModal({
             <span className="ah-mini ah-muted">最后 user 除外</span>
           </div>
         )}
-      </Field>
-
-      <Field label="分组" hint="Key 只能使用与自己分组有交集的渠道；内网匿名调用不受分组限制。多个分组用逗号分隔，例如 public, vip">
-        <Input value={f.groups} onChange={(e) => set('groups', e.target.value)} placeholder="default" />
       </Field>
 
       <div className="ah-grid2">

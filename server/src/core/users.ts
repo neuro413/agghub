@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { promisify } from 'node:util'
 import { db } from '../db'
+import { userGroups } from './groups'
 import type { ApiKey, PortalUser, Settings, UserListResult, UserView } from '../types'
 
 const scrypt = promisify(crypto.scrypt) as (password: string, salt: Buffer, keylen: number, options: crypto.ScryptOptions) => Promise<Buffer>
@@ -45,12 +46,26 @@ export async function burnPasswordCheck(password: string): Promise<void> {
   await verifyPassword(password, await DUMMY_HASH)
 }
 
+function parseGroups(raw: string | null | undefined): string[] {
+  try {
+    const value = JSON.parse(raw || '[]')
+    return Array.isArray(value) ? value.map(String) : []
+  } catch {
+    return []
+  }
+}
+
+/** users 行的 groups 为 JSON 字符串 */
+export function rowToUser(row: (Omit<PortalUser, 'groups'> & { groups: string }) | undefined): PortalUser | null {
+  return row ? { ...row, groups: parseGroups(row.groups) } : null
+}
+
 export function getUserById(id: number): PortalUser | null {
-  return (db.prepare('SELECT * FROM users WHERE id = ?').get(id) as PortalUser | undefined) ?? null
+  return rowToUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any)
 }
 
 export function getUserByName(username: string): PortalUser | null {
-  return (db.prepare('SELECT * FROM users WHERE username = ?').get(username) as PortalUser | undefined) ?? null
+  return rowToUser(db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any)
 }
 
 /** 该 IP 自 since 起注册的用户数 */
@@ -78,6 +93,11 @@ export function setUserPassword(id: number, passwordHash: string): boolean {
   return db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, id).changes > 0
 }
 
+/** 覆盖用户的专属分组 */
+export function setUserGroups(id: number, groups: string[]): boolean {
+  return db.prepare('UPDATE users SET groups = ? WHERE id = ?').run(JSON.stringify(groups), id).changes > 0
+}
+
 /** 余额加减，可以减成负数 */
 export function adjustUserQuota(id: number, delta: number): boolean {
   return db.prepare('UPDATE users SET quota = quota + ? WHERE id = ?').run(delta, id).changes > 0
@@ -97,11 +117,15 @@ export function deleteUser(id: number): boolean {
   })()
 }
 
-const VIEW_COLUMNS = `id, username, status, quota, used_quota, request_count, register_ip, created_at, last_login_at, last_login_ip,
+const VIEW_COLUMNS = `id, username, status, quota, used_quota, request_count, register_ip, created_at, last_login_at, last_login_ip, groups,
   (SELECT COUNT(*) FROM api_keys WHERE api_keys.user_id = users.id) AS key_count`
 
+type UserViewRow = Omit<UserView, 'groups'> & { groups: string }
+const toView = (row: UserViewRow): UserView => ({ ...row, groups: parseGroups(row.groups) })
+
 export function getUserView(id: number): UserView | null {
-  return (db.prepare(`SELECT ${VIEW_COLUMNS} FROM users WHERE id = ?`).get(id) as UserView | undefined) ?? null
+  const row = db.prepare(`SELECT ${VIEW_COLUMNS} FROM users WHERE id = ?`).get(id) as UserViewRow | undefined
+  return row ? toView(row) : null
 }
 
 /** 管理端分页列表，q 按用户名模糊匹配 */
@@ -112,17 +136,22 @@ export function listUsers(query: { q?: string; page?: number; size?: number }): 
   const where = q ? "WHERE username LIKE ? ESCAPE '\\'" : ''
   const args = q ? [`%${q.replace(/[\\%_]/g, m => '\\' + m)}%`] : []
   const total = db.prepare(`SELECT COUNT(*) FROM users ${where}`).pluck().get(...args) as number
-  const items = db
+  const rows = db
     .prepare(`SELECT ${VIEW_COLUMNS} FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
-    .all(...args, size, (page - 1) * size) as UserView[]
-  return { items, total, page, size }
+    .all(...args, size, (page - 1) * size) as UserViewRow[]
+  return { items: rows.map(toView), total, page, size }
 }
 
-/** 门户用户 Key 的有效配置：分组、限流取门户设置，不设模型白名单与 Key 自身额度，正文记录跟随全局 */
-export function effectivePortalKey(key: ApiKey, settings: Settings): ApiKey {
+/**
+ * 门户用户 Key 的有效配置：分组须仍在用户可用范围内（否则返回 null），限流取门户设置，
+ * 不设模型白名单与 Key 自身额度，正文记录跟随全局
+ */
+export function effectivePortalKey(key: ApiKey, user: PortalUser, settings: Settings): ApiKey | null {
+  const group = key.groups[0]
+  if (!group || !userGroups(user).some(g => g.name === group)) return null
   return {
     ...key,
-    groups: settings.portal_groups,
+    groups: [group],
     models: [],
     rpm: settings.portal_rpm || null,
     concurrency: settings.portal_concurrency || null,

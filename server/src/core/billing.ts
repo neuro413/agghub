@@ -80,16 +80,17 @@ export function findRatio(ratios: ModelRatio[], model: string): ModelRatio | nul
   return best
 }
 
-/** 点数公式（见方案 6.2），结果向上取整；produced=false 时不计 per_request */
-export function computePoints(ratio: ModelRatio, usage: BillableUsage, produced: boolean): number {
+/** 点数公式（见方案 6.2）再乘分组倍率，结果向上取整；produced=false 时不计 per_request */
+export function computePoints(ratio: ModelRatio, usage: BillableUsage, produced: boolean, groupRatio = 1): number {
   const uncached = Math.max(0, usage.prompt_tokens - usage.cache_read_tokens - usage.cache_write_tokens)
   const raw = uncached * ratio.input
     + usage.cache_read_tokens * ratio.cache_read
     + usage.cache_write_tokens * ratio.cache_write
     + usage.completion_tokens * ratio.output
     + (produced ? ratio.per_request : 0)
+  const total = raw * groupRatio
   // 先按 6 位小数四舍五入再向上取整，避免浮点误差把 6400.0000000001 抬成 6401
-  return raw > 0 ? Math.ceil(Math.round(raw * 1e6) / 1e6) : 0
+  return total > 0 ? Math.ceil(Math.round(total * 1e6) / 1e6) : 0
 }
 
 const dailyPointsStmt = db.prepare(
@@ -149,6 +150,8 @@ export interface SettleInput {
   success: boolean
   /** 惰性估算输入 Token（仅在 usage.prompt_tokens 为 0 且需要时调用） */
   estimatePrompt: () => number
+  /** 本次命中分组的倍率，缺省 1 */
+  groupRatio?: number
 }
 
 /**
@@ -157,7 +160,7 @@ export interface SettleInput {
  */
 export function settleRequest(input: SettleInput): number | null {
   try {
-    const { caller, model, ratios, usage, meter, success, estimatePrompt } = input
+    const { caller, model, ratios, usage, meter, success, estimatePrompt, groupRatio = 1 } = input
     const account = accountOf(caller)
     const produced = !!meter?.produced
     let prompt = usage.prompt_tokens || 0
@@ -170,7 +173,7 @@ export function settleRequest(input: SettleInput): number | null {
     if (produced && prompt === 0) prompt = estimatePrompt()
     const ratio = model ? findRatio(ratios, model) : null
     const points = ratio
-      ? computePoints(ratio, { prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite }, produced)
+      ? computePoints(ratio, { prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite }, produced, groupRatio)
       : null
     // Key 调用无论成功失败都记账一次（requests +1），owner 不记账
     if (account) commitUsage(account, { points: points ?? 0, prompt_tokens: prompt, completion_tokens: completion })

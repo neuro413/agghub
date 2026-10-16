@@ -15,6 +15,7 @@ import { ParamRuleRow, newParamRule } from './ParamRuleEditor'
 import { LogPickerModal, MultiChips, RuleList, ScopeFields, regexValid } from './preprocessShared'
 import type { Opt, RuleRowProps } from './preprocessShared'
 import { newId } from '../lib/id'
+import { channelModelNames } from '../lib/channelModels'
 
 const ROLE_OPTIONS: Opt[] = [
   { value: 'system', label: 'system' },
@@ -37,7 +38,7 @@ function newToolFilterRule(partial?: Partial<ToolFilterRule>): ToolFilterRule {
 
 // 只提交本页 UI 涉及的字段，避免用本页的旧缓存覆盖设置页的字段
 const KEYS: (keyof Settings)[] = [
-  'strip_top_p', 'drop_thinking', 'drop_thinking_keep_last', 'drop_thinking_channel_ids', 'drop_thinking_models', 'drop_redacted_thinking',
+  'drop_thinking', 'drop_thinking_keep_last', 'drop_thinking_channel_ids', 'drop_thinking_models', 'drop_redacted_thinking',
   'preprocess_rules', 'tool_filter_rules', 'param_rules',
   'pseudo_thinking_enabled', 'pseudo_thinking_channel_ids', 'pseudo_thinking_models', 'pseudo_thinking_open_tag', 'pseudo_thinking_close_tag',
   'pseudo_thinking_prompt', 'pseudo_thinking_store_max',
@@ -67,7 +68,7 @@ export function PreprocessPage() {
   const rules = s?.preprocess_rules ?? []
   const modelOptions = useMemo<Opt[]>(() => {
     const set = new Set<string>()
-    for (const c of channels) for (const m of [...(c.models || []), ...Object.keys(c.model_mapping || {})]) set.add(m)
+    for (const c of channels) for (const m of channelModelNames(c)) set.add(m)
     return [...set].sort().map((m) => ({ value: m, label: m }))
   }, [channels])
   const channelOptions = useMemo<Opt[]>(() => channels.map((c) => ({ value: String(c.id), label: c.name })), [channels])
@@ -159,25 +160,6 @@ export function PreprocessPage() {
 
       {tagError && <div role="alert" className="ah-detail-empty">{tagError}</div>}
       <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
-      {/* 通用参数预处理 */}
-      <Card className="ah-set-card">
-        <div className="ah-set-title">
-          <IconFilter size={18} /> 参数过滤
-        </div>
-        <div className="ah-set-desc">对所有方向生效（OpenAI/Anthropic 同向、OpenAI⇄Anthropic 互转）</div>
-        <div className="ah-set-row">
-          <div className="ah-set-row-info">
-            <div className="ah-set-row-label">去除 top_p</div>
-            <div className="ah-set-row-desc">
-              从发往上游的请求中删除 top_p 采样参数。适用于上游不支持或不希望传递 top_p 的场景。
-            </div>
-          </div>
-          <div className="ah-set-row-control">
-            <Toggle checked={s.strip_top_p} onChange={(v) => patch('strip_top_p', v)} />
-          </div>
-        </div>
-      </Card>
-
       {/* 卡片 A0：参数修改规则 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">

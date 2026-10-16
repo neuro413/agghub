@@ -82,15 +82,15 @@ export function countUserKeys(userId: number): number {
   return db.prepare('SELECT COUNT(*) FROM api_keys WHERE user_id = ?').pluck().get(userId) as number
 }
 
-/** 门户用户自建 Key：分组、限流等在调用时按门户设置覆盖，这里只存名称和过期时间 */
-export function createUserKey(userId: number, name: string, expiresAt: number | null): ApiKey {
+/** 门户用户自建 Key：只存名称、分组和过期时间，限流等在调用时按门户设置覆盖 */
+export function createUserKey(userId: number, name: string, group: string, expiresAt: number | null): ApiKey {
   const now = Date.now()
   const info = db
     .prepare(
       `INSERT INTO api_keys (name, key, enabled, groups, models, quota_used, expires_at, user_id, created_at, updated_at)
-       VALUES (?, ?, 1, '[]', '[]', 0, ?, ?, ?, ?)`,
+       VALUES (?, ?, 1, ?, '[]', 0, ?, ?, ?, ?)`,
     )
-    .run(name, generateKey(), expiresAt, userId, now, now)
+    .run(name, generateKey(), JSON.stringify([group]), expiresAt, userId, now, now)
   return getKeyById(Number(info.lastInsertRowid))!
 }
 

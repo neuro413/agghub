@@ -1,16 +1,18 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
-import { IconButton } from '../components/Button'
+import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Input } from '../components/Form'
 import { IconChevron, IconChevronLeft, IconChevronRight, IconCopy, IconRefresh, IconSearch, IconTrash, IconUsers } from '../components/Icons'
+import { Modal } from '../components/Modal'
 import { Loading } from '../components/Primitives'
 import { useToast } from '../components/Toast'
 import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
 import { fmtNum, fmtTime } from '../lib/format'
 import { currencySymbol, money, toPoints } from '../lib/money'
-import type { ApiKeyView, UserListResult, UserView } from '../types'
+import type { ApiKeyView, ChannelGroupView, UserListResult, UserView } from '../types'
+import { MultiChips } from './preprocessShared'
 
 const PAGE_SIZE = 20
 
@@ -18,8 +20,55 @@ function maskKey(key: string): string {
   return key.length <= 14 ? key : `${key.slice(0, 11)}…${key.slice(-4)}`
 }
 
-/** 展开行：该用户自建的 Key，可停用或删除 */
-function UserKeys({ userId, onChanged }: { userId: number; onChanged: () => void }) {
+/** 分配 / 移除用户的专属分组；公开分组所有用户默认可用，不在这里勾选 */
+function UserGroupsModal({ user, groups, onClose, onSaved }: { user: UserView; groups: ChannelGroupView[]; onClose: () => void; onSaved: (u: UserView) => void }) {
+  const toast = useToast()
+  const [selected, setSelected] = useState(user.groups)
+  const [saving, setSaving] = useState(false)
+  const publicGroups = groups.filter(g => g.is_public)
+  const options = groups.filter(g => !g.is_public).map(g => ({ value: g.name, label: g.ratio === 1 ? g.name : `${g.name} ×${g.ratio}` }))
+  const save = async () => {
+    setSaving(true)
+    try {
+      onSaved(await api.setUserGroups(user.id, selected))
+      toast('ok', '分组已更新')
+      onClose()
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <Modal
+      title={`「${user.username}」的分组`}
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button variant="primary" loading={saving} onClick={save}>保存</Button>
+        </>
+      }
+    >
+      <div className="ah-field">
+        <label className="ah-flabel">专属分组</label>
+        <MultiChips options={options} selected={selected} onChange={setSelected} empty="没有需要分配的分组（非公开分组在「分组」页创建）" />
+        <div className="ah-hint">勾选即分配，取消勾选即移除；移除后该用户使用这个分组的 Key 将无法调用，直到改选其他分组</div>
+      </div>
+      <div className="ah-field">
+        <label className="ah-flabel">公开分组</label>
+        <div className="ah-pp-chips">
+          {publicGroups.map(g => <span key={g.name} className="ah-tag ah-tag-pub">{g.name}</span>)}
+          {!publicGroups.length && <span className="ah-mini ah-faint">无</span>}
+        </div>
+        <div className="ah-hint">所有用户默认可用，无须分配</div>
+      </div>
+    </Modal>
+  )
+}
+
+/** 展开行：该用户自建的 Key，可停用或删除；usable 为该用户当前可用的分组 */
+function UserKeys({ userId, usable, onChanged }: { userId: number; usable: string[]; onChanged: () => void }) {
   const toast = useToast()
   const [keys, setKeys] = useState<ApiKeyView[] | null>(null)
   const load = useCallback(async () => {
@@ -64,6 +113,9 @@ function UserKeys({ userId, onChanged }: { userId: number; onChanged: () => void
         return (
           <div key={k.id} className="ah-user-key">
             <span className="ah-truncate" style={{ fontWeight: 700 }}>{k.name}</span>
+            {k.groups[0] && usable.includes(k.groups[0])
+              ? <span className="ah-tag">{k.groups[0]}</span>
+              : <span className="ah-tag ah-tag-warn" title="分组已删除或不再对该用户可用，这个 Key 无法调用">{k.groups[0] ? `${k.groups[0]}（不可用）` : '无分组'}</span>}
             <code className="ah-key-secret-val">{maskKey(k.key)}</code>
             <IconButton title="复制完整 Key" onClick={() => copy(k)}><IconCopy size={15} /></IconButton>
             <span className="ah-mini ah-muted ah-num">已用 {money(k.quota_used)}</span>
@@ -87,6 +139,8 @@ export function UsersPage() {
   const [data, setData] = useState<UserListResult | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)
   const [refresh, setRefresh] = useState(0)
+  const [groups, setGroups] = useState<ChannelGroupView[]>([])
+  const [groupUser, setGroupUser] = useState<UserView | null>(null)
 
   useEffect(() => {
     const timer = window.setTimeout(() => { setQ(qInput.trim()); setPage(1) }, 300)
@@ -101,6 +155,14 @@ export function UsersPage() {
     )
     return () => controller.abort()
   }, [q, page, refresh, toast])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    api.listGroups(controller.signal).then(setGroups, () => {})
+    return () => controller.abort()
+  }, [refresh])
+
+  const usableOf = (u: UserView) => groups.filter(g => g.is_public || u.groups.includes(g.name)).map(g => g.name)
 
   const reload = () => setRefresh(v => v + 1)
   const patch = (user: UserView) => setData(d => d && { ...d, items: d.items.map(u => (u.id === user.id ? user : u)) })
@@ -192,6 +254,7 @@ export function UsersPage() {
                   <IconChevron size={14} className={`ah-user-chev${openId === u.id ? ' is-open' : ''}`} />
                   <span className="ah-truncate" style={{ fontWeight: 700 }}>{u.username}</span>
                   {u.status !== 1 && <span className="ah-tag ah-tag-warn">已停用</span>}
+                  {u.groups.map(g => <span key={g} className="ah-tag" title="专属分组">{g}</span>)}
                 </span>
                 <span className={`u-num ah-num${u.quota <= 0 ? ' is-neg' : ''}`}>{money(u.quota)}</span>
                 <span className="u-num ah-num ah-muted">{money(u.used_quota)}</span>
@@ -201,12 +264,13 @@ export function UsersPage() {
                 <span className="u-time ah-mini ah-faint ah-num" title={u.last_login_ip ? `IP：${u.last_login_ip}` : undefined}>{u.last_login_at ? fmtTime(u.last_login_at) : '—'}</span>
                 <span className="u-act" onClick={e => e.stopPropagation()}>
                   <Toggle checked={u.status === 1} onChange={() => toggleStatus(u)} />
+                  <button type="button" className="ah-btn is-ghost is-sm" onClick={() => setGroupUser(u)}>分组</button>
                   <button type="button" className="ah-btn is-ghost is-sm" onClick={() => adjust(u)}>调余额</button>
                   <button type="button" className="ah-btn is-ghost is-sm" onClick={() => resetPassword(u)}>重置密码</button>
                   <IconButton title="删除" danger onClick={() => del(u)}><IconTrash size={16} /></IconButton>
                 </span>
               </div>
-              {openId === u.id && <UserKeys userId={u.id} onChanged={reload} />}
+              {openId === u.id && <UserKeys userId={u.id} usable={usableOf(u)} onChanged={reload} />}
             </Fragment>
           ))
         )}
@@ -218,7 +282,8 @@ export function UsersPage() {
           </div>
         )}
       </Card>
-      <div className="ah-mini ah-faint" style={{ marginTop: 10 }}>余额可能因最后一次请求透支为负。</div>
+      <div className="ah-mini ah-faint" style={{ marginTop: 10 }}>余额可能因最后一次请求透支为负。用户可用的分组 = 公开分组 + 专属分组。</div>
+      {groupUser && <UserGroupsModal user={groupUser} groups={groups} onClose={() => setGroupUser(null)} onSaved={patch} />}
     </div>
   )
 }

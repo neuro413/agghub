@@ -1,9 +1,14 @@
 import type {
+  Announcement,
+  AnnouncementInput,
   ApiKeyInput,
   ApiKeyView,
   BillingPreviewInput,
   BillingPreviewResult,
   Channel,
+  ChannelGroup,
+  ChannelGroupInput,
+  ChannelGroupView,
   KeyQuotaOp,
   KeyUsageDay,
   UserListResult,
@@ -87,10 +92,23 @@ export const api = {
   regenerateKey: (id: number) => req<ApiKeyView>(`/keys/${id}/regenerate`, { method: 'POST' }),
   keyQuota: (id: number, op: KeyQuotaOp) => req<ApiKeyView>(`/keys/${id}/quota`, { method: 'POST', body: JSON.stringify(op) }),
   keyUsage: (id: number, days: number, signal?: AbortSignal) => req<KeyUsageDay[]>(`/keys/${id}/usage?days=${days}`, { signal }),
-  listGroups: (signal?: AbortSignal) => req<string[]>('/groups', { signal }),
   getSystem: (signal?: AbortSignal) => req<SystemInfo>('/system', { signal }),
   billingPreview: (data: BillingPreviewInput) => req<BillingPreviewResult>('/billing/preview', { method: 'POST', body: JSON.stringify(data) }),
   openRouterPrices: (signal?: AbortSignal) => req<OpenRouterPrice[]>('/billing/openrouter', { signal }),
+
+  // ── 分组 ──
+  listGroups: (signal?: AbortSignal) => req<ChannelGroupView[]>('/groups', { signal }),
+  createGroup: (data: ChannelGroupInput) => req<ChannelGroup>('/groups', { method: 'POST', body: JSON.stringify(data) }),
+  updateGroup: (name: string, data: ChannelGroupInput) =>
+    req<ChannelGroup>(`/groups/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteGroup: (name: string) => req<{ ok: boolean }>(`/groups/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // ── 门户公告（通知正文走设置项 portal_notice）──
+  listAnnouncements: (signal?: AbortSignal) => req<Announcement[]>('/announcements', { signal }),
+  createAnnouncement: (data: AnnouncementInput) => req<Announcement>('/announcements', { method: 'POST', body: JSON.stringify(data) }),
+  updateAnnouncement: (id: number, data: AnnouncementInput) =>
+    req<Announcement>(`/announcements/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteAnnouncement: (id: number) => req<{ ok: boolean }>(`/announcements/${id}`, { method: 'DELETE' }),
 
   // ── 门户用户 ──
   listUsers: (p: { q?: string; page?: number; size?: number }, signal?: AbortSignal) => {
@@ -101,6 +119,7 @@ export const api = {
     return req<UserListResult>(`/users?${query.toString()}`, { signal })
   },
   setUserStatus: (id: number, status: number) => req<UserView>(`/users/${id}`, { method: 'PUT', body: JSON.stringify({ status }) }),
+  setUserGroups: (id: number, groups: string[]) => req<UserView>(`/users/${id}/groups`, { method: 'PUT', body: JSON.stringify({ groups }) }),
   adjustUserQuota: (id: number, delta: number) => req<UserView>(`/users/${id}/quota`, { method: 'POST', body: JSON.stringify({ delta }) }),
   resetUserPassword: (id: number, password: string) => req<{ ok: boolean }>(`/users/${id}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
   deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),

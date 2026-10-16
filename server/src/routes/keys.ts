@@ -1,14 +1,22 @@
 import { Router } from 'express'
 import { HOST, PORT, PUBLIC_HOST, PUBLIC_PORT, TRUST_PROXY } from '../config'
-import { allChannels } from '../db'
+import { listGroups } from '../core/groups'
 import { applyQuotaOp, createKey, deleteKey, keyUsage, keyView, listKeys, regenerateKey, updateKey, validateKeyInput } from '../core/keys'
-import type { KeyQuotaOp, SystemInfo } from '../types'
+import type { ApiKeyInput, KeyQuotaOp, SystemInfo } from '../types'
 
 export const keysRouter = Router()
 
 const validId = (raw: string): number | null => {
   const id = Number(raw)
   return Number.isInteger(id) && id > 0 ? id : null
+}
+
+/** 引用了不存在的分组时返回错误信息 */
+function unknownGroups(input: ApiKeyInput): string | null {
+  if (!input.groups) return null
+  const names = new Set(listGroups().map(g => g.name))
+  const missing = input.groups.filter(g => !names.has(g))
+  return missing.length ? `分组不存在：${missing.join('、')}` : null
 }
 
 keysRouter.get('/', (_req, res) => {
@@ -18,12 +26,16 @@ keysRouter.get('/', (_req, res) => {
 keysRouter.post('/', (req, res) => {
   const result = validateKeyInput(req.body, false)
   if (!result.ok) return res.status(400).json({ error: result.error })
+  const groupError = unknownGroups(result.value)
+  if (groupError) return res.status(400).json({ error: groupError })
   res.json(keyView(createKey(result.value)))
 })
 
 keysRouter.put('/:id', (req, res) => {
   const result = validateKeyInput(req.body, true)
   if (!result.ok) return res.status(400).json({ error: result.error })
+  const groupError = unknownGroups(result.value)
+  if (groupError) return res.status(400).json({ error: groupError })
   const id = validId(req.params.id)
   const key = id ? updateKey(id, result.value) : null
   if (!key) return res.status(404).json({ error: 'not found' })
@@ -62,13 +74,6 @@ keysRouter.get('/:id/usage', (req, res) => {
 
 // 挂在 /api 下的零散信息接口
 export const metaRouter = Router()
-
-metaRouter.get('/groups', (_req, res) => {
-  const groups = new Set<string>()
-  for (const channel of allChannels()) for (const group of channel.groups) groups.add(group)
-  const list = [...groups].sort()
-  res.json(list.length ? list : ['default'])
-})
 
 metaRouter.get('/system', (_req, res) => {
   const info: SystemInfo = {

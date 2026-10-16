@@ -5,14 +5,17 @@ import { Link, navigate } from '../router'
 import { useSession, useUser } from '../session'
 import { isImageIcon } from '../lib/brand'
 import { money } from '../lib/format'
+import { NoticeProvider } from '../lib/notices'
+import { NoticeBell } from './NoticeCenter'
 import { Button } from './ui'
-import { IconFileText, IconKeyRound, IconLayoutDashboard, IconLogOut, IconPanelLeft, IconUser } from './Icons'
+import { IconBox, IconFileText, IconKeyRound, IconLayoutDashboard, IconLogOut, IconPanelLeft, IconUser } from './Icons'
 
 const NAV = [
   {
     group: '控制台',
     items: [
       { to: '/console', label: '概览', Icon: IconLayoutDashboard },
+      { to: '/console/models', label: '模型列表', Icon: IconBox },
       { to: '/console/keys', label: '令牌', Icon: IconKeyRound },
       { to: '/console/logs', label: '使用日志', Icon: IconFileText },
     ],
@@ -73,6 +76,7 @@ function UserMenu() {
 
 export function ConsoleLayout({ path, children }: { path: string; children: ReactNode }) {
   const { status } = useSession()
+  const user = useUser()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(COLLAPSE_KEY) === '1')
   const [mobileOpen, setMobileOpen] = useState(false)
   useEffect(() => setMobileOpen(false), [path])
@@ -84,36 +88,39 @@ export function ConsoleLayout({ path, children }: { path: string; children: Reac
     })
   }
   return (
-    <div className="pt-shell">
-      <header className="pt-header">
-        <Button variant="ghost" size="icon" onClick={toggle} aria-label="切换侧边栏"><IconPanelLeft /></Button>
-        <Link to="/console" className="pt-brand">
-          <BrandLogo className="pt-brand-logo" />
-          {status.brand_name}
-        </Link>
-        <span className="spacer" />
-        <UserMenu />
-      </header>
-      <div className="pt-body">
-        {mobileOpen && <div className="pt-sidebar-mask" onClick={() => setMobileOpen(false)} />}
-        <aside className={`pt-sidebar${collapsed ? ' is-collapsed' : ''}${mobileOpen ? ' is-open' : ''}`}>
-          {NAV.map(({ group, items }) => (
-            <nav key={group} className="pt-nav-group">
-              <div className="pt-nav-label">{group}</div>
-              <div className="pt-nav-list">
-                {items.map(({ to, label, Icon }) => (
-                  <Link key={to} to={to} className={`pt-nav-item${path === to ? ' is-active' : ''}`} title={collapsed ? label : undefined}>
-                    <Icon />
-                    <span>{label}</span>
-                  </Link>
-                ))}
-              </div>
-            </nav>
-          ))}
-        </aside>
-        <main className="pt-inset">{children}</main>
+    <NoticeProvider key={user.id} userId={user.id}>
+      <div className="pt-shell">
+        <header className="pt-header">
+          <Button variant="ghost" size="icon" onClick={toggle} aria-label="切换侧边栏"><IconPanelLeft /></Button>
+          <Link to="/console" className="pt-brand">
+            <BrandLogo className="pt-brand-logo" />
+            {status.brand_name}
+          </Link>
+          <span className="spacer" />
+          <NoticeBell />
+          <UserMenu />
+        </header>
+        <div className="pt-body">
+          {mobileOpen && <div className="pt-sidebar-mask" onClick={() => setMobileOpen(false)} />}
+          <aside className={`pt-sidebar${collapsed ? ' is-collapsed' : ''}${mobileOpen ? ' is-open' : ''}`}>
+            {NAV.map(({ group, items }) => (
+              <nav key={group} className="pt-nav-group">
+                <div className="pt-nav-label">{group}</div>
+                <div className="pt-nav-list">
+                  {items.map(({ to, label, Icon }) => (
+                    <Link key={to} to={to} className={`pt-nav-item${path === to ? ' is-active' : ''}`} title={collapsed ? label : undefined}>
+                      <Icon />
+                      <span>{label}</span>
+                    </Link>
+                  ))}
+                </div>
+              </nav>
+            ))}
+          </aside>
+          <main className="pt-inset">{children}</main>
+        </div>
       </div>
-    </div>
+    </NoticeProvider>
   )
 }
 
