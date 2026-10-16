@@ -1,9 +1,10 @@
 import type { Response } from 'express'
 
-export type StopReason = 'client_cancel' | 'request_deadline' | 'upstream_idle'
+/** race_lost：多 key 并发时其他 key 先出结果，本次尝试被主动中断 */
+export type StopReason = 'client_cancel' | 'request_deadline' | 'upstream_idle' | 'race_lost'
 export class RequestStopped extends Error {
   constructor(readonly reason: StopReason) {
-    super({ client_cancel: '客户端中断了请求', request_deadline: '整次请求超过总时限', upstream_idle: '上游无数据超时' }[reason])
+    super({ client_cancel: '客户端中断了请求', request_deadline: '整次请求超过总时限', upstream_idle: '上游无数据超时', race_lost: '并发竞速落选' }[reason])
     this.name = 'RequestStopped'
   }
 }
@@ -64,6 +65,11 @@ export class AttemptLifecycle {
   touch = (): void => {
     clearTimeout(this.timer)
     if (!this.paused && !this.signal.aborted) this.timer = setTimeout(() => this.controller.abort(new RequestStopped('upstream_idle')), this.idleMs)
+  }
+  /** 主动中断本次尝试，reason 作为 signal.reason */
+  cancel(reason: unknown): void {
+    clearTimeout(this.timer)
+    this.controller.abort(reason)
   }
   pause(): void { this.paused = true; clearTimeout(this.timer) }
   resume(): void { this.paused = false; this.touch() }

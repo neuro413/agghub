@@ -2,14 +2,16 @@ import { Router } from 'express'
 import { db, getChannelById, getSettings, rowToChannel } from '../db'
 import { getProxyAgent } from '../core/proxy'
 import { resetChannelHealth } from '../core/channelHealth'
+import { channelKeys, keyCounts, keyStatuses, pruneKeyStates, resetKeyStates } from '../core/channelKeys'
 import { removeChannelFromGroups } from '../core/groups'
 import { trimSlash, withV1 } from '../adapters/base'
-import type { ChannelRow, ChannelType, SingleRoleMode } from '../types'
+import type { ChannelRow, ChannelType, KeyMode, SingleRoleMode } from '../types'
 
 export const channelsRouter = Router()
 
 const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses']
 const SINGLE_ROLE_MODES: SingleRoleMode[] = ['user', 'system']
+const KEY_MODES: KeyMode[] = ['poll', 'race']
 
 function startOfToday(): number {
   const d = new Date()
@@ -38,6 +40,9 @@ interface ChannelInput {
   single_role?: SingleRoleMode | null
   single_role_merge_system?: boolean
   single_role_exclude_last_user?: boolean
+  key_mode?: KeyMode | null
+  key_concurrency?: number
+  key_cooldown_seconds?: number
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -70,6 +75,21 @@ function fullUrlColumns(input: ChannelInput): { base_url_full: number; models_ur
   return { base_url_full: full ? 1 : 0, models_url: full ? input.models_url?.trim() || null : null }
 }
 
+/** 多 key 字段：Vertex 不支持；并发数限制在 2~20，冷却秒数至少 1 */
+function keyColumns(input: ChannelInput): { key_mode: KeyMode | null; key_concurrency: number; key_cooldown_seconds: number } {
+  const mode = input.type !== 'vertex' && input.key_mode && KEY_MODES.includes(input.key_mode) ? input.key_mode : null
+  return {
+    key_mode: mode,
+    key_concurrency: Math.min(20, Math.max(2, Math.round(Number(input.key_concurrency) || 2))),
+    key_cooldown_seconds: Math.max(1, Math.round(Number(input.key_cooldown_seconds) || 300)),
+  }
+}
+
+/** 测试连接与拉取模型使用的 key：多 key 模式取第一个 */
+function probeKey(input: ChannelInput): string {
+  return (channelKeys({ api_key: input.api_key || '', key_mode: keyColumns(input).key_mode })[0] ?? '').trim()
+}
+
 /** 完整地址模式的模型列表地址：优先用填写的地址，否则把结尾的接口路径换成 /models */
 function modelsUrlOf(input: ChannelInput): string | null {
   const custom = input.models_url?.trim()
@@ -91,6 +111,9 @@ function validate(input: ChannelInput): string | null {
   }
   if (input.base_url_full && input.type !== 'vertex' && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
   if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
+  if (input.key_mode != null && !KEY_MODES.includes(input.key_mode)) return '多 key 模式必须是 poll / race'
+  const keyMode = keyColumns(input).key_mode
+  if (keyMode && !channelKeys({ api_key: input.api_key || '', key_mode: keyMode }).length) return '多 key 模式下至少填写一个 key'
   return null
 }
 
@@ -105,7 +128,8 @@ channelsRouter.get('/', (_req, res) => {
   const list = rows.map((r) => {
     const ch = rowToChannel(r)
     const s = statStmt.get(r.id, since) as { total: number; ok: number }
-    return { ...ch, today_requests: s.total || 0, today_success: s.ok || 0 }
+    const keys = keyCounts(ch)
+    return { ...ch, today_requests: s.total || 0, today_success: s.ok || 0, key_total: keys?.total, key_available: keys?.available }
   })
   res.json(list)
 })
@@ -118,8 +142,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -141,10 +165,13 @@ channelsRouter.post('/', (req, res) => {
       single_role: input.single_role || null,
       single_role_merge_system: input.single_role_merge_system ? 1 : 0,
       single_role_exclude_last_user: input.single_role_exclude_last_user ? 1 : 0,
+      ...keyColumns(input),
       created_at: now,
       updated_at: now,
     })
-  res.json(getChannelById(Number(info.lastInsertRowid)))
+  const created = getChannelById(Number(info.lastInsertRowid))!
+  pruneKeyStates(created)
+  res.json(created)
 })
 
 channelsRouter.put('/:id', (req, res) => {
@@ -163,6 +190,7 @@ channelsRouter.put('/:id', (req, res) => {
        model_mapping=@model_mapping, model_alias=@model_alias, priority=@priority, weight=@weight, status=@status,
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
+       key_mode=@key_mode, key_concurrency=@key_concurrency, key_cooldown_seconds=@key_cooldown_seconds,
        ban_until=@ban_until,
        updated_at=@updated_at
      WHERE id=@id`,
@@ -198,12 +226,31 @@ channelsRouter.put('/:id', (req, res) => {
       input.single_role_exclude_last_user !== undefined
         ? (input.single_role_exclude_last_user ? 1 : 0)
         : existing.single_role_exclude_last_user ? 1 : 0,
+    ...keyColumns({ ...existing, ...input }),
     ban_until: statusChanged ? null : existing.ban_until,
     updated_at: Date.now(),
   })
   // 手动改状态视为恢复：清掉熔断恢复时间与内存计数；状态没变（如编辑名称时回传原状态）不影响自动恢复
   if (statusChanged) resetChannelHealth(id)
-  res.json(getChannelById(id))
+  const updated = getChannelById(id)!
+  pruneKeyStates(updated)
+  res.json(updated)
+})
+
+// 多 key 渠道的 key 状态（脱敏）
+channelsRouter.get('/:id/keys', (req, res) => {
+  const channel = getChannelById(Number(req.params.id))
+  if (!channel) return res.status(404).json({ error: 'not found' })
+  res.json(keyStatuses(channel))
+})
+
+// 手动重置 key 熔断：带 fingerprint 只重置一个，否则全部重置
+channelsRouter.post('/:id/keys/reset', (req, res) => {
+  const channel = getChannelById(Number(req.params.id))
+  if (!channel) return res.status(404).json({ error: 'not found' })
+  const fingerprint = typeof req.body?.fingerprint === 'string' ? req.body.fingerprint : undefined
+  resetKeyStates(channel.id, fingerprint)
+  res.json(keyStatuses(channel))
 })
 
 channelsRouter.delete('/:id', (req, res) => {
@@ -211,6 +258,7 @@ channelsRouter.delete('/:id', (req, res) => {
   db.prepare('DELETE FROM channels WHERE id = ?').run(id)
   removeChannelFromGroups(id)
   resetChannelHealth(id)
+  resetKeyStates(id)
   res.json({ ok: true })
 })
 
@@ -242,7 +290,7 @@ async function failure(r: Response): Promise<{ ok: false; message: string }> {
 }
 
 async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string): Promise<{ ok: boolean; message: string; models?: string[] }> {
-  const key = (input.api_key || '').trim()
+  const key = probeKey(input)
   const base = input.base_url?.trim() ? trimSlash(input.base_url.trim()) : ''
   const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
 
@@ -256,7 +304,7 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
     const r = await fetch(url, { headers, signal, dispatcher } as any)
     if (!r.ok) return failure(r)
     const data: any = await r.json().catch(() => ({}))
-    const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id).slice(0, 50) : undefined
+    const models = Array.isArray(data?.data) ? data.data.map((m: any) => m.id) : undefined
     return { ok: true, message: '连接成功', models }
   }
 

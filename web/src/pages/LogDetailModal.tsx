@@ -211,6 +211,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       {detail.is_stream ? <span className="ah-tag">stream</span> : null}
       <span className="sp" style={{ flex: 1 }} />
       <span className="ah-mini ah-muted">{detail.channel_name || '—'}</span>
+      {detail.channel_key && <span className="ah-mini ah-muted ah-num" title="多 key 渠道本次使用的上游 key">上游 key：{detail.channel_key}</span>}
       <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
       {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
       {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}

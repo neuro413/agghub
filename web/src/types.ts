@@ -2,13 +2,14 @@
 import type { Channel as ServerChannel, CallerSource, LogBodyField } from '../../server/src/types'
 export type { LogBodyField } from '../../server/src/types'
 export type {
-  ChannelType, SingleRoleMode, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
+  ChannelType, SingleRoleMode, KeyMode, ChannelKeyStatus, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
   UserView, UserListResult, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
   Announcement, AnnouncementInput, AnnouncementType,
 } from '../../server/src/types'
 
-export type Channel = ServerChannel & { today_requests?: number; today_success?: number }
+/** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数 */
+export type Channel = ServerChannel & { today_requests?: number; today_success?: number; key_total?: number; key_available?: number }
 
 export interface ParamTestResult {
   wireFormat: string
@@ -76,6 +77,8 @@ export interface LogItem {
   user_name: string | null
   /** 计费所用分组；owner 调用为 null */
   group_name: string | null
+  /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值） */
+  channel_key: string | null
 }
 
 export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }

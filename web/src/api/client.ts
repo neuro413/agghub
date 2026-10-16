@@ -7,6 +7,7 @@ import type {
   BillingPreviewResult,
   Channel,
   ChannelGroup,
+  ChannelKeyStatus,
   ChannelGroupInput,
   ChannelGroupView,
   KeyQuotaOp,
@@ -83,6 +84,9 @@ export const api = {
   deleteChannel: (id: number) => req<{ ok: boolean }>(`/channels/${id}`, { method: 'DELETE' }),
   testChannel: (data: Partial<Channel>) =>
     req<TestResult>('/channels/test', { method: 'POST', body: JSON.stringify(data) }),
+  channelKeys: (id: number) => req<ChannelKeyStatus[]>(`/channels/${id}/keys`),
+  resetChannelKeys: (id: number, fingerprint?: string) =>
+    req<ChannelKeyStatus[]>(`/channels/${id}/keys/reset`, { method: 'POST', body: JSON.stringify({ fingerprint }) }),
 
   // ── 分发与令牌 ──
   listKeys: (signal?: AbortSignal) => req<ApiKeyView[]>('/keys', { signal }),
