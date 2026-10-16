@@ -3,11 +3,13 @@ import type { ReactNode } from 'react'
 import { api } from '../api'
 import { navigate } from '../router'
 import { useSession, useUser } from '../session'
-import { localDay, num, perMillion, money } from '../lib/format'
-import type { ModelPrice, UsageDay } from '../types'
+import { localDay, num, money } from '../lib/format'
+import { useNoticeCenter } from '../lib/notices'
+import type { UsageDay } from '../types'
 import { PageLayout } from '../components/Layout'
+import { AnnouncementList } from '../components/NoticeCenter'
 import { Button, Card, CardHeader, CopyButton, Empty, IconBadge, Skeleton } from '../components/ui'
-import { IconActivity, IconChartColumn, IconChevronRight, IconGlobe, IconSparkles, IconWallet, IconZap } from '../components/Icons'
+import { IconActivity, IconChartColumn, IconChevronRight, IconGlobe, IconMegaphone, IconSparkles, IconWallet, IconZap } from '../components/Icons'
 import { CheckinCard } from './CheckinCard'
 
 /** 最近 days 天（含今天），没有用量的日期补 0 */
@@ -106,7 +108,7 @@ function SummaryCard({ usage }: { usage: UsageDay[] | null }) {
   )
 }
 
-function AccessCard({ models }: { models: ModelPrice[] | null }) {
+function AccessCard() {
   const { status } = useSession()
   const base = status.base_url.replace(/\/+$/, '')
   const endpoints = [
@@ -126,33 +128,29 @@ function AccessCard({ models }: { models: ModelPrice[] | null }) {
             </div>
           </div>
         ))}
-        <div className="pt-model-head">
-          <span>可用模型</span>
-          <span className="muted">价格为每百万 Token</span>
-        </div>
-        {models == null ? (
-          <Skeleton height={120} />
-        ) : models.length === 0 ? (
-          <Empty title="暂无可用模型" desc="管理员还没有开放模型，请稍后再来看看" />
+      </div>
+    </Card>
+  )
+}
+
+/** 最近 5 条公告，完整列表在顶栏通知中心 */
+function AnnouncementsCard() {
+  const { announcements, loading, openCenter } = useNoticeCenter()
+  return (
+    <Card>
+      <CardHeader
+        icon={<IconBadge tone="warning" size="md"><IconMegaphone /></IconBadge>}
+        title="最新公告"
+        desc="平台动态与重要通知"
+        extra={announcements.length > 0 && <Button variant="ghost" size="sm" onClick={() => openCenter('announcements')}>查看全部<IconChevronRight /></Button>}
+      />
+      <div className="pt-card-content">
+        {loading ? (
+          <div style={{ display: 'grid', gap: 8 }}>{[0, 1, 2].map(i => <Skeleton key={i} height={18} />)}</div>
+        ) : announcements.length ? (
+          <AnnouncementList items={announcements.slice(0, 5)} />
         ) : (
-          <div className="pt-table-wrap pt-model-table">
-            <table className="pt-table">
-              <thead>
-                <tr><th>模型</th><th className="num">输入</th><th className="num">输出</th><th className="num">缓存读取</th><th className="num">按次</th></tr>
-              </thead>
-              <tbody>
-                {models.map(m => (
-                  <tr key={m.model}>
-                    <td><span className="pt-model-name mono">{m.model}</span></td>
-                    <td className="num mono">{perMillion(m.input)}</td>
-                    <td className="num mono">{perMillion(m.output)}</td>
-                    <td className="num mono">{perMillion(m.cache_read)}</td>
-                    <td className="num mono">{m.per_request ? money(m.per_request) : '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Empty icon={<IconMegaphone size={20} />} title="暂无公告" />
         )}
       </div>
     </Card>
@@ -162,23 +160,31 @@ function AccessCard({ models }: { models: ModelPrice[] | null }) {
 export function DashboardPage() {
   const { status, refreshUser } = useSession()
   const [usage, setUsage] = useState<UsageDay[] | null>(null)
-  const [models, setModels] = useState<ModelPrice[] | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
     void refreshUser()
     api.usage(7, controller.signal).then(setUsage, () => setUsage([]))
-    api.models(controller.signal).then(setModels, () => setModels([]))
     return () => controller.abort()
   }, [refreshUser])
 
   return (
     <PageLayout title="概览" desc="账户余额、用量与接入信息">
       <SummaryCard usage={usage} />
-      <div className={`pt-dash-grid${status.checkin_enabled ? '' : ' is-single'}`}>
-        <AccessCard models={models} />
-        {status.checkin_enabled && <CheckinCard />}
-      </div>
+      {status.checkin_enabled ? (
+        <div className="pt-dash-grid">
+          <div className="pt-dash-col">
+            <AccessCard />
+            <AnnouncementsCard />
+          </div>
+          <CheckinCard />
+        </div>
+      ) : (
+        <div className="pt-dash-grid is-pair">
+          <AccessCard />
+          <AnnouncementsCard />
+        </div>
+      )}
     </PageLayout>
   )
 }

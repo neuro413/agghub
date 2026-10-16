@@ -214,6 +214,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
       {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
       {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}
+      {detail.group_name && <span className="ah-mini ah-muted ah-truncate">分组：{detail.group_name}</span>}
       {detail.client_ip && <span className="ah-mini ah-muted ah-num">IP：{detail.client_ip}</span>}
       {detail.quota_points != null && <span className="ah-mini ah-muted ah-num">{money(detail.quota_points)}</span>}
       <span className="ah-mini ah-muted ah-num" title="输入 + 输出（缓存读取 + 缓存写入）；输入已含缓存读写部分">

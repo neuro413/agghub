@@ -6,7 +6,7 @@ import type { Adaptor, UpstreamRequest } from '../adapters'
 import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
-import { candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
+import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
 import { LocalRequestError, UpstreamError, errorKind, extractUpstreamMessage, parseAutoBanCodes, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
@@ -16,7 +16,7 @@ import * as oaiConv from '../convert/openai'
 import * as anthConv from '../convert/anthropic'
 import * as respConv from '../convert/responses'
 import { cacheParts, emptyUsage } from '../convert/usage'
-import type { Caller, Channel, EntryFormat, IRUsage, Settings } from '../types'
+import type { Caller, Channel, ChannelGroup, EntryFormat, IRUsage, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
 import { applySingleRole } from './singleRole'
 import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinkingTransform, splitIRResponse } from './pseudoThinking'
@@ -140,7 +140,7 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   const source = state.passthrough ? ctx.rawBody : ctx.ir
   // 每次尝试独立复制；预处理与图片下载均不能回写原始请求或其他候选的输入。
   const body = structuredClone(source)
-  const preprocess = settings.strip_top_p || settings.drop_thinking || settings.drop_redacted_thinking || settings.preprocess_rules.length || settings.tool_filter_rules.length || state.pseudo
+  const preprocess = settings.drop_thinking || settings.drop_redacted_thinking || settings.preprocess_rules.length || settings.tool_filter_rules.length || state.pseudo
   if (state.pseudo) state.thinkingInject = applyPseudoThinkingRequest(body, settings, thinkingStore.lookup)
   if (preprocess) applyPreprocess(body, meta, settings)
   const images = !state.passthrough && upstreamWire === 'gemini'
@@ -183,6 +183,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   let attemptMs: number | null = null
   let rawJson: string | undefined
   let headersJson: string | undefined
+  // 候选渠道 → 计费分组；owner 调用为空
+  let groupOf = new Map<number, ChannelGroup>()
   const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
   const record = (outcome: Outcome, intermediate: boolean, points: number | null = null): void => {
@@ -203,7 +205,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         response_body: last?.response.text(), upstream_response_body: last?.upstream.text(),
         response_body_truncated: last?.response.truncated, upstream_response_body_truncated: last?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
-        user_id: caller.user?.id ?? null,
+        user_id: caller.user?.id ?? null, group_name: (last && groupOf.get(last.channel.id)?.name) ?? null,
       }
     }, settings, requestId)
   }
@@ -214,6 +216,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     if (caller.key && !findRatio(settings.model_ratios, model)) throw new LocalRequestError('该模型未配置倍率', 403)
     const modelCandidates = candidatesForModel(model, caller)
     if (!modelCandidates.length) throw new LocalRequestError(`没有可用渠道支持模型 ${model}`, 503)
+    groupOf = candidateGroups(caller, modelCandidates, model)
     const blocker = ctx.entryFormat === 'responses' ? respConv.conversionBlocker(ctx.rawBody) : null
     const descriptions = new Map(modelCandidates.map(channel => {
       const adaptor = getAdaptor(channel.type)
@@ -300,6 +303,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     const points = settleRequest({
       caller, model: typeof model === 'string' ? model : null, ratios: settings.model_ratios, usage: final.usage,
       meter: last?.meter ?? null, estimatePrompt: () => estimateIRPrompt(ctx.ir), success: final.status === 'success',
+      groupRatio: (last && groupOf.get(last.channel.id)?.ratio) ?? 1,
     })
     record(final, false, points)
     lifecycle.dispose()

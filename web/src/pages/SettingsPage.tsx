@@ -16,7 +16,7 @@ const KEYS: (keyof Settings)[] = [
   'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
   'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
-  'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys', 'portal_groups',
+  'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
   'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
   'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
 ]
@@ -44,7 +44,6 @@ function readAsDataUrl(file: File): Promise<string> {
 export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
   const [system, setSystem] = useState<SystemInfo | null>(null)
-  const [groups, setGroups] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const iconFile = useRef<HTMLInputElement>(null)
@@ -60,7 +59,6 @@ export function SettingsPage() {
       setS(value)
     }).catch(e => { if (!controller.signal.aborted) toast('err', e.message) })
     api.getSystem(controller.signal).then(value => { if (!controller.signal.aborted) setSystem(value) }).catch(() => {})
-    api.listGroups(controller.signal).then(value => { if (!controller.signal.aborted) setGroups(value) }).catch(() => {})
     return () => controller.abort()
   }, [toast])
 
@@ -210,9 +208,6 @@ export function SettingsPage() {
         </SettingRow>
         <SettingRow label="同 IP 每日注册上限" desc="按服务器日期计，0 = 不限">
           {intInput('portal_register_ip_daily', '同 IP 每日注册上限')}
-        </SettingRow>
-        <SettingRow label="可用分组" desc={`门户用户只能使用这些分组的渠道，逗号分隔；现有分组：${groups.join('、') || '—'}`}>
-          <GroupsInput value={s.portal_groups} onChange={(v) => set('portal_groups', v)} />
         </SettingRow>
         <SettingRow label="每用户 Key 上限" desc="每个用户最多可以创建的 Key 数">
           {intInput('portal_max_keys', '每用户 Key 上限')}
@@ -380,21 +375,6 @@ function SettingRow({ label, desc, children }: { label: string; desc?: string; c
       </div>
       <div className="ah-set-row-control">{children}</div>
     </div>
-  )
-}
-
-/** 逗号分隔的分组输入；保留用户正在输入的原文，只把解析结果交给上层 */
-function GroupsInput({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
-  const [text, setText] = useState(value.join(', '))
-  return (
-    <Input
-      value={text}
-      onChange={(e) => {
-        setText(e.target.value)
-        onChange([...new Set(e.target.value.split(/[,，]/).map(g => g.trim()).filter(Boolean))])
-      }}
-      placeholder="public"
-    />
   )
 }
 

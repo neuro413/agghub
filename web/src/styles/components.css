@@ -106,6 +106,21 @@
 .ah-tab svg {
   opacity: 0.9;
 }
+.ah-tab span {
+  white-space: nowrap;
+}
+/* 九个 tab：中等宽度收紧间距，再窄只留图标 */
+@media (max-width: 1120px) {
+  .ah-tab {
+    gap: 5px;
+    padding: 9px 11px;
+  }
+}
+@media (max-width: 960px) {
+  .ah-tab span {
+    display: none;
+  }
+}
 
 /* ── 卡片 ── */
 .ah-card {
@@ -798,4 +813,25 @@
   background: var(--orange-100);
   color: var(--orange-400);
   cursor: default;
+}
+/* 模型专属名：原名 → 专属名 */
+.ah-alias-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+.ah-alias-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ah-alias-row > .ah-select-wrap,
+.ah-alias-row > .ah-input {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ah-alias-arrow {
+  flex: none;
+  color: var(--ink-faint);
 }

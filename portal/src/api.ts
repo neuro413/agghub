@@ -1,4 +1,4 @@
-import type { CheckinInfo, LogPage, ModelPrice, PortalKey, PortalStatus, Self, UsageDay } from './types'
+import type { CheckinInfo, LogPage, Notices, PortalGroup, PortalKey, PortalStatus, PricingData, Self, UsageDay } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -40,12 +40,16 @@ export const api = {
   self: (signal?: AbortSignal) => request<Self>('/self', 'GET', undefined, signal),
   changePassword: (old_password: string, new_password: string) => request<null>('/password', 'POST', { old_password, new_password }),
   usage: (days: number, signal?: AbortSignal) => request<UsageDay[]>(`/usage?days=${days}`, 'GET', undefined, signal),
-  models: (signal?: AbortSignal) => request<ModelPrice[]>('/models', 'GET', undefined, signal),
+  groups: (signal?: AbortSignal) => request<PortalGroup[]>('/groups', 'GET', undefined, signal),
+  /** 可用分组与模型基础价格 */
+  pricing: (signal?: AbortSignal) => request<PricingData>('/pricing', 'GET', undefined, signal),
+  notices: (signal?: AbortSignal) => request<Notices>('/notices', 'GET', undefined, signal),
 
   keys: (signal?: AbortSignal) => request<PortalKey[]>('/keys', 'GET', undefined, signal),
-  createKey: (name: string, expires_at: number | null) => request<PortalKey>('/keys', 'POST', { name, expires_at }),
+  createKey: (name: string, group: string, expires_at: number | null) => request<PortalKey>('/keys', 'POST', { name, group, expires_at }),
   fullKey: (id: number) => request<{ key: string }>(`/keys/${id}/key`, 'POST'),
   setKeyEnabled: (id: number, enabled: boolean) => request<PortalKey>(`/keys/${id}`, 'PUT', { enabled }),
+  setKeyGroup: (id: number, group: string) => request<PortalKey>(`/keys/${id}`, 'PUT', { group }),
   deleteKey: (id: number) => request<null>(`/keys/${id}`, 'DELETE'),
 
   logs: (query: { page: number; size: number; key_id?: number; model?: string }, signal?: AbortSignal) => {

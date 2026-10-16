@@ -284,6 +284,11 @@ export function LogsPage() {
                       {keyLabel(l)}
                     </span>
                   )}
+                  {l.group_name && (
+                    <span className="ah-tag" style={{ marginLeft: 6 }} title="计费分组">
+                      {l.group_name}
+                    </span>
+                  )}
                   {l.quota_points != null && (
                     <span className="ah-mini ah-faint ah-num" style={{ marginLeft: 6 }}>
                       {money(l.quota_points)}

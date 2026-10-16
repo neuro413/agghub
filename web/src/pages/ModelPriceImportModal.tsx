@@ -5,6 +5,7 @@ import { Input, MoneyInput } from '../components/Form'
 import { IconRefresh, IconSearch } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
+import { channelModelNames } from '../lib/channelModels'
 import { PRICE_FIELDS, findRow, openRouterMatcher, openRouterPrices, pickPrices, validPrice } from './modelPricing'
 import type { PriceField, PriceRow, Prices } from './modelPricing'
 
@@ -62,10 +63,7 @@ export function ModelPriceImportModal({
     api.listChannels(controller.signal).then(
       (channels) => {
         const models = new Set<string>()
-        for (const c of channels) {
-          c.models.forEach((m) => models.add(m))
-          if (c.model_mapping) Object.keys(c.model_mapping).forEach((m) => models.add(m))
-        }
+        for (const c of channels) channelModelNames(c).forEach((m) => models.add(m))
         setCands([...models].sort().map((m) => candidateOf(rows, m)))
       },
       (e: any) => {

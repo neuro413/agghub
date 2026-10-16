@@ -45,6 +45,8 @@ export interface LogEntry {
   quota_points?: number | null
   /** 门户用户 id */
   user_id?: number | null
+  /** 计费所用分组 */
+  group_name?: string | null
 }
 
 const insertStmt = db.prepare(
@@ -54,14 +56,14 @@ const insertStmt = db.prepare(
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
-    source, key_id, key_name, client_ip, quota_points, user_id)
+    source, key_id, key_name, client_ip, quota_points, user_id, group_name)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
-    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id)`,
+    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name)`,
 )
 
 const opt = (s: string | null | undefined, put: (t: string) => number): number | null => (s == null ? null : put(s))
@@ -110,6 +112,7 @@ export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings
     client_ip: e.client_ip || null,
     quota_points: e.quota_points ?? null,
     user_id: e.user_id ?? null,
+    group_name: e.group_name ?? null,
     request_headers_ref: storeReq ? opt(sanitizeHeaders(e.request_headers), putBlob) : null,
     request_body_ref: storeReq ? opt(e.request_body, putJson) : null,
     preprocessed_body_ref: storeReq ? opt(e.preprocessed_body, putJson) : null,

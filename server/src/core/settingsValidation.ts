@@ -77,8 +77,6 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   for (const key of booleans) check(typeof merged[key] === 'boolean', key, '须为布尔值')
   for (const key of ['drop_thinking_channel_ids', 'pseudo_thinking_channel_ids']) check(ids(merged[key]), key, '须为正整数渠道 ID 数组')
   for (const key of ['drop_thinking_models', 'pseudo_thinking_models']) check(strings(merged[key]), key, '须为非空字符串数组')
-  check(Array.isArray(merged.portal_groups) && merged.portal_groups.length > 0 && merged.portal_groups.every((g: any) => typeof g === 'string' && g.trim() === g && g.length >= 1 && g.length <= 32 && !g.includes(',')),
-    'portal_groups', '至少一个分组，分组名须为 1～32 字符、不含逗号和首尾空白')
   if (Number.isSafeInteger(merged.checkin_min_points) && Number.isSafeInteger(merged.checkin_max_points)) {
     check(merged.checkin_min_points <= merged.checkin_max_points, 'checkin_min_points', '最小奖励不能大于最大奖励')
   }
@@ -86,6 +84,7 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   check(text(merged.portal_brand_name, 64), 'portal_brand_name', '须为 1～64 字符的非空文本')
   check(text(merged.portal_site_title, 128), 'portal_site_title', '须为 1～128 字符的非空文本')
   check(brandIcon(merged.portal_brand_icon), 'portal_brand_icon', '须为图片链接或不超过 16 字符的 emoji / 文字')
+  check(typeof merged.portal_notice === 'string' && merged.portal_notice.length <= 20_000, 'portal_notice', '须为不超过 20000 字符的字符串')
   check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')
   try { validateThinkingTags(merged.pseudo_thinking_open_tag, merged.pseudo_thinking_close_tag) } catch (error) {

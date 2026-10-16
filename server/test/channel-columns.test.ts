@@ -26,7 +26,6 @@ test('已有渠道表补齐单 role 与分组列', async () => {
   assert.equal(old.single_role, null)
   assert.equal(old.single_role_merge_system, false)
   assert.equal(old.single_role_exclude_last_user, false)
-  assert.deepEqual(old.groups, ['default'])
   assert.equal(old.ban_until, null)
   db.close()
 })

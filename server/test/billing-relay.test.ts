@@ -3,6 +3,7 @@ import test, { after, afterEach, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { db } from '../src/db'
 import { handleRelay } from '../src/core/relay'
+import { createGroup } from '../src/core/groups'
 import { localDay } from '../src/core/billing'
 import { FakeResponse, channel, jsonResponse, logs, oaiBody, reset } from './helpers/relay'
 import type { ApiKey, ApiKeyRow, Caller } from '../src/types'
@@ -10,7 +11,7 @@ import type { ApiKey, ApiKeyRow, Caller } from '../src/types'
 const originalFetch = globalThis.fetch
 beforeEach(() => {
   reset()
-  db.exec('DELETE FROM api_keys; DELETE FROM usage_daily')
+  db.exec('DELETE FROM api_keys; DELETE FROM usage_daily; DELETE FROM channel_groups')
 })
 afterEach(() => { globalThis.fetch = originalFetch })
 after(() => db.close())
@@ -38,7 +39,8 @@ function getUsage(keyId: number) {
 
 test('Key 调用成功：点数写入日志、扣减额度并记入 usage_daily', async () => {
   const key = insertKey()
-  channel('openai')
+  const channelId = channel('openai')
+  createGroup({ name: 'default', channel_ids: [channelId], models: ['alias'] })
   globalThis.fetch = (async () => jsonResponse(oaiBody)) as typeof fetch
   const rawBody = { model: 'alias', stream: false, messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 }
   const res = new FakeResponse()
@@ -61,7 +63,8 @@ test('Key 调用成功：点数写入日志、扣减额度并记入 usage_daily'
 
 test('Key 白名单不允许的模型：返回 503，不增加点数（requests 仍 +1）', async () => {
   const key = insertKey(['other-model'])
-  channel('openai')
+  const channelId = channel('openai')
+  createGroup({ name: 'default', channel_ids: [channelId], models: ['alias'] })
   let calls = 0
   globalThis.fetch = (async () => { calls++; return jsonResponse(oaiBody) }) as typeof fetch
   const rawBody = { model: 'alias', stream: false, messages: [{ role: 'user', content: 'hi' }], max_tokens: 100 }

@@ -8,7 +8,7 @@ import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { copyText } from '../lib/clipboard'
 import { amountText, toPoints } from '../lib/money'
-import type { ApiKeyInput, ApiKeyView } from '../types'
+import type { ApiKeyInput, ApiKeyView, ChannelGroupView } from '../types'
 import { MultiChips } from './preprocessShared'
 
 interface FormState {
@@ -32,12 +32,12 @@ function toLocalInput(ts: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-function initForm(k: ApiKeyView | null, groups: string[]): FormState {
+function initForm(k: ApiKeyView | null, groups: ChannelGroupView[]): FormState {
   if (!k)
     return {
       name: '',
       enabled: true,
-      groups: groups.includes('public') ? ['public'] : [],
+      groups: groups.length ? [groups[0].name] : [],
       models: '',
       rpm: '',
       concurrency: '',
@@ -72,7 +72,7 @@ export function KeyModal({
   onSaved,
 }: {
   keyItem: ApiKeyView | null
-  groups: string[]
+  groups: ChannelGroupView[]
   onClose: () => void
   onSaved: () => void
 }) {
@@ -148,7 +148,7 @@ export function KeyModal({
     }
   }
 
-  const groupOptions = groups.map((g) => ({ value: g, label: g }))
+  const groupOptions = groups.map((g) => ({ value: g.name, label: g.ratio === 1 ? g.name : `${g.name} ×${g.ratio}` }))
 
   return (
     <Modal
@@ -188,8 +188,8 @@ export function KeyModal({
         </div>
       </Field>
 
-      <Field label="可用分组" required hint="Key 只能使用这些分组里的渠道。分组在渠道编辑里设置">
-        <MultiChips options={groupOptions} selected={f.groups} onChange={(v) => set('groups', v)} empty="暂无分组（请先在渠道里配置分组）" />
+      <Field label="可用分组" required hint="Key 只能调用这些分组允许的渠道和模型；多个分组同时命中时按倍率最低的计费。分组在「分组」页管理">
+        <MultiChips options={groupOptions} selected={f.groups} onChange={(v) => set('groups', v)} empty="暂无分组（请先在「分组」页创建）" />
       </Field>
 
       <Field label="模型白名单" hint="每行一个或逗号分隔，支持 * 通配符；留空 = 不限">

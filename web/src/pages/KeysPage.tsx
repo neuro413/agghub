@@ -9,7 +9,7 @@ import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
 import { fmtTime } from '../lib/format'
 import { currencySymbol, money, toPoints } from '../lib/money'
-import type { ApiKeyView, ModelRatio, SystemInfo } from '../types'
+import type { ApiKeyView, ChannelGroupView, ModelRatio, SystemInfo } from '../types'
 import { KeyModal } from './KeyModal'
 import { ModelRatioCard } from './ModelRatioCard'
 
@@ -27,7 +27,7 @@ function pct(used: number, total: number | null): number {
 export function KeysPage() {
   const toast = useToast()
   const [keys, setKeys] = useState<ApiKeyView[]>([])
-  const [groups, setGroups] = useState<string[]>([])
+  const [groups, setGroups] = useState<ChannelGroupView[]>([])
   const [ratios, setRatios] = useState<ModelRatio[]>([])
   const [publicBaseUrl, setPublicBaseUrl] = useState('')
   const [system, setSystem] = useState<SystemInfo | null>(null)

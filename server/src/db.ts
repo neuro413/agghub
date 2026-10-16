@@ -1,7 +1,9 @@
 import Database from 'better-sqlite3'
+import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
-import type { Channel, ChannelRow, ChannelStatus, Settings } from './types'
+import { channelModelNames } from './core/channelModels'
+import type { Channel, ChannelRow, ChannelStatus, ParamRule, Settings } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
@@ -13,6 +15,9 @@ db.pragma('busy_timeout = 5000')
 // checkpoint 后把 WAL 文件截回 4MB 以内，避免一次大事务后长期占着磁盘
 db.pragma('journal_size_limit = 4194304')
 
+// 分组表出现之前，分组是渠道上的字符串数组；首次建表时迁移（见文件末尾）
+const hadGroupTable = !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'channel_groups'").get()
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS channels (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -22,6 +27,7 @@ CREATE TABLE IF NOT EXISTS channels (
   api_key       TEXT    NOT NULL DEFAULT '',
   models        TEXT    NOT NULL DEFAULT '[]',
   model_mapping TEXT,
+  model_alias   TEXT,
   priority      INTEGER NOT NULL DEFAULT 0,
   weight        INTEGER NOT NULL DEFAULT 1,
   status        INTEGER NOT NULL DEFAULT 1,
@@ -85,7 +91,8 @@ CREATE TABLE IF NOT EXISTS users (
   register_ip   TEXT,
   created_at    INTEGER NOT NULL,
   last_login_at INTEGER,
-  last_login_ip TEXT
+  last_login_ip TEXT,
+  groups        TEXT    NOT NULL DEFAULT '[]'
 );
 CREATE INDEX IF NOT EXISTS idx_users_register ON users(register_ip, created_at);
 
@@ -108,6 +115,19 @@ CREATE TABLE IF NOT EXISTS user_checkins (
   PRIMARY KEY (user_id, day)
 );
 
+-- 分组：channel_ids / models 为 JSON 数组；Key 与用户按 name 引用
+CREATE TABLE IF NOT EXISTS channel_groups (
+  name        TEXT    PRIMARY KEY,
+  description TEXT    NOT NULL DEFAULT '',
+  ratio       REAL    NOT NULL DEFAULT 1,
+  is_public   INTEGER NOT NULL DEFAULT 0,
+  channel_ids TEXT    NOT NULL DEFAULT '[]',
+  models      TEXT    NOT NULL DEFAULT '[]',
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -118,6 +138,17 @@ CREATE TABLE IF NOT EXISTS site_assets (
   name       TEXT PRIMARY KEY,
   mime       TEXT    NOT NULL,
   data       BLOB    NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- 门户公告：content 为 Markdown；publish_at 晚于当前时间的为定时发布
+CREATE TABLE IF NOT EXISTS announcements (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  content    TEXT    NOT NULL,
+  extra      TEXT    NOT NULL DEFAULT '',
+  type       TEXT    NOT NULL DEFAULT 'default',
+  publish_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
 
@@ -182,6 +213,7 @@ addMissingColumns('channels', [
   ['ban_until', 'INTEGER'],
   ['base_url_full', 'INTEGER NOT NULL DEFAULT 0'],
   ['models_url', 'TEXT'],
+  ['model_alias', 'TEXT'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -190,7 +222,9 @@ addMissingColumns('request_logs', [
   ['client_ip', 'TEXT'],
   ['quota_points', 'INTEGER'],
   ['user_id', 'INTEGER'],
+  ['group_name', 'TEXT'],
 ])
+addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`]])
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_user ON request_logs(user_id, created_at)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)')
@@ -214,6 +248,22 @@ function decodeSetting(raw: string, fallback: unknown): unknown {
   db.transaction(() => {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) ins.run(k, encodeSetting(v))
   })()
+}
+
+// 「去除 top_p」开关已并入参数修改：开启过的库迁移为一条删除 top_p 的参数规则
+{
+  const legacy = db.prepare("SELECT value FROM settings WHERE key = 'strip_top_p'").pluck().get()
+  if (legacy !== undefined) {
+    db.transaction(() => {
+      if (legacy === '1') {
+        const raw = db.prepare("SELECT value FROM settings WHERE key = 'param_rules'").pluck().get() as string
+        const rules = decodeSetting(raw, []) as ParamRule[]
+        rules.push({ id: randomUUID(), enabled: true, name: '去除 top_p', ops: [{ type: 'delete', key: 'top_p' }] })
+        db.prepare("UPDATE settings SET value = ? WHERE key = 'param_rules'").run(encodeSetting(rules))
+      }
+      db.prepare("DELETE FROM settings WHERE key = 'strip_top_p'").run()
+    })()
+  }
 }
 
 // ── settings 读写 ───────────────────────────────────────
@@ -264,6 +314,7 @@ export function rowToChannel(r: ChannelRow): Channel {
     api_key: r.api_key,
     models: safeArray(r.models),
     model_mapping: safeObject(r.model_mapping),
+    model_alias: safeObject(r.model_alias),
     priority: r.priority,
     weight: r.weight,
     status: r.status as ChannelStatus,
@@ -275,7 +326,6 @@ export function rowToChannel(r: ChannelRow): Channel {
     single_role: r.single_role === 'user' || r.single_role === 'system' ? r.single_role : null,
     single_role_merge_system: !!r.single_role_merge_system,
     single_role_exclude_last_user: !!r.single_role_exclude_last_user,
-    groups: safeArray(r.groups),
     ban_until: r.ban_until ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
@@ -303,4 +353,33 @@ export function getChannelById(id: number): Channel | null {
 /** 设置渠道状态（用于熔断/手动启停）*/
 export function setChannelStatus(id: number, status: ChannelStatus): void {
   db.prepare('UPDATE channels SET status = ?, updated_at = ? WHERE id = ?').run(status, Date.now(), id)
+}
+
+// 渠道分组迁移为分组表：每个出现过的分组名建一条，渠道为原来属于它的渠道，模型取这些渠道当前对外的全部模型，
+// 原「门户可用分组」设为公开；门户用户的 Key 原来不存分组，设为第一个公开分组。迁移后权限与之前一致。
+if (!hadGroupTable) {
+  db.transaction(() => {
+    const channels = allChannels()
+    const channelGroups = new Map(
+      (db.prepare('SELECT id, groups FROM channels').all() as { id: number; groups: string }[]).map(r => [r.id, safeArray(r.groups)]),
+    )
+    const portalRaw = db.prepare("SELECT value FROM settings WHERE key = 'portal_groups'").pluck().get() as string | undefined
+    const portalGroups = portalRaw === undefined ? [] : safeArray(portalRaw)
+    const keyGroups = (db.prepare('SELECT groups FROM api_keys').pluck().all() as string[]).flatMap(safeArray)
+    const names = [...new Set([...channels.flatMap(c => channelGroups.get(c.id) ?? []), ...keyGroups, ...portalGroups])]
+      .filter(name => name && name.length <= 32 && !name.includes(','))
+    const insert = db.prepare(
+      `INSERT INTO channel_groups (name, description, ratio, is_public, channel_ids, models, sort, created_at, updated_at)
+       VALUES (?, '', 1, ?, ?, ?, ?, ?, ?)`,
+    )
+    const now = Date.now()
+    names.forEach((name, index) => {
+      const members = channels.filter(c => channelGroups.get(c.id)?.includes(name))
+      const models = [...new Set(members.flatMap(channelModelNames))]
+      insert.run(name, portalGroups.includes(name) ? 1 : 0, JSON.stringify(members.map(c => c.id)), JSON.stringify(models), index, now, now)
+    })
+    const firstPublic = portalGroups.find(name => names.includes(name))
+    if (firstPublic) db.prepare("UPDATE api_keys SET groups = ? WHERE user_id IS NOT NULL AND groups = '[]'").run(JSON.stringify([firstPublic]))
+    db.prepare("DELETE FROM settings WHERE key = 'portal_groups'").run()
+  })()
 }

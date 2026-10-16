@@ -18,11 +18,12 @@ export function money(points: number | null | undefined): string {
   return `${value < 0 ? '-' : ''}${symbol}${text}`
 }
 
-/** 每 Token 倍率 → 每百万 Token 的价格 */
-export function perMillion(ratio: number): string {
-  const value = (ratio * 1_000_000) / pointsPerUnit
+/** 每 Token 倍率 → 每 tokens 个 Token 的价格（默认每百万）；小于 1 时保留 4 位有效数字 */
+export function tokenPrice(ratio: number, tokens = 1_000_000): string {
+  const value = (ratio * tokens) / pointsPerUnit
   if (value === 0) return '免费'
-  return `${symbol}${value >= 100 ? value.toFixed(0) : value >= 1 ? value.toFixed(2) : value.toFixed(4)}`
+  const text = value >= 100 ? value.toFixed(0) : value >= 1 ? value.toFixed(2) : value.toLocaleString('en-US', { maximumSignificantDigits: 4 })
+  return `${symbol}${text}`
 }
 
 export function num(value: number | null | undefined): string {

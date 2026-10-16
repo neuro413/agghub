@@ -1,9 +1,10 @@
 import { Router } from 'express'
 import type { Request, RequestHandler, Response } from 'express'
 import { keyView, listUserKeys } from '../core/keys'
+import { listGroups } from '../core/groups'
 import { deleteUserSessions } from '../core/sessions'
 import {
-  adjustUserQuota, deleteUser, getUserView, hashPassword, listUsers, passwordError, setUserPassword, setUserStatus,
+  adjustUserQuota, deleteUser, getUserView, hashPassword, listUsers, passwordError, setUserGroups, setUserPassword, setUserStatus,
   USER_DISABLED, USER_ENABLED,
 } from '../core/users'
 
@@ -29,6 +30,17 @@ usersRouter.put('/:id', (req, res) => {
   if (status !== USER_ENABLED && status !== USER_DISABLED) return res.status(400).json({ error: 'status 须为 1（启用）或 2（停用）' })
   if (!id || !setUserStatus(id, status)) return res.status(404).json({ error: 'not found' })
   if (status === USER_DISABLED) deleteUserSessions(id)
+  res.json(getUserView(id))
+})
+
+usersRouter.put('/:id/groups', (req, res) => {
+  const id = validId(req.params.id)
+  const groups = req.body?.groups
+  if (!Array.isArray(groups) || !groups.every(g => typeof g === 'string')) return res.status(400).json({ error: 'groups 须为分组名数组' })
+  const names = new Set(listGroups().map(g => g.name))
+  const missing = groups.filter(g => !names.has(g))
+  if (missing.length) return res.status(400).json({ error: `分组不存在：${missing.join('、')}` })
+  if (!id || !setUserGroups(id, [...new Set(groups as string[])])) return res.status(404).json({ error: 'not found' })
   res.json(getUserView(id))
 })
 

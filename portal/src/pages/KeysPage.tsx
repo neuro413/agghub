@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { api } from '../api'
 import { ago, dateTime, money } from '../lib/format'
-import type { KeyStatus, PortalKey } from '../types'
+import type { KeyStatus, PortalGroup, PortalKey } from '../types'
 import { PageLayout } from '../components/Layout'
+import { GroupPicker } from '../components/GroupPicker'
 import { ConfirmDialog, Dialog, Sheet } from '../components/Overlay'
 import { useToast } from '../components/Toast'
 import { Badge, Button, CopyButton, Empty, Field, IconBadge, Input, Skeleton } from '../components/ui'
-import { IconClock, IconEye, IconEyeOff, IconInfo, IconKeyRound, IconPlus, IconPower, IconPowerOff, IconRefresh, IconTrash } from '../components/Icons'
+import { IconClock, IconEye, IconEyeOff, IconInfo, IconKeyRound, IconLayers, IconPlus, IconPower, IconPowerOff, IconRefresh, IconTrash } from '../components/Icons'
 
 const STATUS: Record<KeyStatus, { tone: 'success' | 'neutral' | 'warning'; label: string }> = {
   enabled: { tone: 'success', label: '已启用' },
@@ -46,9 +47,12 @@ function KeyCell({ item }: { item: PortalKey }) {
   )
 }
 
-function CreateKeySheet({ onClose, onCreated }: { onClose: () => void; onCreated: (key: PortalKey) => void }) {
+function CreateKeySheet({ groups, onClose, onCreated }: { groups: PortalGroup[]; onClose: () => void; onCreated: (key: PortalKey) => void }) {
   const toast = useToast()
   const [name, setName] = useState('')
+  const [group, setGroup] = useState(groups[0]?.name ?? '')
+  // 分组列表晚于抽屉打开到达时补上默认选中
+  useEffect(() => { if (!group && groups.length) setGroup(groups[0].name) }, [group, groups])
   const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const [quick, setQuick] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -64,10 +68,11 @@ function CreateKeySheet({ onClose, onCreated }: { onClose: () => void; onCreated
     e?.preventDefault()
     const trimmed = name.trim()
     if (!trimmed || trimmed.length > 50) return setError('名称须为 1～50 个字符')
+    if (!group) return toast('error', '请选择令牌分组')
     if (expiresAt != null && expiresAt <= Date.now()) return setError('过期时间须晚于当前时间')
     setBusy(true)
     try {
-      onCreated(await api.createKey(trimmed, expiresAt))
+      onCreated(await api.createKey(trimmed, group, expiresAt))
     } catch (err) {
       toast('error', (err as Error).message)
     } finally {
@@ -83,7 +88,7 @@ function CreateKeySheet({ onClose, onCreated }: { onClose: () => void; onCreated
       footer={
         <>
           <Button variant="outline" onClick={onClose}>关闭</Button>
-          <Button onClick={() => submit()} loading={busy}>创建</Button>
+          <Button onClick={() => submit()} loading={busy} disabled={!groups.length}>创建</Button>
         </>
       }
     >
@@ -99,6 +104,18 @@ function CreateKeySheet({ onClose, onCreated }: { onClose: () => void; onCreated
           <Input id="key-name" value={name} onChange={e => { setName(e.target.value); setError('') }} placeholder="例如：SillyTavern" maxLength={50} autoFocus />
         </Field>
       </form>
+      <div className="pt-sheet-section">
+        <div className="pt-section-head">
+          <IconBadge size="md" tone="info"><IconLayers /></IconBadge>
+          <div>
+            <div className="pt-section-title">令牌分组</div>
+            <div className="pt-section-desc">分组决定可用的模型和计费倍率，创建后也可以修改</div>
+          </div>
+        </div>
+        <Field label="分组" htmlFor="key-group" hint={groups.length ? '扣费 = 模型价格 × 分组倍率' : '暂无可用分组，请联系管理员'}>
+          <GroupPicker id="key-group" groups={groups} value={group} onChange={setGroup} />
+        </Field>
+      </div>
       <div className="pt-sheet-section">
         <div className="pt-section-head">
           <IconBadge size="md" tone="warning"><IconClock /></IconBadge>
@@ -128,9 +145,46 @@ function CreateKeySheet({ onClose, onCreated }: { onClose: () => void; onCreated
   )
 }
 
+/** 修改令牌分组，保存后立即生效 */
+function GroupDialog({ item, groups, onClose, onSaved }: { item: PortalKey; groups: PortalGroup[]; onClose: () => void; onSaved: (key: PortalKey) => void }) {
+  const toast = useToast()
+  const [group, setGroup] = useState(item.group_available && item.group ? item.group : groups[0]?.name ?? '')
+  const [busy, setBusy] = useState(false)
+  const save = async () => {
+    if (!group) return toast('error', '请选择令牌分组')
+    setBusy(true)
+    try {
+      onSaved(await api.setKeyGroup(item.id, group))
+      toast('success', '分组已修改')
+    } catch (e) {
+      toast('error', (e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Dialog
+      title="修改令牌分组"
+      desc={`「${item.name}」切换分组后立即生效，令牌本身不变`}
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={save} loading={busy} disabled={!groups.length}>保存</Button>
+        </>
+      }
+    >
+      <GroupPicker groups={groups} value={group} onChange={setGroup} />
+    </Dialog>
+  )
+}
+
 export function KeysPage() {
   const toast = useToast()
   const [keys, setKeys] = useState<PortalKey[] | null>(null)
+  const [groups, setGroups] = useState<PortalGroup[]>([])
+  const [regrouping, setRegrouping] = useState<PortalKey | null>(null)
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<PortalKey | null>(null)
   const [deleting, setDeleting] = useState<PortalKey | null>(null)
@@ -138,8 +192,10 @@ export function KeysPage() {
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const list = await api.keys(signal)
-      if (!signal?.aborted) setKeys(list)
+      const [list, groupList] = await Promise.all([api.keys(signal), api.groups(signal)])
+      if (signal?.aborted) return
+      setKeys(list)
+      setGroups(groupList)
     } catch (e) {
       if (!signal?.aborted) toast('error', (e as Error).message)
     }
@@ -199,7 +255,7 @@ export function KeysPage() {
           <table className="pt-table">
             <thead>
               <tr>
-                <th>名称</th><th>状态</th><th>令牌</th><th className="num">已用额度</th><th>创建 / 最近使用</th><th>过期时间</th><th className="num">操作</th>
+                <th>名称</th><th>状态</th><th>分组</th><th>令牌</th><th className="num">已用额度</th><th>创建 / 最近使用</th><th>过期时间</th><th className="num">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -207,6 +263,11 @@ export function KeysPage() {
                 <tr key={k.id} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
                   <td style={{ fontWeight: 500 }}>{k.name}</td>
                   <td><Badge tone={STATUS[k.status].tone} dot>{STATUS[k.status].label}</Badge></td>
+                  <td>
+                    {k.group_available
+                      ? <span className="pt-chip"><IconLayers size={12} />{k.group}</span>
+                      : <Badge tone="warning" title="分组已删除或不再开放，令牌无法调用，请修改分组">{k.group ? `${k.group} 不可用` : '未选分组'}</Badge>}
+                  </td>
                   <td><KeyCell item={k} /></td>
                   <td className="num mono">{money(k.used_quota)}</td>
                   <td>
@@ -227,6 +288,7 @@ export function KeysPage() {
                           {k.status === 'disabled' ? <IconPower size={14} /> : <IconPowerOff size={14} />}
                         </Button>
                       )}
+                      <Button variant="ghost" size="icon-sm" onClick={() => setRegrouping(k)} title="修改分组" aria-label="修改分组"><IconLayers size={14} /></Button>
                       <Button variant="ghost" size="icon-sm" className="pt-btn-danger-text" onClick={() => setDeleting(k)} title="删除" aria-label="删除"><IconTrash size={14} /></Button>
                     </div>
                   </td>
@@ -239,6 +301,7 @@ export function KeysPage() {
 
       {creating && (
         <CreateKeySheet
+          groups={groups}
           onClose={() => setCreating(false)}
           onCreated={key => {
             setCreating(false)
@@ -262,6 +325,18 @@ export function KeysPage() {
           </div>
           <div className="pt-alert"><IconInfo size={14} />请妥善保管令牌，泄露后他人可以消耗你的余额；发现泄露请立即删除。</div>
         </Dialog>
+      )}
+
+      {regrouping && (
+        <GroupDialog
+          item={regrouping}
+          groups={groups}
+          onClose={() => setRegrouping(null)}
+          onSaved={updated => {
+            setKeys(list => list?.map(k => (k.id === updated.id ? updated : k)) ?? null)
+            setRegrouping(null)
+          }}
+        />
       )}
 
       {deleting && (
