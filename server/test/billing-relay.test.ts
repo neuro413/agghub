@@ -22,7 +22,7 @@ function insertKey(models: string[] = []): ApiKey {
     .run('分发Key', 'sk-agh-test1', '["default"]', JSON.stringify(models))
   const r = db.prepare('SELECT * FROM api_keys WHERE id = ?').get(Number(info.lastInsertRowid)) as ApiKeyRow
   return {
-    id: r.id, name: r.name, key: r.key, enabled: !!r.enabled,
+    id: r.id, name: r.name, key: r.key, enabled: !!r.enabled, admin_disabled: !!r.admin_disabled,
     groups: JSON.parse(r.groups) as string[], models: JSON.parse(r.models) as string[],
     rpm: r.rpm, concurrency: r.concurrency, quota_total: r.quota_total, quota_used: r.quota_used,
     quota_daily: r.quota_daily, log_bodies: r.log_bodies == null ? null : !!r.log_bodies,
@@ -46,7 +46,7 @@ test('Key 调用成功：点数写入日志、扣减额度并记入 usage_daily'
   const res = new FakeResponse()
   const caller: Caller = { surface: 'lan', source: 'lan_key', key, ip: '127.0.0.1' }
 
-  await handleRelay({ entryFormat: 'openai', ir: rawBody, stream: false, rawBody, rawHeaders: {}, res: res as any, caller })
+  await handleRelay({ entryFormat: 'openai', ir: rawBody, stream: false, rawBody, rawHeaders: {}, res: res as any, caller, admitted: true })
 
   assert.equal(res.statusCode, 200)
   const final = logs().find(row => row.is_retry === 0)!
@@ -71,7 +71,7 @@ test('Key 白名单不允许的模型：返回 503，不增加点数（requests 
   const res = new FakeResponse()
   const caller: Caller = { surface: 'lan', source: 'lan_key', key, ip: '127.0.0.1' }
 
-  await handleRelay({ entryFormat: 'openai', ir: rawBody, stream: false, rawBody, rawHeaders: {}, res: res as any, caller })
+  await handleRelay({ entryFormat: 'openai', ir: rawBody, stream: false, rawBody, rawHeaders: {}, res: res as any, caller, admitted: true })
 
   assert.equal(calls, 0)
   assert.equal(res.statusCode, 503)

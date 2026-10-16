@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
   name          TEXT    NOT NULL,
   key           TEXT    NOT NULL UNIQUE,
   enabled       INTEGER NOT NULL DEFAULT 1,
+  admin_disabled INTEGER NOT NULL DEFAULT 0,
   groups        TEXT    NOT NULL DEFAULT '[]',
   models        TEXT    NOT NULL DEFAULT '[]',
   rpm           INTEGER,
@@ -229,6 +230,8 @@ addMissingColumns('request_logs', [
   ['channel_key', 'TEXT'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`]])
+// 管理员停用的 Key 标记：与 enabled 分开，门户用户不能自行解锁
+addMissingColumns('api_keys', [['admin_disabled', 'INTEGER NOT NULL DEFAULT 0']])
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_user ON request_logs(user_id, created_at)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)')

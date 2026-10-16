@@ -27,6 +27,12 @@ import type { Surface } from './types'
 /** 只在这三个路径上做额度预检与限流 */
 const GENERATION_PATHS = ['/v1/chat/completions', '/v1/messages', '/v1/responses']
 
+/** 路径里出现重复斜杠时，准入与入口的路由匹配会不一致，直接拒绝 */
+const rejectDuplicatedSlash: RequestHandler = (req, res, next) => {
+  if (req.path.includes('//')) return sendEntryError(req, res, 404, 'not_found', 'not_found_error', 'not found')
+  next()
+}
+
 /** 三个对外入口 */
 function mountEntries(app: Express): void {
   app.use('/v1', openaiEntry)
@@ -45,6 +51,7 @@ const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 /** 组装内网 app：管理 API + WebUI + 可匿名的 /v1 */
 function createLanApp(): Express {
   const app = express()
+  app.use(rejectDuplicatedSlash)
   app.use(express.json({ limit: '50mb' }))
 
   app.get('/api/health', (_req, res) => {
@@ -102,6 +109,7 @@ function createPublicApp(): Express {
   const app = express()
   app.disable('x-powered-by')
   app.set('trust proxy', TRUST_PROXY)
+  app.use(rejectDuplicatedSlash)
 
   // 鉴权走请求头、不用 Cookie，开放来源是安全的，方便浏览器端客户端直接调用
   app.use('/v1', (req, res, next) => {

@@ -47,9 +47,28 @@ export class OutputMeter {
   get estimate(): number { return this.cjk + Math.ceil(this.other / 4) }
 }
 
-/** 估算 IR 请求的输入 Token（系统提示与全部消息文本） */
+/** 估算 IR 请求的输入 Token：全部消息文本、工具调用参数与工具定义（图片无法按文本估算，不计入） */
 export function estimateIRPrompt(ir: any): number {
-  return estimateTokens((ir?.messages || []).map((m: any) => contentToText(m?.content)).join(' '))
+  const parts: string[] = []
+  for (const m of ir?.messages || []) {
+    parts.push(contentToText(m?.content))
+    for (const call of Array.isArray(m?.tool_calls) ? m.tool_calls : []) {
+      parts.push(String(call?.function?.name || ''), typeof call?.function?.arguments === 'string' ? call.function.arguments : '')
+    }
+  }
+  if (Array.isArray(ir?.tools) && ir.tools.length) parts.push(JSON.stringify(ir.tools))
+  return estimateTokens(parts.join(' '))
+}
+
+/** 未声明输出上限时按此预扣，与 Anthropic 入口的 DEFAULT_MAX_TOKENS 一致 */
+const RESERVE_OUTPUT_FALLBACK = 4096
+
+/** 准入预扣点数：输入按估算，输出声明了上限就按上限算，否则按保守常量 */
+export function estimateReservePoints(ratio: ModelRatio, ir: any, groupRatio = 1): number {
+  const prompt = estimateIRPrompt(ir)
+  const declared = Number(ir?.max_tokens ?? ir?.max_completion_tokens)
+  const output = Number.isSafeInteger(declared) && declared > 0 ? declared : RESERVE_OUTPUT_FALLBACK
+  return computePoints(ratio, { prompt_tokens: prompt, completion_tokens: output, cache_read_tokens: 0, cache_write_tokens: 0 }, true, groupRatio)
 }
 
 /** Caller 对应的计费账户；owner 没有账户（只记录点数不扣费） */
@@ -152,6 +171,8 @@ export interface SettleInput {
   estimatePrompt: () => number
   /** 本次命中分组的倍率，缺省 1 */
   groupRatio?: number
+  /** 请求是否确实发往过上游；即使没有任何输出，上游也已按输入计费 */
+  reachedUpstream?: boolean
 }
 
 /**
@@ -160,7 +181,7 @@ export interface SettleInput {
  */
 export function settleRequest(input: SettleInput): number | null {
   try {
-    const { caller, model, ratios, usage, meter, success, estimatePrompt, groupRatio = 1 } = input
+    const { caller, model, ratios, usage, meter, success, estimatePrompt, groupRatio = 1, reachedUpstream = false } = input
     const account = accountOf(caller)
     const produced = !!meter?.produced
     let prompt = usage.prompt_tokens || 0
@@ -169,8 +190,8 @@ export function settleRequest(input: SettleInput): number | null {
     const cacheWrite = usage.prompt_tokens_details?.cache_write_tokens || 0
     // 失败（含客户端中断）或上游没报输出量时，用计量器估算的输出兜底
     if (produced && (!success || completion === 0)) completion = Math.max(completion, meter!.estimate)
-    // 产生了输出但上游没报输入量时估算输入
-    if (produced && prompt === 0) prompt = estimatePrompt()
+    // 产生了输出、或请求已发往上游，但上游没报输入量时估算输入（Key 调用才需要，owner 不记账）
+    if ((produced || (account && reachedUpstream)) && prompt === 0) prompt = estimatePrompt()
     const ratio = model ? findRatio(ratios, model) : null
     const points = ratio
       ? computePoints(ratio, { prompt_tokens: prompt, completion_tokens: completion, cache_read_tokens: cacheRead, cache_write_tokens: cacheWrite }, produced, groupRatio)

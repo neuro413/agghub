@@ -33,6 +33,7 @@ export function rowToApiKey(row: ApiKeyRow): ApiKey {
     name: row.name,
     key: row.key,
     enabled: !!row.enabled,
+    admin_disabled: !!row.admin_disabled,
     groups: safeArray(row.groups),
     models: safeArray(row.models),
     rpm: row.rpm ?? null,
@@ -125,6 +126,11 @@ export function validateKeyInput(input: unknown, partial: boolean): { ok: true; 
   if (input.enabled !== undefined) {
     if (typeof input.enabled !== 'boolean') return { ok: false, error: 'enabled 须为布尔值' }
     value.enabled = input.enabled
+  }
+
+  if (input.admin_disabled !== undefined) {
+    if (typeof input.admin_disabled !== 'boolean') return { ok: false, error: 'admin_disabled 须为布尔值' }
+    value.admin_disabled = input.admin_disabled
   }
 
   if (input.groups !== undefined) {
@@ -245,6 +251,7 @@ export function updateKey(id: number, input: ApiKeyInput): ApiKey | null {
   }
   if (input.name !== undefined) set('name', input.name)
   if (input.enabled !== undefined) set('enabled', input.enabled ? 1 : 0)
+  if (input.admin_disabled !== undefined) set('admin_disabled', input.admin_disabled ? 1 : 0)
   if (input.groups !== undefined) set('groups', JSON.stringify(input.groups))
   if (input.models !== undefined) set('models', JSON.stringify(input.models))
   if (input.rpm !== undefined) set('rpm', input.rpm)

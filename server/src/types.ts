@@ -107,6 +107,8 @@ export interface ApiKeyRow {
   name: string
   key: string
   enabled: number
+  /** 1 = 被管理员停用；门户用户不能自行恢复 */
+  admin_disabled: number
   groups: string
   models: string
   rpm: number | null
@@ -130,6 +132,8 @@ export interface ApiKey {
   /** 明文 Key：sk-agh- + 40 位 base62 */
   key: string
   enabled: boolean
+  /** 被管理员停用；管理员再启用时置回 false，门户用户只能停用不能启用 */
+  admin_disabled: boolean
   /** 分组名：管理员发的 Key 可多个（至少一个），门户用户的 Key 只有一个 */
   groups: string[]
   /** 模型白名单，支持 * 通配符；空 = 不限 */
@@ -556,6 +560,7 @@ export interface ApiKeyView extends ApiKey {
 export interface ApiKeyInput {
   name?: string
   enabled?: boolean
+  admin_disabled?: boolean
   groups?: string[]
   models?: string[]
   rpm?: number | null

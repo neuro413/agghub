@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { after, beforeEach } from 'node:test'
 import { db, setSettings } from '../src/db'
 import { createKey, generateKey, validateKeyInput } from '../src/core/keys'
-import { createAdmission, createCallerResolver, resetAuthFailures } from '../src/core/caller'
+import { createAdmission, createCallerResolver, limitKey, resetAuthFailures } from '../src/core/caller'
 import { createApp } from '../src/app'
 import type { ApiKeyInput, Caller } from '../src/types'
 
@@ -106,29 +106,57 @@ test('停用与过期的 Key 均返回 403', () => {
   assert.equal(expiredRes.body.error.type, 'key_expired')
 })
 
-test('公网同一 IP 连续失败 10 次后第 11 次即使带有效 Key 也 429', () => {
+test('公网同一 IP 连续失败 10 次后：无有效 Key 返回 429，带有效 Key 不受封禁影响', () => {
   const handler = createCallerResolver('public', () => '')
   for (let i = 0; i < 10; i++) {
     const res = fakeRes()
     assert.equal(run(handler, fakeReq(), res), false)
     assert.equal(res.statusCode, 401)
   }
-  const key = newKey()
   const blocked = fakeRes()
-  assert.equal(run(handler, fakeReq({ authorization: `Bearer ${key.key}` }), blocked), false)
+  assert.equal(run(handler, fakeReq({ authorization: 'Bearer sk-agh-wrong' }), blocked), false)
   assert.equal(blocked.statusCode, 429)
   assert.ok(Number(blocked.headers['Retry-After']) >= 1)
+
+  const key = newKey()
+  const valid = fakeRes()
+  assert.equal(run(handler, fakeReq({ authorization: `Bearer ${key.key}` }), valid), true)
+  assert.equal((valid.locals.caller as Caller).key?.id, key.id)
+})
+
+test('IPv6 按 /64 归并计数，同一 /64 内换地址也会被封禁', () => {
+  assert.equal(limitKey('2001:db8:1:2:aaaa::1'), limitKey('2001:0db8:0001:0002:ffff:ffff:ffff:ffff'))
+  assert.notEqual(limitKey('2001:db8:1:2::1'), limitKey('2001:db8:1:3::1'))
+  assert.equal(limitKey('::1'), '0000:0000:0000:0000::/64')
+  assert.equal(limitKey('203.0.113.9'), '203.0.113.9')
+  const handler = createCallerResolver('public', () => '')
+  const req = (n: number) => ({ ...fakeReq(), ip: `2001:db8:1:2::${n.toString(16)}` })
+  for (let i = 0; i < 10; i++) run(handler, req(i), fakeRes())
+  const blocked = fakeRes()
+  run(handler, req(999), blocked)
+  assert.equal(blocked.statusCode, 429)
+})
+
+test('管理员停用的 Key 返回 403', () => {
+  const key = newKey()
+  db.prepare('UPDATE api_keys SET admin_disabled = 1 WHERE id = ?').run(key.id)
+  const res = fakeRes()
+  assert.equal(run(createCallerResolver('public', () => ''), fakeReq({ authorization: `Bearer ${key.key}` }), res), false)
+  assert.equal(res.statusCode, 403)
+  assert.equal(res.body.error.type, 'key_disabled')
 })
 
 test('createAdmission：owner 与带 Key 均放行', () => {
   const ownerRes = fakeRes()
   ownerRes.locals.caller = { surface: 'lan', source: 'owner', key: null, ip: '' }
   assert.equal(run(createAdmission(), fakeReq(), ownerRes), true)
+  assert.equal(ownerRes.locals.admitted, true)
 
   const keyRes = fakeRes()
   const key = newKey()
   keyRes.locals.caller = { surface: 'public', source: 'public_key', key, ip: '1.2.3.4' }
   assert.equal(run(createAdmission(), fakeReq(), keyRes), true)
+  assert.equal(keyRes.locals.admitted, true)
 })
 
 test('validateKeyInput 与 generateKey', () => {

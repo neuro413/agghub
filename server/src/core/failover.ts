@@ -25,6 +25,11 @@ export class UpstreamError extends Error {
   }
 }
 
+/** 上游返回 2xx，但网关在解析/转换/校验阶段失败；上游通常已计费，不再重试也不换渠道 */
+export class UpstreamResponseError extends Error {
+  constructor(message: string, readonly status = 502) { super(message); this.name = 'UpstreamResponseError' }
+}
+
 /** 解析 Retry-After 头（秒数或 HTTP 日期）为毫秒；缺失或无法解析返回 undefined */
 export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
   const text = value?.trim()
@@ -54,7 +59,7 @@ export function isBudgetPoolExhausted(err: any): boolean {
 
 /** 是否为瞬时错误、值得在「本渠道」再试一次：网络/超时/5xx/429/402 额度池耗尽 → true；其余 4xx → false */
 export function shouldRetry(err: any): boolean {
-  if (err instanceof LocalRequestError || err instanceof CandidateError) return false
+  if (err instanceof LocalRequestError || err instanceof CandidateError || err instanceof UpstreamResponseError) return false
   if (err instanceof RequestStopped) return err.reason === 'upstream_idle'
   if (!(err instanceof UpstreamError)) return true // 网络错误 / 上游超时
   if (err.status === 429) return true
@@ -83,7 +88,7 @@ export function extractUpstreamMessage(body: string): string {
 export type ErrorKind = 'upstream' | 'network' | 'local'
 
 export function errorKind(error: unknown): ErrorKind {
-  if (error instanceof UpstreamError) return 'upstream'
+  if (error instanceof UpstreamError || error instanceof UpstreamResponseError) return 'upstream'
   if (error instanceof LocalRequestError || error instanceof CandidateError || error instanceof RequestStopped) return 'local'
   return 'network'
 }
@@ -92,11 +97,12 @@ export function errorKind(error: unknown): ErrorKind {
 export function sanitizePublicError(kind: ErrorKind, message: string): string {
   if (kind === 'network') return '上游连接失败'
   if (kind === 'local') return message
-  // 上游错误：抹掉 URL、IP 与疑似密钥，再截断
-  let text = message
+  // 上游错误：抹掉 URL、IP 与疑似密钥，再截断；正则逐条至少 O(n)，先截断，避免超长文本拖住主线程
+  let text = message.slice(0, 2000)
   text = text.replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
   text = text.replace(/\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b/g, m => net.isIPv4(m.split(':')[0]) ? '[ip]' : m)
-  text = text.replace(/[0-9a-f]*:[0-9a-f:]*:[0-9a-f]*/gi, m => net.isIPv6(m) ? '[ip]' : m)
+  // 每段都有上界，最坏 O(n)；原来的 [0-9a-f]*:[0-9a-f:]*:[0-9a-f]* 在无冒号长串上是 O(n²)。段内允许 0 位以覆盖 :: 缩写
+  text = text.replace(/(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}/gi, m => net.isIPv6(m) ? '[ip]' : m)
   text = text.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[redacted]')
   text = text.replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')
   const trimmed = text.slice(0, 300).trim()

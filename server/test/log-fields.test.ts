@@ -21,7 +21,7 @@ after(async () => {
 const message = { role: 'user', content: '共享的长消息🙂'.repeat(200) }
 const request = JSON.stringify({ messages: [message], model: 'a' })
 const processed = JSON.stringify({ messages: [message], model: 'b' })
-recordLog({
+await recordLog({
   channel_id: null, channel_name: null, entry_format: 'openai', model: 'test', upstream_model: null,
   status: 'success', status_code: 200, latency_ms: 1,
   request_body: request, preprocessed_body: processed, response_body: '{"reply":"ok"}', upstream_response_body: 'data: 原始回复\n\n',

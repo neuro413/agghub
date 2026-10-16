@@ -36,6 +36,8 @@ keysRouter.put('/:id', (req, res) => {
   if (!result.ok) return res.status(400).json({ error: result.error })
   const groupError = unknownGroups(result.value)
   if (groupError) return res.status(400).json({ error: groupError })
+  // 管理端显式启停时同步停用标记：停用 = enabled 0 + admin_disabled 1，启用则一并清掉
+  if (result.value.enabled !== undefined) result.value.admin_disabled = !result.value.enabled
   const id = validId(req.params.id)
   const key = id ? updateKey(id, result.value) : null
   if (!key) return res.status(404).json({ error: 'not found' })

@@ -7,7 +7,7 @@ import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
-import { LocalRequestError, UpstreamError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
+import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
@@ -15,7 +15,7 @@ import { estimatePromptTokens, parseSSEEvents } from '../convert/ir'
 import * as oaiConv from '../convert/openai'
 import * as anthConv from '../convert/anthropic'
 import * as respConv from '../convert/responses'
-import { cacheParts, emptyUsage } from '../convert/usage'
+import { cacheParts, emptyUsage, maxUsage, rawWireUsage, sumUsage } from '../convert/usage'
 import type { Caller, Channel, ChannelGroup, EntryFormat, IRUsage, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
 import { applySingleRole } from './singleRole'
@@ -30,7 +30,11 @@ import { createStreamWriter } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
 import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthroughUsage, streamDeltaText } from './responseSemantics'
 import { OWNER_CALLER, callerSettings } from './caller'
-import { OutputMeter, estimateIRPrompt, findRatio, settleRequest } from './billing'
+import { OutputMeter, accountOf, estimateIRPrompt, estimateReservePoints, findRatio, settleRequest } from './billing'
+import type { BillingAccount } from './billing'
+import { reserveQuota, reservedPoints } from './quotaLedger'
+import { getKeyById } from './keys'
+import { getUserById } from './users'
 import { onAttemptSuccess, onBanSignal } from './channelHealth'
 import { availableKeys, keyLabel, onKeyFailure, onKeySuccess, pickRaceKeys } from './channelKeys'
 
@@ -48,6 +52,18 @@ export interface RelayContext {
   res: Response
   /** 鉴权中间件解析的调用方；缺省视为内网 owner */
   caller?: Caller
+  /** 是否已通过生成接口的准入中间件；缺省表示未经准入 */
+  admitted?: boolean
+}
+
+/** 模型名会写进错误信息与日志并参与脱敏，长度必须设上界 */
+const MAX_MODEL_LENGTH = 256
+
+/** 预扣时的可用额度：现查库，避免鉴权时的快照漏掉期间已结算的扣费；不限额返回 Infinity */
+function availableQuota(caller: Caller, account: BillingAccount): number {
+  if (account.type === 'user') return getUserById(account.id)?.quota ?? 0
+  const key = getKeyById(account.id) ?? caller.key!
+  return key.quota_total == null ? Number.POSITIVE_INFINITY : key.quota_total - key.quota_used
 }
 
 interface AttemptState extends UpstreamContext {
@@ -73,6 +89,8 @@ interface AttemptState extends UpstreamContext {
   thinkingInject?: ThinkingInjectEntry[]
   /** 输出计量，usage 缺失时用于估算计费 */
   meter: OutputMeter
+  /** 请求是否已经发往上游 */
+  sent?: boolean
 }
 
 type Description = Pick<AttemptState, 'adaptor' | 'upstreamModel' | 'upstreamWire' | 'passthrough'>
@@ -87,7 +105,7 @@ interface Outcome {
 }
 
 function errorOutcome(error: unknown): Outcome {
-  const code = error instanceof UpstreamError || error instanceof LocalRequestError ? error.status
+  const code = error instanceof UpstreamError || error instanceof LocalRequestError || error instanceof UpstreamResponseError ? error.status
     : error instanceof RequestStopped ? error.reason === 'client_cancel' ? 499 : 504 : 502
   const message = error instanceof UpstreamError ? extractUpstreamMessage(error.body)
     : error instanceof Error ? error.message : String(error || 'relay failed')
@@ -205,6 +223,9 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   const lifecycle = new RequestLifecycle(ctx.res, settings.request_max_duration_ms)
   const requestId = randomUUID()
   const model = ctx.ir?.model
+  // 超长模型名只截断写日志，不参与计费匹配
+  const loggedModel = typeof model === 'string' ? model.slice(0, MAX_MODEL_LENGTH) : null
+  const billedModel = typeof model === 'string' && model.length <= MAX_MODEL_LENGTH ? model : null
   const autoBanCodes = parseAutoBanCodes(settings.auto_ban_codes)
   let final = errorOutcome(new Error('没有成功的上游尝试'))
   let last: AttemptState | undefined
@@ -213,18 +234,28 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   let headersJson: string | undefined
   // 候选渠道 → 计费分组；owner 调用为空
   let groupOf = new Map<number, ChannelGroup>()
+  // 计费累计：每次到达结算的尝试只计一次；竞速落选的尝试不会进到这里（README「竞速落选不计费」）
+  const billed = new Set<AttemptState>()
+  let billedUsage = emptyUsage()
+  const bill = (state: AttemptState | undefined, usage: IRUsage): void => {
+    if (!state || billed.has(state)) return
+    billed.add(state)
+    billedUsage = sumUsage(billedUsage, usage)
+  }
+  let releaseReserve: (() => void) | undefined
   const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
-  const record = (outcome: Outcome, intermediate: boolean, state = last, points: number | null = null): void => {
+  const record = (outcome: Outcome, intermediate: boolean, state = last, points: number | null = null): Promise<boolean> => {
+    bill(state, outcome.usage)
     const attemptMs = state?.elapsedMs ?? null
-    safeRecordLog((): LogEntry => {
+    return safeRecordLog((): LogEntry => {
       if (settings.store_request_body) {
         rawJson ??= JSON.stringify(ctx.rawBody)
         headersJson ??= JSON.stringify(ctx.rawHeaders)
       }
       return {
         request_id: requestId, channel_id: state?.channel.id ?? null, channel_name: state?.channel.name ?? null,
-        entry_format: ctx.entryFormat, model: typeof model === 'string' ? model : null, upstream_model: state?.upstreamModel ?? null,
+        entry_format: ctx.entryFormat, model: loggedModel, upstream_model: state?.upstreamModel ?? null,
         status: outcome.status, status_code: outcome.code, error_message: outcome.error,
         latency_ms: intermediate ? attemptMs : lifecycle.elapsed, attempt_latency_ms: attemptMs,
         ...outcome.usage, ...cacheParts(outcome.usage), retry_count: Math.max(0, attempts - 1), is_stream: ctx.stream, is_retry: intermediate,
@@ -251,12 +282,27 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   })
 
   try {
+    // 准入中间件按精确路径挂载；任何绕过它到达这里的 Key 调用一律拒绝
+    if (caller.key && ctx.admitted !== true) throw new LocalRequestError('请求未经过准入检查', 429)
     lifecycle.signal.throwIfAborted()
     if (typeof model !== 'string' || !model.trim()) throw new LocalRequestError('model is required')
+    // 不回显模型名本身
+    if (model.length > MAX_MODEL_LENGTH) throw new LocalRequestError('model 名称过长', 400)
     if (caller.key && !findRatio(settings.model_ratios, model)) throw new LocalRequestError('该模型未配置倍率', 403)
     const modelCandidates = candidatesForModel(model, caller)
     if (!modelCandidates.length) throw new LocalRequestError(`没有可用渠道支持模型 ${model}`, 503)
     groupOf = candidateGroups(caller, modelCandidates, model)
+    const account = accountOf(caller)
+    if (account) {
+      // 预扣：输入估算 + 声明的输出上限，按候选分组的最大倍率保守计算；结算时按实际 usage 扣费后释放
+      const ratio = findRatio(settings.model_ratios, model)!
+      const groupRatio = groupOf.size ? Math.max(...[...groupOf.values()].map(g => g.ratio)) : 1
+      const points = estimateReservePoints(ratio, ctx.ir, groupRatio)
+      if (availableQuota(caller, account) - reservedPoints(account) < points) {
+        throw new LocalRequestError('余额不足以支付本次请求的预估费用，可调小 max_tokens 后重试', 429)
+      }
+      releaseReserve = reserveQuota(account, points)
+    }
     const blocker = ctx.entryFormat === 'responses' ? respConv.conversionBlocker(ctx.rawBody) : null
     const descriptions = new Map(modelCandidates.map((channel): [number, Description] => {
       const adaptor = getAdaptor(channel.type)
@@ -308,11 +354,11 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
             banned.add(channel.id)
           }
         }
-        const recordFailures = (list: typeof failures) => {
-          for (const f of list) record({ ...errorOutcome(f.error), usage: f.state.usage }, true, f.state)
+        const recordFailures = async (list: typeof failures) => {
+          for (const f of list) await record({ ...errorOutcome(f.error), usage: f.state.usage }, true, f.state)
         }
         if (winner) {
-          recordFailures(failures)
+          await recordFailures(failures)
           last = winner.state
           final = winner.outcome
           onAttemptSuccess(channel.id)
@@ -322,19 +368,20 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const { state: lastFailed, error } = failures[failures.length - 1]
         last = lastFailed
         final = { ...errorOutcome(error), usage: lastFailed.usage }
-        // 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
-        const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !failures.some(f => f.error instanceof LocalRequestError)
+        // 本地确定的输入错误、以及上游已返回 2xx 后的处理失败阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
+        const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent
+          && !failures.some(f => f.error instanceof LocalRequestError || f.error instanceof UpstreamResponseError)
         const hasKey = canContinue && keysLeft(channel).length > 0
         const switchKey = channel.key_mode === 'poll' && hasKey && keyFailed
         const retrySame = !switchKey && hasKey && !banned.has(channel.id) && index < settings.single_retry_times
           && (failures.some(f => shouldRetry(f.error)) || (channel.key_mode === 'race' && keyFailed))
         const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
         if (!switchKey && !retrySame && !nextChannel) {
-          recordFailures(failures.slice(0, -1))
+          await recordFailures(failures.slice(0, -1))
           if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
           return
         }
-        recordFailures(failures)
+        await recordFailures(failures)
         if (switchKey) continue
         if (settings.retry_interval_ms > 0) await sleep(settings.retry_interval_ms, lifecycle.signal)
         if (!retrySame) break
@@ -348,13 +395,19 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     final = errorOutcome(lifecycle.signal.aborted ? lifecycle.signal.reason : error)
     if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
   } finally {
+    bill(last, final.usage)
+    // 按所有到达结算的尝试累计计费：重试与换渠道中已消耗的上游 Token 同样计入
     const points = settleRequest({
-      caller, model: typeof model === 'string' ? model : null, ratios: settings.model_ratios, usage: final.usage,
+      caller, model: billedModel, ratios: settings.model_ratios, usage: billedUsage,
       meter: last?.meter ?? null, estimatePrompt: () => estimateIRPrompt(ctx.ir), success: final.status === 'success',
       groupRatio: (last && groupOf.get(last.channel.id)?.ratio) ?? 1,
+      reachedUpstream: [...billed].some(state => state.sent),
     })
-    record(final, false, last, points)
+    // 先落账再放开预扣，避免出现「预扣已释放、扣费尚未写入」的间隙
+    releaseReserve?.()
+    const logged = record(final, false, last, points)
     lifecycle.dispose()
+    await logged
   }
 }
 
@@ -367,6 +420,7 @@ async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Sett
     attempt.touch()
     const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
     if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
+    state.sent = true
     response = await fetch(request.url, options)
     if (!response.ok) {
       const text = await readBodyText(response.body, {
@@ -388,30 +442,50 @@ async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Sett
   }
 }
 
+/**
+ * 非流式响应。上游已返回 2xx，此后的失败（超限、非 JSON、空回复、转换异常）一律抛 UpstreamResponseError：
+ * 上游通常已经计费，不再重试也不换渠道；usage 在判定之前先行解析，保证失败也能按实际用量结算。
+ */
 async function sendResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings): Promise<Outcome> {
-  const raw = await readBodyText(response.body, {
-    signal: state.lifecycle.signal, maxBytes: settings.stream_buffer_max_bytes,
-    onTruncate: () => { state.upstream.truncated = settings.store_response_body },
-    onBytes: bytes => { state.lifecycle.touch(); state.upstream.append(bytes) },
-  })
+  let overflow = false
+  let raw: string
+  try {
+    raw = await readBodyText(response.body, {
+      signal: state.lifecycle.signal, maxBytes: settings.stream_buffer_max_bytes,
+      onTruncate: () => { overflow = true; state.upstream.truncated = settings.store_response_body },
+      onBytes: bytes => { state.lifecycle.touch(); state.upstream.append(bytes) },
+    })
+  } catch (error) {
+    if (overflow && !state.lifecycle.signal.aborted) throw new UpstreamResponseError(`上游响应体超过 ${settings.stream_buffer_max_bytes} 字节限制`)
+    throw error
+  }
   state.lifecycle.signal.throwIfAborted()
-  const json = JSON.parse(raw)
+  let json: any
+  try { json = JSON.parse(raw) } catch { throw new UpstreamResponseError('上游响应不是合法 JSON') }
+  // 先计量：即便后面判定空回复或转换失败，上游费用也已经产生
+  state.usage = rawWireUsage(state.upstreamWire, json)
   if (state.upstreamWire === 'responses') logResponsesBody(state.upstream, json)
   let output: any
   if (state.passthrough && !state.pseudo) {
-    if (isEmptyPassthroughBody(ctx.entryFormat, json)) throw new UpstreamError(502, '上游返回空回复')
-    json.model = state.requestedModel
-    state.usage = passthroughUsage(ctx.entryFormat, json)
-    // 直通 JSON 不逐字段解析，usage 缺失时按整段文本保守估算
+    if (isEmptyPassthroughBody(ctx.entryFormat, json)) throw new UpstreamResponseError('上游返回空回复')
+    // 直通 JSON 不逐字段解析，usage 缺失时按整段文本保守估算；空回复的外壳不算输出
     state.meter.append(raw)
+    json.model = state.requestedModel
+    state.usage = maxUsage(state.usage, passthroughUsage(ctx.entryFormat, json))
     output = json
   } else {
-    let ir = state.adaptor.parseResponse(json, state)
-    if (state.pseudo) ir = splitIRResponse(ir, settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max))
-    if (isEmptyIRResponse(ir)) throw new UpstreamError(502, '上游返回空回复')
+    let ir: any
+    try {
+      ir = state.adaptor.parseResponse(json, state)
+      if (state.pseudo) ir = splitIRResponse(ir, settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max))
+    } catch (error) {
+      if (error instanceof UpstreamError || error instanceof CandidateError || error instanceof LocalRequestError) throw error
+      throw new UpstreamResponseError(error instanceof Error ? error.message : '上游响应转换失败')
+    }
+    if (isEmptyIRResponse(ir)) throw new UpstreamResponseError('上游返回空回复')
     for (const choice of ir.choices || []) meterIR(state.meter, choice.message)
     ir.model = state.requestedModel
-    state.usage = ir.usage || emptyUsage()
+    state.usage = maxUsage(state.usage, ir.usage || emptyUsage())
     output = entryBuildResponse(ctx.entryFormat, ir, ctx.ir)
   }
   const text = JSON.stringify(output)

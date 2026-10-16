@@ -262,7 +262,7 @@ export function KeysPage() {
               {keys.map((k, i) => (
                 <tr key={k.id} style={{ animationDelay: `${Math.min(i, 10) * 25}ms` }}>
                   <td style={{ fontWeight: 500 }}>{k.name}</td>
-                  <td><Badge tone={STATUS[k.status].tone} dot>{STATUS[k.status].label}</Badge></td>
+                  <td><Badge tone={STATUS[k.status].tone} dot>{STATUS[k.status].label}</Badge>{k.admin_disabled && <Badge tone="warning" style={{ marginLeft: 6 }} title="管理员已停用该令牌，请联系管理员">管理员已停用</Badge>}</td>
                   <td>
                     {k.group_available
                       ? <span className="pt-chip"><IconLayers size={12} />{k.group}</span>
@@ -284,7 +284,14 @@ export function KeysPage() {
                   <td className="num">
                     <div className="pt-row-actions">
                       {k.status !== 'expired' && (
-                        <Button variant="ghost" size="icon-sm" disabled={busyId === k.id} onClick={() => toggle(k)} title={k.status === 'disabled' ? '启用' : '停用'} aria-label={k.status === 'disabled' ? '启用' : '停用'}>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          disabled={busyId === k.id || k.admin_disabled}
+                          onClick={() => toggle(k)}
+                          title={k.admin_disabled ? '管理员已停用，无法自行启用' : k.status === 'disabled' ? '启用' : '停用'}
+                          aria-label={k.admin_disabled ? '管理员已停用' : k.status === 'disabled' ? '启用' : '停用'}
+                        >
                           {k.status === 'disabled' ? <IconPower size={14} /> : <IconPowerOff size={14} />}
                         </Button>
                       )}

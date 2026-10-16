@@ -1,7 +1,7 @@
 import express, { Router } from 'express'
 import type { ErrorRequestHandler, Request, RequestHandler, Response } from 'express'
 import { db, getSettings } from '../db'
-import { blockedSeconds, clientIp, recordAuthFailure } from '../core/caller'
+import { beginAuthAttempt, blockedSeconds, clientIp, limitKey, recordAuthFailure } from '../core/caller'
 import { checkin, checkinStatus } from '../core/checkin'
 import { findRatio, localDay } from '../core/billing'
 import { PORTAL_ANNOUNCEMENTS, publishedAnnouncements } from '../core/announcements'
@@ -48,6 +48,8 @@ function keyView(key: ApiKey, usable: string[], now = Date.now()) {
     name: key.name,
     key: maskKey(key.key),
     status: expired ? 'expired' : key.enabled ? 'enabled' : 'disabled',
+    /** 被管理员停用：门户只能查看，不能自行启用 */
+    admin_disabled: key.admin_disabled,
     group,
     group_available: !!group && usable.includes(group),
     used_quota: key.quota_used,
@@ -109,36 +111,62 @@ portalRouter.post('/register', wrap(async (req, res) => {
   const error = usernameError(username) ?? passwordError(password)
   if (error) return fail(res, error)
   const ip = clientIp(req)
-  const now = Date.now()
-  if (s.portal_register_ip_daily > 0 && ip && countRegistrations(ip, localMidnight(now)) >= s.portal_register_ip_daily) {
-    return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+  const seconds = blockedSeconds(ip)
+  if (seconds > 0) {
+    res.setHeader('Retry-After', String(seconds))
+    return fail(res, `尝试次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
   }
-  if (getUserByName(username)) return fail(res, '用户名已被占用')
-  const user = createUser({ username, password_hash: await hashPassword(password), quota: s.portal_initial_quota, ip }, now)
-  if (!user) return fail(res, '用户名已被占用')
-  ok(res, null, '注册成功')
+  const ipLimitReached = () => s.portal_register_ip_daily > 0 && !!ip
+    && countRegistrations(ip, localMidnight(Date.now()), limitKey) >= s.portal_register_ip_daily
+  // 先做一次廉价检查，超额请求不进入 scrypt
+  if (ipLimitReached()) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+  // 用户名已被占用计入失败次数，让枚举用户名付出代价
+  const taken = () => { recordAuthFailure(ip); return fail(res, '用户名已被占用') }
+  if (getUserByName(username)) return taken()
+  const release = beginAuthAttempt(`register:${limitKey(ip)}`, 2)
+  if (!release) return fail(res, '注册请求过于频繁，请稍后再试', 429)
+  try {
+    const passwordHash = await hashPassword(password)
+    // scrypt 期间可能有并发注册写入；断言紧挨 INSERT，中间没有 await
+    if (ipLimitReached()) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+    const user = createUser({ username, password_hash: passwordHash, quota: s.portal_initial_quota, ip })
+    if (!user) return taken()
+    ok(res, null, '注册成功')
+  } finally {
+    release()
+  }
 }))
 
 portalRouter.post('/login', wrap(async (req, res) => {
   const ip = clientIp(req)
-  const seconds = blockedSeconds(ip)
+  const { username, password } = req.body ?? {}
+  // 只有合法用户名才有账号维度的计数，避免任意长字符串撑大限流表
+  const account = usernameError(username) ? '' : `u:${String(username).toLowerCase()}`
+  const seconds = Math.max(blockedSeconds(ip), account ? blockedSeconds(account) : 0)
   if (seconds > 0) {
     res.setHeader('Retry-After', String(seconds))
     return fail(res, `登录失败次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
   }
-  const { username, password } = req.body ?? {}
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) return fail(res, '请输入用户名和密码')
-  const user = username.length <= 20 ? getUserByName(username) : null
-  const valid = user && !passwordError(password) ? await verifyPassword(password, user.password_hash) : (await burnPasswordCheck(password), false)
-  if (!user || !valid) {
-    recordAuthFailure(ip)
-    return fail(res, '用户名或密码错误')
+  // 同一 IP 对同一账号最多 2 个并发校验，避免用突发请求在失败计数生效前全部进入 scrypt
+  const release = beginAuthAttempt(`login:${limitKey(ip)}:${account}`, 2)
+  if (!release) return fail(res, '登录请求过于频繁，请稍后再试', 429)
+  try {
+    const user = account ? getUserByName(username) : null
+    const valid = user && !passwordError(password) ? await verifyPassword(password, user.password_hash) : (await burnPasswordCheck(password), false)
+    if (!user || !valid) {
+      recordAuthFailure(ip)
+      if (account) recordAuthFailure(account)
+      return fail(res, '用户名或密码错误')
+    }
+    if (user.status !== USER_ENABLED) return fail(res, '账号已停用，请联系管理员')
+    const token = createSession(user.id, ip)
+    touchLogin(user.id, ip)
+    res.setHeader('Set-Cookie', sessionCookie(token, req.secure))
+    ok(res, selfView(user), '登录成功')
+  } finally {
+    release()
   }
-  if (user.status !== USER_ENABLED) return fail(res, '账号已停用，请联系管理员')
-  const token = createSession(user.id, ip)
-  touchLogin(user.id, ip)
-  res.setHeader('Set-Cookie', sessionCookie(token, req.secure))
-  ok(res, selfView(user), '登录成功')
 }))
 
 portalRouter.post('/logout', (req, res) => {
@@ -173,14 +201,33 @@ portalRouter.get('/notices', (_req, res) => {
 
 portalRouter.post('/password', wrap(async (req, res) => {
   const user = currentUser(res)
-  const { old_password, new_password } = req.body ?? {}
-  if (typeof old_password !== 'string' || !(await verifyPassword(old_password, user.password_hash))) return fail(res, '原密码错误')
-  const error = passwordError(new_password)
-  if (error) return fail(res, error)
-  setUserPassword(user.id, await hashPassword(new_password))
-  // 其他设备上的登录全部失效，保留当前会话
-  deleteUserSessions(user.id, res.locals.sessionToken)
-  ok(res, null, '密码已修改')
+  const ip = clientIp(req)
+  // 按账号与按 IP 各计一份失败，挡住「拿着会话无限次猜原密码」
+  const userId = `pw:${user.id}`
+  const ipId = `pwip:${limitKey(ip)}`
+  const seconds = Math.max(blockedSeconds(userId), blockedSeconds(ipId))
+  if (seconds > 0) {
+    res.setHeader('Retry-After', String(seconds))
+    return fail(res, `尝试次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
+  }
+  const release = beginAuthAttempt(userId, 1)
+  if (!release) return fail(res, '请求过于频繁，请稍后再试', 429)
+  try {
+    const { old_password, new_password } = req.body ?? {}
+    if (typeof old_password !== 'string' || !(await verifyPassword(old_password, user.password_hash))) {
+      recordAuthFailure(userId)
+      recordAuthFailure(ipId)
+      return fail(res, '原密码错误')
+    }
+    const error = passwordError(new_password)
+    if (error) return fail(res, error)
+    setUserPassword(user.id, await hashPassword(new_password))
+    // 其他设备上的登录全部失效，保留当前会话
+    deleteUserSessions(user.id, res.locals.sessionToken)
+    ok(res, null, '密码已修改')
+  } finally {
+    release()
+  }
 }))
 
 portalRouter.get('/usage', (req, res) => {
@@ -210,7 +257,7 @@ portalRouter.get('/pricing', (req, res) => {
   for (const group of groups) {
     // 用一个占位 Key 套上门户设置，与实际调用时的可见范围一致
     const placeholder: ApiKey = {
-      id: 0, name: '', key: '', enabled: true, groups: [group.name], models: [], rpm: null, concurrency: null, quota_total: null,
+      id: 0, name: '', key: '', enabled: true, admin_disabled: false, groups: [group.name], models: [], rpm: null, concurrency: null, quota_total: null,
       quota_used: 0, quota_daily: null, log_bodies: null, expires_at: null, note: null, user_id: user.id,
       created_at: 0, updated_at: 0, last_used_at: null,
     }
@@ -263,10 +310,12 @@ portalRouter.post('/keys/:id/key', (req, res) => {
 portalRouter.put('/keys/:id', (req, res) => {
   const user = currentUser(res)
   const id = validId(req.params.id)
-  if (!getUserKey(user.id, id)) return fail(res, '令牌不存在')
+  const existing = getUserKey(user.id, id)
+  if (!existing) return fail(res, '令牌不存在')
   const { enabled, group } = req.body ?? {}
   const usable = usableNames(user)
   if (enabled !== undefined && typeof enabled !== 'boolean') return fail(res, 'enabled 须为布尔值')
+  if (enabled === true && existing.admin_disabled) return fail(res, '该令牌已被管理员停用，请先联系管理员')
   if (group !== undefined && (typeof group !== 'string' || !usable.includes(group))) return fail(res, '请选择可用的分组')
   if (enabled === undefined && group === undefined) return fail(res, '没有要修改的内容')
   ok(res, keyView(updateKey(id, { enabled, groups: group === undefined ? undefined : [group] })!, usable))

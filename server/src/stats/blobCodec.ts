@@ -16,6 +16,20 @@ export function compress(buf: Buffer): { codec: number; data: Buffer } {
   return data.length < buf.length ? { codec, data } : { codec: CODEC_RAW, data: buf }
 }
 
+/** 与 compress 同语义，但把压缩交给 zlib 线程池，避免阻塞主线程 */
+export function compressAsync(buf: Buffer): Promise<{ codec: number; data: Buffer }> {
+  if (buf.length < COMPRESS_MIN) return Promise.resolve({ codec: CODEC_RAW, data: buf })
+  const codec = hasZstd ? CODEC_ZSTD : CODEC_GZIP
+  return new Promise((resolve, reject) => {
+    const done = (error: Error | null, data: Buffer) => {
+      if (error) return reject(error)
+      resolve(data.length < buf.length ? { codec, data } : { codec: CODEC_RAW, data: buf })
+    }
+    if (hasZstd) z.zstdCompress(buf, { params: { [z.constants.ZSTD_c_compressionLevel]: 3 } }, done)
+    else zlib.gzip(buf, { level: 6 }, done)
+  })
+}
+
 /** 冷包压缩交给 zlib 线程池，避免在 SQLite 事务和网关主线程内执行。 */
 export function compressPack(buf: Buffer): Promise<Buffer> {
   return new Promise((resolve, reject) => {

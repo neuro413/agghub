@@ -28,6 +28,7 @@ function apiKeyById(id: number): ApiKey {
     name: r.name,
     key: r.key,
     enabled: !!r.enabled,
+    admin_disabled: !!r.admin_disabled,
     groups: JSON.parse(r.groups) as string[],
     models: JSON.parse(r.models) as string[],
     rpm: r.rpm,

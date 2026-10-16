@@ -2,7 +2,7 @@
 import { createHash } from 'node:crypto'
 import { setImmediate as yieldTurn } from 'node:timers/promises'
 import { db } from '../db'
-import { CODEC_ZSTD, compress, compressPack, decompress, decompressAsync, hasZstd } from './blobCodec'
+import { CODEC_ZSTD, compress, compressAsync, compressPack, decompress, decompressAsync, hasZstd } from './blobCodec'
 export { compressText, decompressText } from './blobCodec'
 const CHUNK_MIN = 128
 const STRING_CHUNK_MIN = 64
@@ -93,6 +93,45 @@ export function putBlob(text: string, kind = KIND_DATA): number {
   return insertLoose(hash, kind, buf.length, codec, data)
 }
 
+// 异步写日志时，块先于日志行落库；这期间引用它的只有内存里的 id，GC 必须同样视为存活，
+// 否则新插入的块、或去重命中的孤儿旧块会在日志行写入前被回收，留下悬空引用
+const pinnedBlobs = new Map<number, number>()
+
+/** 一次异步写入持有的块 id，写完（无论成败）交给 releaseBlobs */
+export type BlobPins = number[]
+
+function pinBlob(pins: BlobPins, id: number): number {
+  pinnedBlobs.set(id, (pinnedBlobs.get(id) ?? 0) + 1)
+  pins.push(id)
+  return id
+}
+
+export function releaseBlobs(pins: BlobPins): void {
+  for (const id of pins) {
+    const left = (pinnedBlobs.get(id) ?? 1) - 1
+    if (left > 0) pinnedBlobs.set(id, left)
+    else pinnedBlobs.delete(id)
+  }
+  pins.length = 0
+}
+
+/** 存储代次；清空日志后递增，异步写入据此判断已拿到的块 id 是否失效 */
+export function blobEpoch(): number {
+  return storageEpoch
+}
+
+/** 异步写块：压缩在线程池执行，拿到的 id 记入 pins */
+export async function putBlobAsync(text: string, pins: BlobPins, kind = KIND_DATA): Promise<number> {
+  const buf = Buffer.from(text, 'utf8')
+  const hash = createHash('sha256').update(buf).digest()
+  const existing = selectId.get(kind, hash) as number | undefined
+  if (existing !== undefined) return pinBlob(pins, existing)
+  const { codec, data } = await compressAsync(buf)
+  // 压缩期间可能已有相同内容写入，复用即可
+  const id = (selectId.get(kind, hash) as number | undefined) ?? insertLoose(hash, kind, buf.length, codec, data)
+  return pinBlob(pins, id)
+}
+
 type BlobRow = { id: number; hash: Buffer; kind: number; raw_size: number; codec: number; pack_id: number | null; pack_offset: number | null; data?: Buffer | null }
 type PackRow = { raw_size: number; codec: number; data: Buffer }
 
@@ -166,32 +205,44 @@ function manifestChildren(id: number): number[] {
   return 'raw' in manifest ? [manifest.raw] : manifest.c.map(([, child]) => child)
 }
 
-/** JSON 请求/响应体：把 messages 等大数组逐项切块，多轮对话重复的历史消息只存一份 */
-export function putJsonBody(text: string): number {
+/** 按切块规则拆出骨架与子块正文；非对象或不能无损往返的正文返回 null，整段存储 */
+function splitJsonBody(text: string): { skeleton: any; parts: [(string | number)[], string][] } | null {
   let obj: any
   try { obj = JSON.parse(text) } catch {}
-  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || JSON.stringify(obj) !== text) {
-    return putManifest({ v: 2, raw: putBlob(text) })
-  }
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || JSON.stringify(obj) !== text) return null
   const skeleton: any = Object.create(null)
-  const chunks: [(string | number)[], number][] = []
-  const emit = (path: (string | number)[], text: string): void => {
-    chunks.push([path, putBlob(text)])
-  }
+  const parts: [(string | number)[], string][] = []
   for (const key of Object.keys(obj)) {
     const value = obj[key]
     if (ARRAY_KEYS.includes(key) && Array.isArray(value)) {
       skeleton[key] = value.map((item, i) => {
         const text = JSON.stringify(item)
-        if (text !== undefined && text.length >= CHUNK_MIN) { emit([key, i], text); return null }
+        if (text !== undefined && text.length >= CHUNK_MIN) { parts.push([[key, i], text]); return null }
         return item
       })
     } else if (STRING_KEYS.includes(key) && typeof value === 'string' && value.length >= STRING_CHUNK_MIN) {
       skeleton[key] = null
-      emit([key], JSON.stringify(value))
+      parts.push([[key], JSON.stringify(value)])
     } else skeleton[key] = value
   }
-  return putManifest({ v: 2, s: skeleton, c: chunks })
+  return { skeleton, parts }
+}
+
+/** JSON 请求/响应体：把 messages 等大数组逐项切块，多轮对话重复的历史消息只存一份 */
+export function putJsonBody(text: string): number {
+  const split = splitJsonBody(text)
+  if (!split) return putManifest({ v: 2, raw: putBlob(text) })
+  return putManifest({ v: 2, s: split.skeleton, c: split.parts.map(([path, part]) => [path, putBlob(part)]) })
+}
+
+/** putJsonBody 的异步版本：切块规则相同，子块与 manifest 都在线程池压缩，逐块执行以免占满线程池 */
+export async function putJsonBodyAsync(text: string, pins: BlobPins): Promise<number> {
+  const split = splitJsonBody(text)
+  if (!split) return putBlobAsync(JSON.stringify({ v: 2, raw: await putBlobAsync(text, pins) }), pins, KIND_MANIFEST)
+  const chunks: [(string | number)[], number][] = []
+  for (const [path, part] of split.parts) chunks.push([path, await putBlobAsync(part, pins)])
+  const manifest: Manifest = { v: 2, s: split.skeleton, c: chunks }
+  return putBlobAsync(JSON.stringify(manifest), pins, KIND_MANIFEST)
 }
 
 /** 缓存只活在一次详情还原中，不跨事务或 GC；共享历史消息只查库、解压和解析一次。 */
@@ -259,6 +310,13 @@ export function gcBlobs(): number {
       db.exec(`INSERT OR IGNORE INTO live_blobs SELECT ${column} FROM request_logs WHERE ${column} IS NOT NULL`)
       // 通过引用字段识别 manifest，也保护旧版本已发生 kind 混用的记录。
       if (JSON_REF_COLUMNS.has(column)) db.exec(`INSERT OR IGNORE INTO live_manifests SELECT ${column} FROM request_logs WHERE ${column} IS NOT NULL`)
+    }
+    // 异步写入中、日志行尚未落库的块同样存活；manifest 按块表里的实际 kind 识别
+    const markPinned = db.prepare('INSERT OR IGNORE INTO live_blobs (id) VALUES (?)')
+    const markPinnedManifest = db.prepare(`INSERT OR IGNORE INTO live_manifests SELECT id FROM blobs WHERE id = ? AND kind = ${KIND_MANIFEST}`)
+    for (const id of pinnedBlobs.keys()) {
+      markPinned.run(id)
+      markPinnedManifest.run(id)
     }
     // manifest 按 id 顺序读取，和打包顺序一致，每个 manifest 包只需解压一次
     const manifests = db.prepare('SELECT id FROM live_manifests WHERE id > ? ORDER BY id LIMIT ?').pluck()

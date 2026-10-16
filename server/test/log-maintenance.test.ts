@@ -13,9 +13,10 @@ test('维护单飞，小批删除期间新增日志不会被回收，旧日志�
   const first = cleanupOldLogs()
   assert.equal(cleanupOldLogs(), first)
   const body = JSON.stringify({ messages: [{ role: 'user', content: '维护期间新增的日志'.repeat(50) }] })
-  recordLog({ channel_id: null, channel_name: null, entry_format: 'openai', model: 'new', upstream_model: null,
+  const logged = recordLog({ channel_id: null, channel_name: null, entry_format: 'openai', model: 'new', upstream_model: null,
     status: 'success', status_code: 200, latency_ms: 1, request_body: body, request_id: 'during-maintenance' })
   await first
+  await logged
   assert.equal(db.prepare('SELECT COUNT(*) FROM request_logs WHERE created_at=1').pluck().get(), 100)
   const ref = db.prepare("SELECT request_body_ref FROM request_logs WHERE request_id='during-maintenance'").pluck().get() as number
   assert.equal(getJsonBody(ref), body)

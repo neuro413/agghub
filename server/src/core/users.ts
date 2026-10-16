@@ -10,6 +10,24 @@ const USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/
 const SCRYPT = { N: 16384, r: 8, p: 1 }
 const KEY_LEN = 32
 
+/** scrypt 跑在 libuv 线程池（默认 4 线程），必须限定并发，否则会拖垮 DNS 与文件 IO */
+const SCRYPT_CONCURRENCY = 2
+let scryptRunning = 0
+const scryptWaiting: (() => void)[] = []
+
+/** 全局 scrypt 并发闸门：所有 hashPassword / verifyPassword 都要走它 */
+async function withScryptSlot<T>(task: () => Promise<T>): Promise<T> {
+  // 名额满时排队；释放方把名额直接移交给队首，避免移交间隙被新请求插队而超出上限
+  if (scryptRunning >= SCRYPT_CONCURRENCY) await new Promise<void>(resolve => scryptWaiting.push(resolve))
+  else scryptRunning++
+  try { return await task() }
+  finally {
+    const next = scryptWaiting.shift()
+    if (next) next()
+    else scryptRunning--
+  }
+}
+
 export const USER_ENABLED = 1
 export const USER_DISABLED = 2
 
@@ -28,7 +46,7 @@ export function passwordError(value: unknown): string | null {
 /** scrypt$N$r$p$salt$hash（salt / hash 为 base64） */
 export async function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16)
-  const hash = await scrypt(password, salt, KEY_LEN, SCRYPT)
+  const hash = await withScryptSlot(() => scrypt(password, salt, KEY_LEN, SCRYPT))
   return `scrypt$${SCRYPT.N}$${SCRYPT.r}$${SCRYPT.p}$${salt.toString('base64')}$${hash.toString('base64')}`
 }
 
@@ -36,7 +54,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   const [scheme, n, r, p, salt, hash] = stored.split('$')
   if (scheme !== 'scrypt' || !salt || !hash) return false
   const expected = Buffer.from(hash, 'base64')
-  const actual = await scrypt(password, Buffer.from(salt, 'base64'), expected.length, { N: Number(n), r: Number(r), p: Number(p) })
+  const actual = await withScryptSlot(() => scrypt(password, Buffer.from(salt, 'base64'), expected.length, { N: Number(n), r: Number(r), p: Number(p) }))
   return actual.length === expected.length && crypto.timingSafeEqual(actual, expected)
 }
 
@@ -68,9 +86,12 @@ export function getUserByName(username: string): PortalUser | null {
   return rowToUser(db.prepare('SELECT * FROM users WHERE username = ?').get(username) as any)
 }
 
-/** 该 IP 自 since 起注册的用户数 */
-export function countRegistrations(ip: string, since: number): number {
-  return (db.prepare('SELECT COUNT(*) FROM users WHERE register_ip = ? AND created_at >= ?').pluck().get(ip, since) as number) ?? 0
+/** 该 IP 自 since 起注册的用户数；networkOf 把地址归并成限流网段（IPv6 按 /64），历史行存的是完整地址，逐行归并比对 */
+export function countRegistrations(ip: string, since: number, networkOf: (ip: string) => string = ip => ip): number {
+  const network = networkOf(ip)
+  if (network === ip) return (db.prepare('SELECT COUNT(*) FROM users WHERE register_ip = ? AND created_at >= ?').pluck().get(ip, since) as number) ?? 0
+  const rows = db.prepare("SELECT register_ip FROM users WHERE created_at >= ? AND register_ip LIKE '%:%'").pluck().all(since) as string[]
+  return rows.filter(other => networkOf(other) === network).length
 }
 
 /** 用户名重复（不区分大小写）时返回 null */

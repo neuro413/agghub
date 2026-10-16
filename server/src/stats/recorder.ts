@@ -1,7 +1,7 @@
 import { db, getSettings } from '../db'
 import { setImmediate as yieldTurn } from 'node:timers/promises'
 import type { CallerSource, LogBodyField, Settings } from '../types'
-import { clearBlobs, createBlobReader, gcBlobs, packBlobs, putBlob, putJsonBody, sanitizeHeaders } from './blobstore'
+import { blobEpoch, clearBlobs, createBlobReader, gcBlobs, packBlobs, putBlobAsync, putJsonBodyAsync, releaseBlobs, sanitizeHeaders, type BlobPins } from './blobstore'
 
 export interface LogEntry {
   channel_id: number | null
@@ -68,69 +68,87 @@ const insertStmt = db.prepare(
     @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key)`,
 )
 
-const opt = (s: string | null | undefined, put: (t: string) => number): number | null => (s == null ? null : put(s))
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
 
-/** 写一条日志；大正文写入块存储（去重 + 压缩），整个过程在一个事务内。 */
-export const recordLog = db.transaction((e: LogEntry, snapshot?: StorageSettings): void => {
+/**
+ * 写一条日志；大正文写入块存储（去重 + 压缩）。
+ * 压缩在线程池执行，块先于日志行落库：日志行写入失败只会留下无引用的块，由 GC 回收；
+ * 写入期间持有的块在 GC 中视为存活，避免日志行落库前被回收。
+ */
+export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promise<void> {
   const s = snapshot ?? getSettings()
   const storeReq = s.store_request_body
   const storeRes = s.store_response_body
-  // 仅在本次事务内复用完全相同的正文，不把块 id 缓存到 GC 或事务边界之外。
-  const jsonRefs = new Map<string, number>()
-  const putJson = (text: string): number => {
-    let id = jsonRefs.get(text)
-    if (id === undefined) { id = putJsonBody(text); jsonRefs.set(text, id) }
-    return id
+  const epoch = blobEpoch()
+  const pins: BlobPins = []
+  try {
+    // 仅在本条日志内复用完全相同的正文，不把块 id 缓存到写入之外。
+    const jsonRefs = new Map<string, number>()
+    const putJson = async (text: string): Promise<number> => {
+      let id = jsonRefs.get(text)
+      if (id === undefined) { id = await putJsonBodyAsync(text, pins); jsonRefs.set(text, id) }
+      return id
+    }
+    const putRaw = (text: string): Promise<number> => putBlobAsync(text, pins)
+    const opt = async (text: string | null | undefined, put: (t: string) => Promise<number>): Promise<number | null> => (text == null ? null : put(text))
+    // 逐个写入，一条日志不同时占用多个压缩线程
+    const refs = {
+      request_headers_ref: storeReq ? await opt(sanitizeHeaders(e.request_headers), putRaw) : null,
+      request_body_ref: storeReq ? await opt(e.request_body, putJson) : null,
+      preprocessed_body_ref: storeReq ? await opt(e.preprocessed_body, putJson) : null,
+      thinking_inject_ref: storeReq ? await opt(e.thinking_inject, putRaw) : null,
+      response_body_ref: storeRes ? await opt(e.response_body, putJson) : null,
+      upstream_response_body_ref: storeRes ? await opt(e.upstream_response_body, putRaw) : null,
+    }
+    // 写入期间日志被清空：已拿到的块 id 失效，只保留日志行本身
+    if (epoch !== blobEpoch()) for (const key of Object.keys(refs) as (keyof typeof refs)[]) refs[key] = null
+    insertStmt.run({
+      created_at: Date.now(),
+      channel_id: e.channel_id ?? null,
+      channel_name: e.channel_name ?? null,
+      entry_format: e.entry_format,
+      model: e.model ?? null,
+      upstream_model: e.upstream_model ?? null,
+      status: e.status,
+      status_code: e.status_code ?? null,
+      latency_ms: e.latency_ms ?? null,
+      request_id: e.request_id ?? null,
+      attempt_latency_ms: e.attempt_latency_ms ?? null,
+      response_body_truncated: e.response_body_truncated ? 1 : 0,
+      upstream_response_body_truncated: e.upstream_response_body_truncated ? 1 : 0,
+      prompt_tokens: e.prompt_tokens ?? 0,
+      completion_tokens: e.completion_tokens ?? 0,
+      total_tokens: e.total_tokens ?? 0,
+      cache_read_tokens: e.cache_read_tokens ?? 0,
+      cache_write_tokens: e.cache_write_tokens ?? 0,
+      retry_count: e.retry_count ?? 0,
+      is_stream: e.is_stream ? 1 : 0,
+      is_retry: e.is_retry ? 1 : 0,
+      // 管理端与门户都读这一列，同时给公网脱敏留出稳定的输入上界
+      error_message: e.error_message ? e.error_message.slice(0, 2000) : null,
+      preprocessed: e.preprocessed ? 1 : 0,
+      pseudo_thinking: e.pseudo_thinking ? 1 : 0,
+      source: e.source ?? null,
+      key_id: e.key_id ?? null,
+      key_name: e.key_name ?? null,
+      client_ip: e.client_ip || null,
+      quota_points: e.quota_points ?? null,
+      user_id: e.user_id ?? null,
+      group_name: e.group_name ?? null,
+      channel_key: e.channel_key ?? null,
+      ...refs,
+    })
+  } finally {
+    releaseBlobs(pins)
   }
-  insertStmt.run({
-    created_at: Date.now(),
-    channel_id: e.channel_id ?? null,
-    channel_name: e.channel_name ?? null,
-    entry_format: e.entry_format,
-    model: e.model ?? null,
-    upstream_model: e.upstream_model ?? null,
-    status: e.status,
-    status_code: e.status_code ?? null,
-    latency_ms: e.latency_ms ?? null,
-    request_id: e.request_id ?? null,
-    attempt_latency_ms: e.attempt_latency_ms ?? null,
-    response_body_truncated: e.response_body_truncated ? 1 : 0,
-    upstream_response_body_truncated: e.upstream_response_body_truncated ? 1 : 0,
-    prompt_tokens: e.prompt_tokens ?? 0,
-    completion_tokens: e.completion_tokens ?? 0,
-    total_tokens: e.total_tokens ?? 0,
-    cache_read_tokens: e.cache_read_tokens ?? 0,
-    cache_write_tokens: e.cache_write_tokens ?? 0,
-    retry_count: e.retry_count ?? 0,
-    is_stream: e.is_stream ? 1 : 0,
-    is_retry: e.is_retry ? 1 : 0,
-    error_message: e.error_message ?? null,
-    preprocessed: e.preprocessed ? 1 : 0,
-    pseudo_thinking: e.pseudo_thinking ? 1 : 0,
-    source: e.source ?? null,
-    key_id: e.key_id ?? null,
-    key_name: e.key_name ?? null,
-    client_ip: e.client_ip || null,
-    quota_points: e.quota_points ?? null,
-    user_id: e.user_id ?? null,
-    group_name: e.group_name ?? null,
-    channel_key: e.channel_key ?? null,
-    request_headers_ref: storeReq ? opt(sanitizeHeaders(e.request_headers), putBlob) : null,
-    request_body_ref: storeReq ? opt(e.request_body, putJson) : null,
-    preprocessed_body_ref: storeReq ? opt(e.preprocessed_body, putJson) : null,
-    thinking_inject_ref: storeReq ? opt(e.thinking_inject, putBlob) : null,
-    response_body_ref: storeRes ? opt(e.response_body, putJson) : null,
-    upstream_response_body_ref: storeRes ? opt(e.upstream_response_body, putBlob) : null,
-  })
-})
+}
 
 let lastLogWarning = -Infinity
 
 /** 包含日志构造/序列化的完整故障边界，绝不因此再次请求上游。 */
-export function safeRecordLog(build: () => LogEntry, snapshot?: StorageSettings, requestId?: string): boolean {
+export async function safeRecordLog(build: () => LogEntry, snapshot?: StorageSettings, requestId?: string): Promise<boolean> {
   try {
-    recordLog(build(), snapshot)
+    await recordLog(build(), snapshot)
     return true
   } catch (error) {
     if (Date.now() - lastLogWarning > 60_000) {

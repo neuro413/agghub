@@ -12,7 +12,8 @@ export const openaiEntry = Router()
 openaiEntry.post('/chat/completions', async (req, res) => {
   try {
     const { ir, stream } = oaiConv.parseRequest(req.body)
-    await handleRelay({ entryFormat: 'openai', ir, stream, rawBody: req.body, rawHeaders: req.headers, res, caller: res.locals.caller })
+    await handleRelay({ entryFormat: 'openai', ir, stream, rawBody: req.body, rawHeaders: req.headers, res,
+      caller: res.locals.caller, admitted: res.locals.admitted === true })
   } catch (e: any) {
     if (!res.headersSent) {
       res.status(400).json({ error: { message: String(e?.message || e), type: 'invalid_request_error' } })

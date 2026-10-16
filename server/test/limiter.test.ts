@@ -9,7 +9,7 @@ beforeEach(resetLimiter)
 
 function key(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
-    id: 1, name: 'k', key: 'sk-agh-test1', enabled: true, groups: ['default'], models: [],
+    id: 1, name: 'k', key: 'sk-agh-test1', enabled: true, admin_disabled: false, groups: ['default'], models: [],
     rpm: null, concurrency: null, quota_total: null, quota_used: 0, quota_daily: null,
     log_bodies: null, expires_at: null, note: null, user_id: null,
     created_at: 0, updated_at: 0, last_used_at: null,

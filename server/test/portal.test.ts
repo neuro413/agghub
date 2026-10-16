@@ -135,7 +135,8 @@ test('用户 Key 调用扣用户余额，调用记录只能看到自己的', asy
   const models = await realFetch(base + '/v1/models', { headers: auth })
   assert.deepEqual(((await models.json()) as any).data.map((m: any) => m.id), ['alias'])
 
-  const chat = (body = { model: 'alias', messages: [{ role: 'user', content: 'hi' }] }) =>
+  // 声明较小的输出上限，让预扣落在 1000 点余额以内
+  const chat = (body = { model: 'alias', max_tokens: 16, messages: [{ role: 'user', content: 'hi' }] }) =>
     realFetch(base + '/v1/chat/completions', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: JSON.stringify(body) })
   assert.equal((await chat()).status, 200)
 
@@ -163,6 +164,65 @@ test('用户 Key 调用扣用户余额，调用记录只能看到自己的', asy
   assert.equal(disabled.status, 403)
   assert.equal(((await disabled.json()) as any).error.type, 'user_disabled')
   assert.equal((await call('/api/user/self', { cookie: alice })).status, 401)
+})
+
+test('管理员停用的令牌，门户用户不能自行启用', async () => {
+  setSettings({ portal_initial_quota: 1000, portal_max_keys: 5 })
+  const alice = await signup('alice')
+  const c1 = channel('openai')
+  createGroup({ name: 'public', is_public: true, channel_ids: [c1], models: ['alias'] })
+
+  const created = await call('/api/user/keys', { method: 'POST', cookie: alice, body: { name: '测试', group: 'public' } })
+  assert.equal(created.json.success, true)
+  const id: number = created.json.data.id
+  assert.equal(created.json.data.admin_disabled, false)
+
+  // 管理端在另一个 app 上，用真实 fetch 走 /api/keys（门户测试的 fetch 替身只转发公网端口）
+  const lan = createApp('lan').listen(0)
+  await new Promise<void>((resolve) => lan.once('listening', resolve))
+  const adminBase = `http://127.0.0.1:${(lan.address() as { port: number }).port}`
+  const adminPut = async (body: unknown) => {
+    const r = await realFetch(`${adminBase}/api/keys/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    return { status: r.status, json: (await r.json()) as any }
+  }
+
+  try {
+    // 管理端点「停用」：enabled 置 0 并打上 admin_disabled 标记
+    const disabled = await adminPut({ enabled: false })
+    assert.equal(disabled.status, 200)
+    assert.equal(disabled.json.enabled, false)
+    assert.equal(disabled.json.admin_disabled, true)
+    const row = db.prepare('SELECT enabled, admin_disabled FROM api_keys WHERE id = ?').get(id) as any
+    assert.deepEqual({ enabled: row.enabled, admin_disabled: row.admin_disabled }, { enabled: 0, admin_disabled: 1 })
+
+    // 门户能看到该标记，且自行启用被拒绝
+    const listed = (await call('/api/user/keys', { cookie: alice })).json.data
+    assert.equal(listed[0].admin_disabled, true)
+    assert.equal(listed[0].status, 'disabled')
+    const unlock = await call(`/api/user/keys/${id}`, { method: 'PUT', cookie: alice, body: { enabled: true } })
+    assert.equal(unlock.json.success, false)
+    assert.match(unlock.json.message, /管理员停用/)
+    assert.equal(db.prepare('SELECT enabled FROM api_keys WHERE id = ?').pluck().get(id), 0)
+
+    // 用户自己停用仍然可以（不会误改管理员标记）
+    const selfOff = await call(`/api/user/keys/${id}`, { method: 'PUT', cookie: alice, body: { enabled: false } })
+    assert.equal(selfOff.json.success, true)
+    assert.equal(db.prepare('SELECT admin_disabled FROM api_keys WHERE id = ?').pluck().get(id), 1)
+
+    // 管理端重新启用后标记清空，用户可以自行启停
+    const enabled = await adminPut({ enabled: true })
+    assert.equal(enabled.json.enabled, true)
+    assert.equal(enabled.json.admin_disabled, false)
+    const userOn = await call(`/api/user/keys/${id}`, { method: 'PUT', cookie: alice, body: { enabled: true } })
+    assert.equal(userOn.json.success, true)
+    assert.equal(userOn.json.data.status, 'enabled')
+  } finally {
+    await new Promise<void>((resolve) => lan.close(() => resolve()))
+  }
 })
 
 test('/pricing 返回可用分组与模型基础价格', async () => {

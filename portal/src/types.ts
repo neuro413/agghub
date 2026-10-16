@@ -88,6 +88,8 @@ export interface PortalKey {
   /** 脱敏后的 Key */
   key: string
   status: KeyStatus
+  /** 被管理员停用：用户不能自行启用，只能联系管理员 */
+  admin_disabled: boolean
   group: string | null
   /** 分组被删除或不再对当前用户开放时为 false，此时令牌无法调用 */
   group_available: boolean

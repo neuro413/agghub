@@ -1,4 +1,4 @@
-import type { IRUsage } from '../types'
+import type { IRUsage, WireFormat } from '../types'
 
 // 用量三方换算。IR 采用 OpenAI 语义：
 //   IR prompt_tokens                            = 含缓存读写在内的输入总量
@@ -141,4 +141,49 @@ export function usageToResponses(u: any): any {
     output_tokens_details: { reasoning_tokens: num(u?.completion_tokens_details?.reasoning_tokens) },
     total_tokens: num(u?.total_tokens) || input + output,
   }
+}
+
+/** 从上游原始响应体直接解析 usage；用于在空回复判定与协议转换之前完成计量 */
+export function rawWireUsage(wire: WireFormat, json: any): IRUsage {
+  if (!json || typeof json !== 'object') return emptyUsage()
+  if (wire === 'anthropic') return usageFromClaude(json.usage)
+  if (wire === 'responses') return usageFromResponses(json.usage)
+  if (wire === 'gemini') return usageFromGemini(json.usageMetadata)
+  return usageFromOpenAI(json.usage)
+}
+
+function addDetails<T extends Record<string, number | undefined>>(a: T | undefined, b: T | undefined): T | undefined {
+  const out: Record<string, number> = {}
+  for (const source of [a, b]) for (const [key, value] of Object.entries(source || {})) {
+    const n = num(value)
+    if (n) out[key] = (out[key] || 0) + n
+  }
+  return Object.keys(out).length ? out as T : undefined
+}
+
+/** 逐字段相加（含缓存与推理明细），负数与非有限值按 0 计；用于累计多次上游尝试的计费用量 */
+export function sumUsage(a: IRUsage, b: IRUsage): IRUsage {
+  const prompt = num(a.prompt_tokens) + num(b.prompt_tokens)
+  const completion = num(a.completion_tokens) + num(b.completion_tokens)
+  const out: IRUsage = { prompt_tokens: prompt, completion_tokens: completion, total_tokens: Math.max(num(a.total_tokens) + num(b.total_tokens), prompt + completion) }
+  const pd = addDetails(a.prompt_tokens_details, b.prompt_tokens_details)
+  if (pd) out.prompt_tokens_details = pd
+  const cd = addDetails(a.completion_tokens_details, b.completion_tokens_details)
+  if (cd) out.completion_tokens_details = cd
+  return out
+}
+
+/** 逐字段取较大值；同一份响应的两种解析结果合并时使用，避免任一方缺字段时丢掉另一方的计量 */
+export function maxUsage(a: IRUsage, b: IRUsage): IRUsage {
+  const prompt = Math.max(num(a.prompt_tokens), num(b.prompt_tokens))
+  const completion = Math.max(num(a.completion_tokens), num(b.completion_tokens))
+  const out: IRUsage = { ...a, prompt_tokens: prompt, completion_tokens: completion, total_tokens: Math.max(num(a.total_tokens), num(b.total_tokens), prompt + completion) }
+  const { cache_read_tokens: readA, cache_write_tokens: writeA } = cacheParts(a)
+  const { cache_read_tokens: readB, cache_write_tokens: writeB } = cacheParts(b)
+  const read = Math.max(readA, readB)
+  const write = Math.max(writeA, writeB)
+  if (read || write) out.prompt_tokens_details = { ...(a.prompt_tokens_details || {}), ...(read ? { cached_tokens: read } : {}), ...(write ? { cache_write_tokens: write } : {}) }
+  const reasoning = Math.max(num(a.completion_tokens_details?.reasoning_tokens), num(b.completion_tokens_details?.reasoning_tokens))
+  if (reasoning) out.completion_tokens_details = { ...(a.completion_tokens_details || {}), reasoning_tokens: reasoning }
+  return out
 }

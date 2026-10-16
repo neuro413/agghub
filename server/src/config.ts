@@ -85,7 +85,7 @@ export const DEFAULT_SETTINGS: Settings = {
   portal_register_ip_daily: 3,
   portal_max_keys: 10,
   portal_rpm: 0,
-  portal_concurrency: 0,
+  portal_concurrency: 2,
   /** 与 new-api 的 QuotaPerUnit 一致 */
   portal_points_per_usd: 500000,
   currency_symbol: '$',

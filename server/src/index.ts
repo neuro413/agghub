@@ -1,10 +1,17 @@
 import { createApp } from './app'
 import { HOST, PORT, PUBLIC_HOST, PUBLIC_PORT } from './config'
+import { getSettings } from './db'
 import { cleanupOldLogs } from './stats/recorder'
 import { recoverChannels } from './core/channelHealth'
 import { cleanupSessions } from './core/sessions'
 
 if (PUBLIC_PORT && PUBLIC_PORT === PORT) throw new Error('AGGHUB_PUBLIC_PORT 不能与 PORT 相同')
+
+// 已有数据库不会被新默认值覆盖，启动时提示“开放注册却不限并发”的配置
+const initialSettings = getSettings()
+if (initialSettings.portal_register_enabled && initialSettings.portal_concurrency === 0) {
+  console.warn('[agghub] 门户已开放注册但并发上限为 0（不限），用户可透支额度；建议在设置页设为非零值')
+}
 
 const lan = createApp('lan')
 const onLanListening = () => {

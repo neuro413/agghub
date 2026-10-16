@@ -55,7 +55,7 @@ function ids(value: any): boolean {
   return Array.isArray(value) && value.every(v => Number.isSafeInteger(v) && v > 0)
 }
 /** 跨字段校验的错误记在前者上，提交任一字段都要报告 */
-const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'] }
+const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'], portal_concurrency: ['portal_register_enabled'] }
 
 /**
  * 对合并后的完整设置校验，但只报告本次提交涉及的字段：库里遗留的旧值（如早期版本允许的更大范围）
@@ -79,6 +79,10 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   for (const key of ['drop_thinking_models', 'pseudo_thinking_models']) check(strings(merged[key]), key, '须为非空字符串数组')
   if (Number.isSafeInteger(merged.checkin_min_points) && Number.isSafeInteger(merged.checkin_max_points)) {
     check(merged.checkin_min_points <= merged.checkin_max_points, 'checkin_min_points', '最小奖励不能大于最大奖励')
+  }
+  // 开放注册时并发必须非零，否则可由无限并发透支用户额度
+  if (merged.portal_register_enabled && !(Number.isSafeInteger(merged.portal_concurrency) && merged.portal_concurrency > 0)) {
+    check(false, 'portal_concurrency', '开放注册时并发上限须大于 0，否则用户可无限透支额度')
   }
   check(text(merged.currency_symbol, 8), 'currency_symbol', '须为 1～8 字符的非空文本')
   check(text(merged.portal_brand_name, 64), 'portal_brand_name', '须为 1～64 字符的非空文本')

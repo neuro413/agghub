@@ -268,7 +268,11 @@ function KeyCard({
         <IconButton title="复制完整 Key" onClick={copyKey}>
           <IconCopy size={16} />
         </IconButton>
-        {!k.enabled && <span className="ah-tag">已停用</span>}
+        {!k.enabled && (
+          <span className={`ah-tag${k.admin_disabled ? ' ah-tag-err' : ''}`} title={k.admin_disabled ? '管理员已停用该 Key' : undefined}>
+            {k.admin_disabled ? '管理员已停用' : '已停用'}
+          </span>
+        )}
       </div>
 
       <div className="ah-pp-chips">
