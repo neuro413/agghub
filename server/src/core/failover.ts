@@ -14,12 +14,24 @@ export class CandidateError extends Error {
 export class UpstreamError extends Error {
   status: number
   body: string
-  constructor(status: number, body: string) {
+  /** 上游 Retry-After 头折算的等待毫秒数 */
+  retryAfterMs?: number
+  constructor(status: number, body: string, retryAfterMs?: number) {
     super(`upstream ${status}`)
     this.name = 'UpstreamError'
     this.status = status
     this.body = body
+    this.retryAfterMs = retryAfterMs
   }
+}
+
+/** 解析 Retry-After 头（秒数或 HTTP 日期）为毫秒；缺失或无法解析返回 undefined */
+export function parseRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  const text = value?.trim()
+  if (!text) return undefined
+  if (/^\d+(\.\d+)?$/.test(text)) return Math.round(Number(text) * 1000)
+  const at = Date.parse(text)
+  return Number.isFinite(at) ? Math.max(0, at - now) : undefined
 }
 
 export function parseAutoBanCodes(s: string): number[] {

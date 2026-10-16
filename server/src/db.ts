@@ -214,6 +214,9 @@ addMissingColumns('channels', [
   ['base_url_full', 'INTEGER NOT NULL DEFAULT 0'],
   ['models_url', 'TEXT'],
   ['model_alias', 'TEXT'],
+  ['key_mode', 'TEXT'],
+  ['key_concurrency', 'INTEGER NOT NULL DEFAULT 2'],
+  ['key_cooldown_seconds', 'INTEGER NOT NULL DEFAULT 300'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -223,11 +226,23 @@ addMissingColumns('request_logs', [
   ['quota_points', 'INTEGER'],
   ['user_id', 'INTEGER'],
   ['group_name', 'TEXT'],
+  ['channel_key', 'TEXT'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`]])
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_user ON request_logs(user_id, created_at)')
 db.exec('CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id)')
+// 多 key 渠道里被熔断的 key：按 key 指纹记录，调整顺序或增删其他 key 不影响；until 为空表示需手动恢复
+db.exec(`
+CREATE TABLE IF NOT EXISTS channel_key_states (
+  channel_id  INTEGER NOT NULL,
+  fingerprint TEXT    NOT NULL,
+  until       INTEGER,
+  status_code INTEGER,
+  message     TEXT,
+  updated_at  INTEGER NOT NULL,
+  PRIMARY KEY (channel_id, fingerprint)
+)`)
 
 function encodeSetting(value: unknown): string {
   return typeof value === 'boolean' ? (value ? '1' : '0') : typeof value === 'object' ? JSON.stringify(value) : String(value)
@@ -326,6 +341,9 @@ export function rowToChannel(r: ChannelRow): Channel {
     single_role: r.single_role === 'user' || r.single_role === 'system' ? r.single_role : null,
     single_role_merge_system: !!r.single_role_merge_system,
     single_role_exclude_last_user: !!r.single_role_exclude_last_user,
+    key_mode: r.type !== 'vertex' && (r.key_mode === 'poll' || r.key_mode === 'race') ? r.key_mode : null,
+    key_concurrency: r.key_concurrency ?? 2,
+    key_cooldown_seconds: r.key_cooldown_seconds ?? 300,
     ban_until: r.ban_until ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,

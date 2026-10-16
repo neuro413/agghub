@@ -7,6 +7,9 @@ export type ChannelStatus = 0 | 1 | 2
 /** 单 role 渠道兼容：对话历史打包进一条 user 消息 / 打包进系统提示 */
 export type SingleRoleMode = 'user' | 'system'
 
+/** 多 key 模式：轮询（按顺序用第一个可用 key，失效即切下一个）/ 并发（同时用多个 key 请求，先出结果者胜） */
+export type KeyMode = 'poll' | 'race'
+
 /** 数据库原始行（models / model_mapping 为 JSON 字符串） */
 export interface ChannelRow {
   id: number
@@ -30,6 +33,9 @@ export interface ChannelRow {
   single_role: string | null
   single_role_merge_system: number
   single_role_exclude_last_user: number
+  key_mode: string | null
+  key_concurrency: number
+  key_cooldown_seconds: number
   ban_until: number | null
   created_at: number
   updated_at: number
@@ -64,10 +70,28 @@ export interface Channel {
   single_role_merge_system: boolean
   /** system 模式下最后一条 user 消息不打包，原样作为随后的 user 消息 */
   single_role_exclude_last_user: boolean
+  /** 多 key 模式，null = 单 key（api_key 整串使用）；开启时 api_key 每行一个 key（Vertex 不支持） */
+  key_mode: KeyMode | null
+  /** 并发模式下同时请求的 key 数 */
+  key_concurrency: number
+  /** 多 key 模式下 429/402 熔断 key 的冷却秒数（上游带 Retry-After 时优先） */
+  key_cooldown_seconds: number
   /** 自动熔断的恢复时间（毫秒时间戳），null = 需手动恢复 */
   ban_until: number | null
   created_at: number
   updated_at: number
+}
+
+/** 多 key 渠道里单个 key 的状态（脱敏后给管理端展示） */
+export interface ChannelKeyStatus {
+  index: number
+  fingerprint: string
+  masked: string
+  state: 'ok' | 'cooldown' | 'banned'
+  /** 冷却恢复时间（毫秒时间戳）；banned 为 null */
+  until: number | null
+  status_code: number | null
+  message: string | null
 }
 
 // ── 调用主体与分发 Key ─────────────────────────────────
@@ -277,6 +301,8 @@ export interface LogRow {
   user_id: number | null
   /** 本次请求命中的分组（计费所用）；owner 调用为 null */
   group_name: string | null
+  /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值）；单 key 渠道为 null */
+  channel_key: string | null
 }
 
 // ── 设置 ───────────────────────────────────────────────

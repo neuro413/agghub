@@ -7,7 +7,7 @@ import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
-import { LocalRequestError, UpstreamError, errorKind, extractUpstreamMessage, parseAutoBanCodes, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
+import { LocalRequestError, UpstreamError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
@@ -32,6 +32,7 @@ import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthrough
 import { OWNER_CALLER, callerSettings } from './caller'
 import { OutputMeter, estimateIRPrompt, findRatio, settleRequest } from './billing'
 import { onAttemptSuccess, onBanSignal } from './channelHealth'
+import { availableKeys, keyLabel, onKeyFailure, onKeySuccess, pickRaceKeys } from './channelKeys'
 
 respConv.setReasoningStore({
   save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
@@ -50,7 +51,16 @@ export interface RelayContext {
 }
 
 interface AttemptState extends UpstreamContext {
+  /** 多 key 渠道为替换成本次 key 的副本 */
   channel: Channel
+  /** 本次使用的上游 key */
+  key: string
+  /** 写进日志的 key 标识；单 key 渠道为 null */
+  keyLabel: string | null
+  /** 并发竞速时向下游输出前调用：返回 false 表示其他 key 已胜出 */
+  claim?: () => boolean
+  /** 本次尝试结束时的耗时 */
+  elapsedMs?: number
   adaptor: Adaptor
   passthrough: boolean
   lifecycle: AttemptLifecycle
@@ -64,6 +74,8 @@ interface AttemptState extends UpstreamContext {
   /** 输出计量，usage 缺失时用于估算计费 */
   meter: OutputMeter
 }
+
+type Description = Pick<AttemptState, 'adaptor' | 'upstreamModel' | 'upstreamWire' | 'passthrough'>
 
 interface Outcome {
   status: 'success' | 'error'
@@ -120,6 +132,23 @@ function entryEncoder(format: EntryFormat, ir: any) {
   if (format === 'anthropic') return anthConv.createStreamEncoder({ estimatePromptTokens: estimatePromptTokens(ir) })
   if (format === 'responses') return respConv.createStreamEncoder({ model: ir?.model, customToolNames: ir?.custom_tool_names })
   return oaiConv.createStreamEncoder()
+}
+
+/** 多 key 并发竞速：第一个准备向下游输出的尝试胜出，其余尝试立即中断 */
+function startRace(states: AttemptState[]): void {
+  let winner: AttemptState | null = null
+  for (const state of states) {
+    state.claim = () => {
+      if (winner) return winner === state
+      winner = state
+      for (const other of states) if (other !== state) other.lifecycle.cancel(new RequestStopped('race_lost'))
+      return true
+    }
+  }
+}
+
+function isRaceLost(error: unknown): boolean {
+  return error instanceof RequestStopped && error.reason === 'race_lost'
 }
 
 function applyUserAgent(headers: Record<string, string>, channel: Channel, rawHeaders?: Record<string, any>): void {
@@ -180,35 +209,46 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   let final = errorOutcome(new Error('没有成功的上游尝试'))
   let last: AttemptState | undefined
   let attempts = 0
-  let attemptMs: number | null = null
   let rawJson: string | undefined
   let headersJson: string | undefined
   // 候选渠道 → 计费分组；owner 调用为空
   let groupOf = new Map<number, ChannelGroup>()
   const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
-  const record = (outcome: Outcome, intermediate: boolean, points: number | null = null): void => {
+  const record = (outcome: Outcome, intermediate: boolean, state = last, points: number | null = null): void => {
+    const attemptMs = state?.elapsedMs ?? null
     safeRecordLog((): LogEntry => {
       if (settings.store_request_body) {
         rawJson ??= JSON.stringify(ctx.rawBody)
         headersJson ??= JSON.stringify(ctx.rawHeaders)
       }
       return {
-        request_id: requestId, channel_id: last?.channel.id ?? null, channel_name: last?.channel.name ?? null,
-        entry_format: ctx.entryFormat, model: typeof model === 'string' ? model : null, upstream_model: last?.upstreamModel ?? null,
+        request_id: requestId, channel_id: state?.channel.id ?? null, channel_name: state?.channel.name ?? null,
+        entry_format: ctx.entryFormat, model: typeof model === 'string' ? model : null, upstream_model: state?.upstreamModel ?? null,
         status: outcome.status, status_code: outcome.code, error_message: outcome.error,
         latency_ms: intermediate ? attemptMs : lifecycle.elapsed, attempt_latency_ms: attemptMs,
         ...outcome.usage, ...cacheParts(outcome.usage), retry_count: Math.max(0, attempts - 1), is_stream: ctx.stream, is_retry: intermediate,
         request_body: rawJson, request_headers: headersJson,
-        preprocessed: last?.preprocessed, preprocessed_body: last?.preprocessedBody,
-        pseudo_thinking: last?.pseudo, thinking_inject: settings.store_request_body && last?.thinkingInject?.length ? JSON.stringify(last.thinkingInject) : undefined,
-        response_body: last?.response.text(), upstream_response_body: last?.upstream.text(),
-        response_body_truncated: last?.response.truncated, upstream_response_body_truncated: last?.upstream.truncated,
+        preprocessed: state?.preprocessed, preprocessed_body: state?.preprocessedBody,
+        pseudo_thinking: state?.pseudo, thinking_inject: settings.store_request_body && state?.thinkingInject?.length ? JSON.stringify(state.thinkingInject) : undefined,
+        response_body: state?.response.text(), upstream_response_body: state?.upstream.text(),
+        response_body_truncated: state?.response.truncated, upstream_response_body_truncated: state?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
-        user_id: caller.user?.id ?? null, group_name: (last && groupOf.get(last.channel.id)?.name) ?? null,
+        user_id: caller.user?.id ?? null, group_name: (state && groupOf.get(state.channel.id)?.name) ?? null, channel_key: state?.keyLabel ?? null,
       }
     }, settings, requestId)
   }
+
+  const newState = (channel: Channel, description: Description, key: string): AttemptState => ({
+    ...description, requestedModel: model, key, keyLabel: keyLabel(channel, key),
+    channel: channel.key_mode ? { ...channel, api_key: key } : channel,
+    lifecycle: new AttemptLifecycle(lifecycle.signal, channel.timeout_ms || settings.request_timeout_ms),
+    usage: emptyUsage(),
+    upstream: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
+    response: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
+    pseudo: description.passthrough && matchesPseudoThinking(ctx.entryFormat, description.upstreamWire, channel.id, model, settings),
+    meter: new OutputMeter(),
+  })
 
   try {
     lifecycle.signal.throwIfAborted()
@@ -218,7 +258,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     if (!modelCandidates.length) throw new LocalRequestError(`没有可用渠道支持模型 ${model}`, 503)
     groupOf = candidateGroups(caller, modelCandidates, model)
     const blocker = ctx.entryFormat === 'responses' ? respConv.conversionBlocker(ctx.rawBody) : null
-    const descriptions = new Map(modelCandidates.map(channel => {
+    const descriptions = new Map(modelCandidates.map((channel): [number, Description] => {
       const adaptor = getAdaptor(channel.type)
       const upstreamModel = resolveUpstreamModel(channel, model)
       const upstreamWire = adaptor.resolveWireFormat?.(upstreamModel) ?? adaptor.wireFormat
@@ -229,68 +269,76 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     const tried = new Set<number>()
     // 本次请求中被熔断的渠道；候选快照在请求开始时确定，不再逐轮查库
     const banned = new Set<number>()
-    const available = () => candidates.filter(c => !banned.has(c.id))
+    // 多 key 渠道本次请求中已失效的 key；可用 key 用尽的渠道不再参与选路
+    const failedKeys = new Map<number, Set<string>>()
+    const keysLeft = (c: Channel) => availableKeys(c, failedKeys.get(c.id))
+    const available = () => candidates.filter(c => !banned.has(c.id) && keysLeft(c).length > 0)
+    if (!available().length) throw new LocalRequestError('可用渠道的 key 已全部熔断', 503)
     for (let round = 0; round <= settings.channel_retry_times; round++) {
       const channel = selectChannel(available(), tried)
       if (!channel) break
       const description = descriptions.get(channel.id)!
-      for (let index = 0; index <= settings.single_retry_times; index++) {
+      const failed = failedKeys.get(channel.id) ?? new Set<string>()
+      failedKeys.set(channel.id, failed)
+      // 轮询模式换 key 不消耗同渠道重试次数；并发模式整组失败后再来一组要消耗
+      for (let index = 0; index <= settings.single_retry_times;) {
         lifecycle.signal.throwIfAborted()
-        const attempt = new AttemptLifecycle(lifecycle.signal, channel.timeout_ms || settings.request_timeout_ms)
-        const state: AttemptState = {
-          ...description, requestedModel: model, channel, lifecycle: attempt,
-          usage: emptyUsage(),
-          upstream: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
-          response: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
-          pseudo: description.passthrough && matchesPseudoThinking(ctx.entryFormat, description.upstreamWire, channel.id, model, settings),
-          meter: new OutputMeter(),
-        }
-        last = state
+        const usable = keysLeft(channel)
+        const keys = channel.key_mode === 'race' ? pickRaceKeys(channel, usable, channel.key_concurrency) : usable.slice(0, 1)
+        const states = keys.map(key => newState(channel, description, key))
+        if (states.length > 1) startRace(states)
+        last = states[states.length - 1]
         attempts++
-        let response: globalThis.Response | undefined
-        let retrySame = false
-        try {
-          const request = await prepareRequest(ctx, state, settings, caller)
-          attempt.touch()
-          const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
-          if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
-          response = await fetch(request.url, options)
-          if (!response.ok) {
-            const text = await readBodyText(response.body, {
-              signal: attempt.signal, maxBytes: 64 * 1024, truncate: true,
-              onTruncate: () => { state.upstream.truncated = settings.store_response_body },
-              onBytes: bytes => { attempt.touch(); state.upstream.append(bytes) },
-            })
-            throw new UpstreamError(response.status, text)
-          }
-          final = ctx.stream
-            ? await pipeResponse(ctx, state, response, settings, lifecycle.signal, caller)
-            : await sendResponse(ctx, state, response, settings)
-          onAttemptSuccess(channel.id)
-          return
-        } catch (caught) {
-          const error = attempt.signal.aborted ? attempt.signal.reason : caught
-          final = { ...errorOutcome(error), usage: state.usage }
-          attemptMs = attempt.elapsed
-          if (!lifecycle.signal.aborted && settings.auto_ban && shouldDisable(error, autoBanCodes) && onBanSignal(channel.id, settings)) {
+        let winner: { state: AttemptState; outcome: Outcome } | undefined
+        // 按结束先后排列；竞速落选的尝试不算失败
+        const failures: { state: AttemptState; error: unknown }[] = []
+        await Promise.all(states.map(state => runAttempt(ctx, state, settings, caller, lifecycle.signal).then(
+          outcome => { winner = { state, outcome } },
+          error => { if (!isRaceLost(error)) failures.push({ state, error }) },
+        )))
+        let keyFailed = false
+        for (const { state, error } of failures) {
+          if (lifecycle.signal.aborted) break
+          if (channel.key_mode) {
+            if (onKeyFailure(channel, state.key, error, autoBanCodes, settings)) {
+              failed.add(state.key)
+              keyFailed = true
+            }
+          } else if (settings.auto_ban && shouldDisable(error, autoBanCodes) && onBanSignal(channel.id, settings)) {
             banned.add(channel.id)
           }
-          // 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
-          const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !(error instanceof LocalRequestError)
-          retrySame = canContinue && !banned.has(channel.id) && shouldRetry(error) && index < settings.single_retry_times
-          const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
-          if (!retrySame && !nextChannel) {
-            if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
-            return
-          }
-          record(final, true)
-        } finally {
-          attemptMs = attempt.elapsed
-          attempt.dispose()
-          if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {})
         }
+        const recordFailures = (list: typeof failures) => {
+          for (const f of list) record({ ...errorOutcome(f.error), usage: f.state.usage }, true, f.state)
+        }
+        if (winner) {
+          recordFailures(failures)
+          last = winner.state
+          final = winner.outcome
+          onAttemptSuccess(channel.id)
+          onKeySuccess(channel, winner.state.key)
+          return
+        }
+        const { state: lastFailed, error } = failures[failures.length - 1]
+        last = lastFailed
+        final = { ...errorOutcome(error), usage: lastFailed.usage }
+        // 只有本地确定的输入错误阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
+        const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent && !failures.some(f => f.error instanceof LocalRequestError)
+        const hasKey = canContinue && keysLeft(channel).length > 0
+        const switchKey = channel.key_mode === 'poll' && hasKey && keyFailed
+        const retrySame = !switchKey && hasKey && !banned.has(channel.id) && index < settings.single_retry_times
+          && (failures.some(f => shouldRetry(f.error)) || (channel.key_mode === 'race' && keyFailed))
+        const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
+        if (!switchKey && !retrySame && !nextChannel) {
+          recordFailures(failures.slice(0, -1))
+          if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
+          return
+        }
+        recordFailures(failures)
+        if (switchKey) continue
         if (settings.retry_interval_ms > 0) await sleep(settings.retry_interval_ms, lifecycle.signal)
         if (!retrySame) break
+        index++
       }
       tried.add(channel.id)
     }
@@ -305,8 +353,38 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       meter: last?.meter ?? null, estimatePrompt: () => estimateIRPrompt(ctx.ir), success: final.status === 'success',
       groupRatio: (last && groupOf.get(last.channel.id)?.ratio) ?? 1,
     })
-    record(final, false, points)
+    record(final, false, last, points)
     lifecycle.dispose()
+  }
+}
+
+/** 单次上游尝试：准备请求 → 发送 → 按流式 / 非流式转发；失败时抛出，超时与中断换成 signal 的原因 */
+async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, requestSignal: AbortSignal): Promise<Outcome> {
+  const attempt = state.lifecycle
+  let response: globalThis.Response | undefined
+  try {
+    const request = await prepareRequest(ctx, state, settings, caller)
+    attempt.touch()
+    const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
+    if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
+    response = await fetch(request.url, options)
+    if (!response.ok) {
+      const text = await readBodyText(response.body, {
+        signal: attempt.signal, maxBytes: 64 * 1024, truncate: true,
+        onTruncate: () => { state.upstream.truncated = settings.store_response_body },
+        onBytes: bytes => { attempt.touch(); state.upstream.append(bytes) },
+      })
+      throw new UpstreamError(response.status, text, parseRetryAfter(response.headers.get('retry-after')))
+    }
+    return ctx.stream
+      ? await pipeResponse(ctx, state, response, settings, requestSignal, caller)
+      : await sendResponse(ctx, state, response, settings)
+  } catch (caught) {
+    throw attempt.signal.aborted ? attempt.signal.reason : caught
+  } finally {
+    state.elapsedMs = attempt.elapsed
+    attempt.dispose()
+    if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {})
   }
 }
 
@@ -339,6 +417,7 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
   const text = JSON.stringify(output)
   state.response.append(text)
   state.lifecycle.signal.throwIfAborted()
+  if (state.claim && !state.claim()) throw new RequestStopped('race_lost')
   ctx.res.type('json').send(text)
   return { status: 'success', code: 200, usage: state.usage }
 }
@@ -359,6 +438,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   const open = async (): Promise<void> => {
     if (opened) return
     requestSignal.throwIfAborted()
+    if (state.claim && !state.claim()) throw new RequestStopped('race_lost')
     ctx.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
     ctx.res.setHeader('Cache-Control', 'no-cache')
     ctx.res.setHeader('Connection', 'keep-alive')

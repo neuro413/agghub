@@ -160,6 +160,14 @@ function ChannelCard({
           <div className="k">权重</div>
           <div className="v">{c.weight}</div>
         </div>
+        {c.key_total != null && (
+          <div className="ah-meta-box" title={c.key_mode === 'race' ? `多 key 并发 · 每次 ${c.key_concurrency} 个 key` : '多 key 轮询'}>
+            <div className="k">{c.key_mode === 'race' ? '并发 key' : '轮询 key'}</div>
+            <div className="v" style={c.key_available === 0 ? { color: 'var(--warn)' } : undefined}>
+              {c.key_available}/{c.key_total}
+            </div>
+          </div>
+        )}
       </div>
 
       {groups.length > 0 && (

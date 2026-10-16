@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Dropdown, Field, Input, Select, Slider, Textarea } from '../components/Form'
@@ -6,7 +6,7 @@ import { IconCheck, IconPlus, IconRefresh, IconTest, IconTrash } from '../compon
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Channel, ChannelType, SingleRoleMode } from '../types'
+import type { Channel, ChannelKeyStatus, ChannelType, KeyMode, SingleRoleMode } from '../types'
 
 const PLACEHOLDER: Record<ChannelType, string> = {
   openai: 'https://api.openai.com（留空用官方）',
@@ -42,6 +42,22 @@ interface FormState {
   single_role_mode: SingleRoleMode
   merge_system: boolean
   exclude_last_user: boolean
+  multi_key: boolean
+  key_mode: KeyMode
+  key_concurrency: string
+  key_cooldown: string
+}
+
+/** 多 key 模式下按行拆分并去重的 key 列表（与后端规则一致） */
+function splitKeys(text: string): string[] {
+  return [...new Set(text.split(/\r?\n/).map((k) => k.trim()).filter(Boolean))]
+}
+
+function keyModeHint(f: FormState): string {
+  if (!f.multi_key) return '开启后 API Key 改为每行一个，在多个 key 之间轮询或并发请求；key 失效（熔断状态码、429、402）时自动熔断该 key'
+  if (f.key_mode === 'poll')
+    return '每次请求先用排在最前的可用 key；key 失效时熔断它并立即换下一个，不消耗同渠道重试次数。全部 key 熔断时选路自动跳过本渠道'
+  return '每次请求轮流取 N 个可用 key 同时请求上游，最先产出内容（流式）或最先完整返回（非流式）的结果转发给客户端，其余请求立即中断；上游实际被调用 N 次，落选请求也可能计费'
 }
 
 const FULL_PLACEHOLDER: Record<Exclude<ChannelType, 'vertex'>, string> = {
@@ -71,7 +87,7 @@ function initForm(c: Channel | null): FormState {
     return {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
-      exclude_last_user: false,
+      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300',
     }
   return {
     name: c.name,
@@ -94,6 +110,10 @@ function initForm(c: Channel | null): FormState {
     single_role_mode: c.single_role || 'user',
     merge_system: !!c.single_role_merge_system,
     exclude_last_user: !!c.single_role_exclude_last_user,
+    multi_key: !!c.key_mode,
+    key_mode: c.key_mode || 'poll',
+    key_concurrency: String(c.key_concurrency ?? 2),
+    key_cooldown: String(c.key_cooldown_seconds ?? 300),
   }
 }
 
@@ -113,6 +133,7 @@ function buildPayload(f: FormState): Partial<Channel> {
   for (const { model, alias } of f.aliases) {
     if (models.includes(model) && alias.trim()) aliases[model] = alias.trim()
   }
+  const multiKey = f.type !== 'vertex' && f.multi_key
   return {
     name: f.name.trim(),
     type: f.type,
@@ -133,7 +154,79 @@ function buildPayload(f: FormState): Partial<Channel> {
     single_role: f.single_role ? f.single_role_mode : null,
     single_role_merge_system: f.single_role && f.single_role_mode === 'user' && f.merge_system,
     single_role_exclude_last_user: f.single_role && f.single_role_mode === 'system' && f.exclude_last_user,
+    key_mode: multiKey ? f.key_mode : null,
+    key_concurrency: Number(f.key_concurrency) || 2,
+    key_cooldown_seconds: Number(f.key_cooldown) || 300,
   }
+}
+
+function keyStateTag(k: ChannelKeyStatus): { cls: string; text: string } {
+  if (k.state === 'ok') return { cls: 'ah-tag-ok', text: '正常' }
+  if (k.state === 'banned') return { cls: 'ah-tag-err', text: '已熔断' }
+  const until = new Date(k.until!).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return { cls: 'ah-tag-warn', text: `冷却至 ${until}` }
+}
+
+/** 已保存渠道的 key 熔断状态，可逐个或全部手动重置 */
+function KeyStatusList({ channelId }: { channelId: number }) {
+  const toast = useToast()
+  const [keys, setKeys] = useState<ChannelKeyStatus[] | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.channelKeys(channelId).then(setKeys).catch((e) => toast('err', e.message))
+  }, [channelId, toast])
+
+  const reset = async (fingerprint?: string): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      setKeys(await api.resetChannelKeys(channelId, fingerprint))
+      toast('ok', fingerprint ? '已重置该 key' : '已重置全部 key')
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!keys?.length) return null
+  const broken = keys.filter((k) => k.state !== 'ok').length
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div className="ah-row">
+        <span className="ah-mini ah-muted">
+          已保存的 key：可用 <b className="ah-num">{keys.length - broken}</b>/{keys.length}
+        </span>
+        <span style={{ flex: 1 }} />
+        {broken > 0 && (
+          <Button size="sm" variant="soft" icon={<IconRefresh size={15} />} loading={busy} onClick={() => reset()}>
+            全部重置
+          </Button>
+        )}
+      </div>
+      <div className="ah-key-list">
+        {keys.map((k) => {
+          const tag = keyStateTag(k)
+          return (
+            <div className="ah-key-row" key={k.fingerprint}>
+              <span className="ah-mini ah-faint ah-num">#{k.index + 1}</span>
+              <span className="ah-key-mask">{k.masked}</span>
+              <span className={`ah-tag ${tag.cls}`}>{tag.text}</span>
+              <span className="ah-mini ah-faint ah-truncate ah-key-msg" title={k.message || undefined}>
+                {k.message ? `${k.status_code ?? ''} ${k.message}` : ''}
+              </span>
+              {k.state !== 'ok' && (
+                <IconButton title="重置该 key" onClick={() => reset(k.fingerprint)}>
+                  <IconRefresh size={14} />
+                </IconButton>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }
 
 export function ChannelModal({
@@ -152,6 +245,22 @@ export function ChannelModal({
   const [fetching, setFetching] = useState(false)
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null)
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
+
+  const keyCount = splitKeys(f.api_key).length
+  const apiKeyHint =
+    f.type === 'vertex'
+      ? '粘贴 API Key 或服务账号 JSON 全文'
+      : f.multi_key
+        ? '每行一个 key，重复的自动去除；测试连接与拉取模型使用第一个 key'
+        : '可选 · 不鉴权的渠道可留空'
+
+  // 关闭多 key 模式只保留第一个 key：单行密码框无法承载多行内容
+  const toggleMultiKey = (on: boolean): void => {
+    if (on) return set('multi_key', true)
+    const keys = splitKeys(f.api_key)
+    if (keys.length > 1 && !window.confirm(`关闭多 key 模式只会保留第一个 key（共 ${keys.length} 个），确定吗？`)) return
+    setF((s) => ({ ...s, multi_key: false, api_key: keys[0] ?? '' }))
+  }
 
   const currentModels = (): Set<string> => new Set(f.models.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))
 
@@ -256,7 +365,7 @@ export function ChannelModal({
         )}
       </div>
 
-      <Field label={f.type === 'vertex' ? 'API Key / JSON 凭证' : 'API Key'} hint={f.type === 'vertex' ? '粘贴 API Key 或服务账号 JSON 全文' : '可选 · 不鉴权的渠道可留空'}>
+      <Field label={f.type === 'vertex' ? 'API Key / JSON 凭证' : 'API Key'} hint={apiKeyHint}>
         {f.type === 'vertex' ? (
           <Textarea
             value={f.api_key}
@@ -265,10 +374,55 @@ export function ChannelModal({
             rows={4}
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
+        ) : f.multi_key ? (
+          <Textarea
+            value={f.api_key}
+            onChange={(e) => set('api_key', e.target.value)}
+            placeholder={'每行一个 key\nsk-aaa…\nsk-bbb…'}
+            rows={5}
+            spellCheck={false}
+            style={{ fontFamily: 'monospace', fontSize: 12 }}
+          />
         ) : (
           <Input type="password" value={f.api_key} onChange={(e) => set('api_key', e.target.value)} placeholder="可留空（不鉴权渠道）" autoComplete="off" />
         )}
       </Field>
+
+      {f.type !== 'vertex' && (
+        <Field label="多 key 模式" hint={keyModeHint(f)}>
+          <div className="ah-row">
+            <Toggle checked={f.multi_key} onChange={toggleMultiKey} />
+            <span className="ah-mini ah-muted">{f.multi_key ? `已识别 ${keyCount} 个 key` : '单个 key'}</span>
+          </div>
+          {f.multi_key && (
+            <div className="ah-pp-chips" style={{ marginTop: 8 }}>
+              {(['poll', 'race'] as const).map((mode) => (
+                <button
+                  type="button"
+                  key={mode}
+                  className={`ah-pp-chip${f.key_mode === mode ? ' is-on' : ''}`}
+                  onClick={() => set('key_mode', mode)}
+                >
+                  {mode === 'poll' ? '多 key 轮询' : '多 key 并发'}
+                </button>
+              ))}
+            </div>
+          )}
+          {f.multi_key && (
+            <div className="ah-grid2" style={{ marginTop: 8 }}>
+              {f.key_mode === 'race' && (
+                <Field label="并发 key 数" hint="2~20；可用 key 不足时按实际数量">
+                  <Input type="number" min={2} max={20} value={f.key_concurrency} onChange={(e) => set('key_concurrency', e.target.value)} />
+                </Field>
+              )}
+              <Field label="限流冷却（秒）" hint="429/402 时冷却该 key；上游带 Retry-After 时以它为准">
+                <Input type="number" min={1} value={f.key_cooldown} onChange={(e) => set('key_cooldown', e.target.value)} />
+              </Field>
+            </div>
+          )}
+          {f.multi_key && channel?.key_mode && <KeyStatusList channelId={channel.id} />}
+        </Field>
+      )}
 
       <Field label="Base URL" hint={baseUrlHint(f)}>
         <Input
