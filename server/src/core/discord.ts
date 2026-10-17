@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import type { Request } from 'express'
 import { getProxyAgent } from './proxy'
-import type { Settings } from '../types'
+import type { DiscordGuild, Settings } from '../types'
 
 // 门户 Discord 登录：授权码模式，请求 Discord 一律走设置里的全局代理
 
@@ -21,6 +21,8 @@ export class DiscordError extends Error {}
 export interface DiscordProfile {
   id: string
   username: string
+  /** 用户所在的服务器；没拿到时为 null，不影响登录 */
+  guilds: DiscordGuild[] | null
 }
 
 /** 开关打开且凭据齐全才算启用 */
@@ -38,13 +40,13 @@ export function newDiscordState(): string {
   return crypto.randomBytes(24).toString('base64url')
 }
 
-/** 设了服务器门槛时多要 guilds.members.read，用来查成员身份和身份组 */
+/** guilds 用来记录用户所在的服务器供管理端排查；设了服务器门槛时多要 guilds.members.read，用来查成员身份和身份组 */
 export function discordAuthorizeUrl(s: Settings, redirectUri: string, state: string): string {
   const params = new URLSearchParams({
     client_id: s.discord_client_id,
     response_type: 'code',
     redirect_uri: redirectUri,
-    scope: s.discord_guild_id ? 'identify guilds.members.read' : 'identify',
+    scope: s.discord_guild_id ? 'identify guilds guilds.members.read' : 'identify guilds',
     state,
     // 授权过同样权限的用户直接跳回，首次授权仍会显示确认页
     prompt: 'none',
@@ -98,7 +100,7 @@ async function exchangeCode(s: Settings, code: string, redirectUri: string): Pro
   throw new DiscordError(body?.error === 'invalid_grant' ? '授权已过期，请重新发起 Discord 登录' : 'Discord 授权失败，请联系管理员检查 Discord 登录配置')
 }
 
-async function fetchProfile(s: Settings, token: string): Promise<DiscordProfile> {
+async function fetchProfile(s: Settings, token: string): Promise<Omit<DiscordProfile, 'guilds'>> {
   const r = await discordFetch('/users/@me', { headers: { authorization: `Bearer ${token}` } }, s)
   const body: any = await r.json().catch(() => null)
   if (!r.ok || typeof body?.id !== 'string' || !/^\d{1,20}$/.test(body.id) || typeof body?.username !== 'string') {
@@ -127,10 +129,35 @@ async function checkMembership(s: Settings, token: string): Promise<void> {
   }
 }
 
-/** 用授权码换取 Discord 用户，并检查服务器与身份组门槛 */
+/** 用户所在的服务器（Discord 一次最多返回 200 个，普通用户上限 100、Nitro 200，一次取完）；失败时返回 null */
+async function fetchGuilds(s: Settings, token: string): Promise<DiscordGuild[] | null> {
+  let r: Response
+  try {
+    r = await discordFetch('/users/@me/guilds?with_counts=true', { headers: { authorization: `Bearer ${token}` } }, s)
+  } catch {
+    return null
+  }
+  const body: any = await r.json().catch(() => null)
+  if (!r.ok || !Array.isArray(body)) {
+    console.warn(`[agghub] 获取 Discord 服务器列表失败: HTTP ${r.status} ${body?.message ?? ''}`)
+    return null
+  }
+  return body
+    .filter(g => typeof g?.id === 'string' && /^\d{1,20}$/.test(g.id) && typeof g.name === 'string')
+    .map(g => ({
+      id: g.id,
+      name: g.name.slice(0, 100),
+      // 图标哈希要拼进 CDN 地址，只收十六进制（动图带 a_ 前缀）
+      icon: typeof g.icon === 'string' && /^(a_)?[0-9a-f]{1,64}$/.test(g.icon) ? g.icon : null,
+      owner: g.owner === true,
+      member_count: Number.isSafeInteger(g.approximate_member_count) ? g.approximate_member_count : null,
+    }))
+}
+
+/** 用授权码换取 Discord 用户，并检查服务器与身份组门槛；服务器列表与门槛检查并行请求 */
 export async function authorizeDiscord(s: Settings, code: string, redirectUri: string): Promise<DiscordProfile> {
   const token = await exchangeCode(s, code, redirectUri)
   const profile = await fetchProfile(s, token)
-  await checkMembership(s, token)
-  return profile
+  const [, guilds] = await Promise.all([checkMembership(s, token), fetchGuilds(s, token)])
+  return { ...profile, guilds }
 }

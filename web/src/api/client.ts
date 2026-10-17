@@ -10,6 +10,7 @@ import type {
   ChannelKeyStatus,
   ChannelGroupInput,
   ChannelGroupView,
+  DiscordGuild,
   KeyQuotaOp,
   KeyUsageDay,
   UserListResult,
@@ -128,6 +129,7 @@ export const api = {
   resetUserPassword: (id: number, password: string) => req<{ ok: boolean }>(`/users/${id}/password`, { method: 'POST', body: JSON.stringify({ password }) }),
   deleteUser: (id: number) => req<{ ok: boolean }>(`/users/${id}`, { method: 'DELETE' }),
   listUserKeys: (id: number, signal?: AbortSignal) => req<ApiKeyView[]>(`/users/${id}/keys`, { signal }),
+  listUserDiscordGuilds: (id: number, signal?: AbortSignal) => req<DiscordGuild[]>(`/users/${id}/discord-guilds`, { signal }),
 
   // ── 设置 ──
   getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),

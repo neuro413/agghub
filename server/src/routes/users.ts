@@ -4,7 +4,7 @@ import { keyView, listUserKeys } from '../core/keys'
 import { listGroups } from '../core/groups'
 import { deleteUserSessions } from '../core/sessions'
 import {
-  adjustUserQuota, deleteUser, getUserView, hashPassword, listUsers, passwordError, setUserGroups, setUserPassword, setUserStatus,
+  adjustUserQuota, deleteUser, getUserView, hashPassword, listDiscordGuilds, listUsers, passwordError, setUserGroups, setUserPassword, setUserStatus,
   USER_DISABLED, USER_ENABLED,
 } from '../core/users'
 
@@ -71,4 +71,10 @@ usersRouter.delete('/:id', (req, res) => {
 usersRouter.get('/:id/keys', (req, res) => {
   const id = validId(req.params.id)
   res.json(id ? listUserKeys(id).map(k => keyView(k)) : [])
+})
+
+/** 用户最近一次 Discord 登录时所在的服务器 */
+usersRouter.get('/:id/discord-guilds', (req, res) => {
+  const id = validId(req.params.id)
+  res.json(id ? listDiscordGuilds(id) : [])
 })

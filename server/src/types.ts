@@ -193,6 +193,8 @@ export interface PortalUser {
   discord_id: string | null
   /** 最近一次 Discord 登录时的用户名 */
   discord_username: string | null
+  /** 最近一次记录 Discord 服务器列表的时间；从未记录时为 null */
+  discord_guilds_at: number | null
 }
 
 // ── 分组 ───────────────────────────────────────────────
@@ -645,6 +647,19 @@ export interface UserView {
   discord_username: string | null
   /** 没有密码的账号只能用 Discord 登录 */
   has_password: boolean
+  discord_guilds_at: number | null
+}
+
+/** 用户 Discord 登录时所在的服务器，供管理端排查 */
+export interface DiscordGuild {
+  id: string
+  name: string
+  /** 图标哈希，拼 CDN 地址用 */
+  icon: string | null
+  /** 是否为服主 */
+  owner: boolean
+  /** Discord 给出的近似成员数 */
+  member_count: number | null
 }
 
 export interface UserListResult {

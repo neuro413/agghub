@@ -6,7 +6,7 @@ import { db, getSettings, setSettings } from '../src/db'
 import { createApp } from '../src/app'
 import { resetAuthFailures } from '../src/core/caller'
 import { resetLimiter } from '../src/core/limiter'
-import { listUsers } from '../src/core/users'
+import { listDiscordGuilds, listUsers } from '../src/core/users'
 import { SettingsValidationError, validateSettingsPatch } from '../src/core/settingsValidation'
 import { jsonResponse, reset } from './helpers/relay'
 
@@ -25,6 +25,7 @@ const ROLE_B = '200000000000000002'
 type Scenario = {
   profile: { id: string; username: string }
   member?: { status: number; body: unknown }
+  guilds?: { status: number; body: unknown }
 }
 const scenarios = new Map<string, Scenario>()
 let tokenCalls = 0
@@ -59,6 +60,10 @@ before(async () => {
       const reply = scenarios.get(code)?.member ?? { status: 200, body: { roles: [], pending: false } }
       return jsonResponse(reply.body, reply.status)
     }
+    if (url === `${DISCORD_API}/users/@me/guilds?with_counts=true`) {
+      const reply = scenarios.get(code)?.guilds ?? { status: 200, body: [] }
+      return jsonResponse(reply.body, reply.status)
+    }
     return jsonResponse({ message: 'not found' }, 404)
   }) as typeof fetch
 })
@@ -69,7 +74,7 @@ after(async () => {
 })
 beforeEach(() => {
   reset()
-  db.exec('DELETE FROM users; DELETE FROM user_sessions; DELETE FROM user_checkins; DELETE FROM api_keys; DELETE FROM usage_daily; DELETE FROM channel_groups; DELETE FROM announcements')
+  db.exec('DELETE FROM users; DELETE FROM user_discord_guilds; DELETE FROM user_sessions; DELETE FROM user_checkins; DELETE FROM api_keys; DELETE FROM usage_daily; DELETE FROM channel_groups; DELETE FROM announcements')
   resetAuthFailures()
   resetLimiter()
   // 大部分用例都会建号；注册上限单独在用例里设置
@@ -100,8 +105,8 @@ function enableDiscord(extra: Record<string, unknown> = {}) {
   })
 }
 
-function scenario(code: string, profile: { id: string; username: string }, member?: Scenario['member']) {
-  scenarios.set(code, { profile, member })
+function scenario(code: string, profile: { id: string; username: string }, member?: Scenario['member'], guilds?: Scenario['guilds']) {
+  scenarios.set(code, { profile, member, guilds })
 }
 
 async function startLogin() {
@@ -186,7 +191,7 @@ test('start：授权地址、state Cookie 与 scope', async () => {
   assert.equal(url.searchParams.get('response_type'), 'code')
   assert.equal(url.searchParams.get('redirect_uri'), 'https://portal.example.com/oauth/discord')
   assert.equal(url.searchParams.get('prompt'), 'none')
-  assert.equal(url.searchParams.get('scope'), 'identify')
+  assert.equal(url.searchParams.get('scope'), 'identify guilds')
   assert.equal(url.searchParams.get('state'), started.json.data.state)
   assert.equal(
     started.stateCookie,
@@ -195,7 +200,7 @@ test('start：授权地址、state Cookie 与 scope', async () => {
 
   setSettings({ discord_guild_id: GUILD_ID })
   started = await startLogin()
-  assert.equal(new URL(started.json.data.url).searchParams.get('scope'), 'identify guilds.members.read')
+  assert.equal(new URL(started.json.data.url).searchParams.get('scope'), 'identify guilds guilds.members.read')
 })
 
 test('callback：缺少 Cookie 或 state 不一致时拒绝且不请求 Discord', async () => {
@@ -425,4 +430,35 @@ test('listUsers 支持按 Discord 用户名模糊与 Discord ID 精确搜索', a
   const byDiscordId = listUsers({ q: '987654321012345678' })
   assert.equal(byDiscordId.total, 1)
   assert.equal(byDiscordId.items[0].id, login.json.data.id)
+})
+
+test('登录时记录服务器列表：每次覆盖、获取失败保留旧记录、支持按服务器搜索', async () => {
+  enableDiscord()
+  const discordId = '333333333333333333'
+  const guildA = { id: '400000000000000001', name: 'Alpha Hub', icon: 'a_0123abcd', owner: true, approximate_member_count: 12 }
+  const guildB = { id: '400000000000000002', name: 'beta', icon: '../evil', owner: false }
+  scenario('g1', { id: discordId, username: 'guild.user' }, undefined, { status: 200, body: [guildB, guildA, { id: 'bad', name: 'x' }] })
+  const first = await discordLogin('g1')
+  assert.equal(first.json.success, true)
+  const userId = first.json.data.id
+  assert.deepEqual(listDiscordGuilds(userId), [
+    { id: guildA.id, name: 'Alpha Hub', icon: 'a_0123abcd', owner: true, member_count: 12 },
+    { id: guildB.id, name: 'beta', icon: null, owner: false, member_count: null },
+  ])
+  const recordedAt = listUsers({}).items[0].discord_guilds_at
+  assert.ok(recordedAt)
+
+  assert.equal(listUsers({ q: guildA.id }).total, 1)
+  assert.equal(listUsers({ q: 'alpha' }).items[0]?.id, userId)
+  assert.equal(listUsers({ q: '400000000000000003' }).total, 0)
+
+  // 获取失败不影响登录，也不清掉上次的记录
+  scenario('g2', { id: discordId, username: 'guild.user' }, undefined, { status: 500, body: { message: 'boom' } })
+  assert.equal((await discordLogin('g2')).json.success, true)
+  assert.equal(listDiscordGuilds(userId).length, 2)
+
+  scenario('g3', { id: discordId, username: 'guild.user' }, undefined, { status: 200, body: [guildB] })
+  assert.equal((await discordLogin('g3')).json.success, true)
+  assert.deepEqual(listDiscordGuilds(userId).map(g => g.id), [guildB.id])
+  assert.equal(listUsers({ q: guildA.id }).total, 0)
 })
