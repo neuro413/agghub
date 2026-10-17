@@ -1,7 +1,12 @@
 // 门户 API 契约，与 server/src/routes/portal.ts 对应；额度字段均为点数
 
 export interface PortalStatus {
+  /** 注册总开关 */
   register_enabled: boolean
+  /** 可以用用户名密码注册（已计入总开关） */
+  password_register_enabled: boolean
+  /** 可以用 Discord 登录；未注册的账号能否建号还看总开关 */
+  discord_enabled: boolean
   checkin_enabled: boolean
   checkin_min_points: number
   checkin_max_points: number
@@ -26,6 +31,10 @@ export interface Self {
   created_at: number
   today_requests: number
   today_points: number
+  /** Discord 建的号才有 */
+  discord_username: string | null
+  /** 没有密码的账号只能用 Discord 登录 */
+  has_password: boolean
 }
 
 export interface UsageDay {

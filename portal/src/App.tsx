@@ -9,7 +9,7 @@ import type { PortalStatus, Self } from './types'
 import { ToastProvider } from './components/Toast'
 import { ConsoleLayout } from './components/Layout'
 import { Button } from './components/ui'
-import { LoginPage, RegisterPage } from './pages/AuthPages'
+import { DiscordCallbackPage, LoginPage, RegisterPage } from './pages/AuthPages'
 import { DashboardPage } from './pages/DashboardPage'
 import { KeysPage } from './pages/KeysPage'
 import { LogsPage } from './pages/LogsPage'
@@ -24,8 +24,12 @@ const CONSOLE_PAGES: Record<string, () => JSX.Element> = {
   '/console/profile': ProfilePage,
 }
 
-/** 未登录访问控制台去登录页（带回跳地址），已登录访问登录页去控制台 */
+/** Discord 授权回跳页，与后端 DISCORD_CALLBACK_PATH 一致 */
+const DISCORD_CALLBACK = '/oauth/discord'
+
+/** 未登录访问控制台去登录页（带回跳地址），已登录访问登录页去控制台；Discord 回跳页自己处理跳转 */
 function redirectTarget(pathname: string, location: string, loggedIn: boolean): string | null {
+  if (pathname === DISCORD_CALLBACK) return null
   const isAuth = pathname === '/login' || pathname === '/register'
   if (loggedIn) return isAuth || !CONSOLE_PAGES[pathname] ? '/console' : null
   if (isAuth) return null
@@ -87,6 +91,7 @@ export default function App() {
       <ToastProvider>
         {pathname === '/login' && <LoginPage />}
         {pathname === '/register' && <RegisterPage />}
+        {pathname === DISCORD_CALLBACK && <DiscordCallbackPage />}
         {ConsolePage && user && (
           <ConsoleLayout path={pathname}>
             <ConsolePage key={user.id} />

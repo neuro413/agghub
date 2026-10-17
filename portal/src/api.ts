@@ -37,6 +37,9 @@ export const api = {
   register: (username: string, password: string) => request<null>('/register', 'POST', { username, password }),
   login: (username: string, password: string) => request<Self>('/login', 'POST', { username, password }),
   logout: () => request<null>('/logout', 'POST'),
+  /** 返回 Discord 授权地址，state 同时写进 Cookie */
+  discordStart: () => request<{ url: string; state: string }>('/oauth/discord/start', 'POST'),
+  discordCallback: (code: string, state: string) => request<Self>('/oauth/discord/callback', 'POST', { code, state }),
   self: (signal?: AbortSignal) => request<Self>('/self', 'GET', undefined, signal),
   changePassword: (old_password: string, new_password: string) => request<null>('/password', 'POST', { old_password, new_password }),
   usage: (days: number, signal?: AbortSignal) => request<UsageDay[]>(`/usage?days=${days}`, 'GET', undefined, signal),

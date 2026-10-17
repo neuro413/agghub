@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Input } from '../components/Form'
-import { IconChevron, IconChevronLeft, IconChevronRight, IconCopy, IconRefresh, IconSearch, IconTrash, IconUsers } from '../components/Icons'
+import { IconChevron, IconChevronLeft, IconChevronRight, IconCopy, IconDiscord, IconRefresh, IconSearch, IconTrash, IconUsers } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Loading } from '../components/Primitives'
 import { useToast } from '../components/Toast'
@@ -189,7 +189,9 @@ export function UsersPage() {
   }
 
   const resetPassword = async (u: UserView) => {
-    const password = window.prompt(`为「${u.username}」设置新密码（8～128 个字符），该用户的所有登录会失效`)
+    const password = window.prompt(u.has_password
+      ? `为「${u.username}」设置新密码（8～128 个字符），该用户的所有登录会失效`
+      : `「${u.username}」目前只能用 Discord 登录，设置密码（8～128 个字符）后也能用用户名和密码登录；该用户的所有登录会失效`)
     if (password == null) return
     try {
       await api.resetUserPassword(u.id, password)
@@ -222,7 +224,7 @@ export function UsersPage() {
         <div className="ah-row">
           <div className="ah-user-search">
             <IconSearch size={16} />
-            <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名" />
+            <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord" />
           </div>
           <IconButton title="刷新" onClick={reload}><IconRefresh size={18} /></IconButton>
         </div>
@@ -253,6 +255,11 @@ export function UsersPage() {
                 <span className="u-name">
                   <IconChevron size={14} className={`ah-user-chev${openId === u.id ? ' is-open' : ''}`} />
                   <span className="ah-truncate" style={{ fontWeight: 700 }}>{u.username}</span>
+                  {u.discord_id && (
+                    <span className="ah-tag ah-tag-discord" title={`Discord ID：${u.discord_id}${u.has_password ? '' : '（仅 Discord 登录）'}`}>
+                      <IconDiscord size={12} />{u.discord_username ?? 'Discord'}
+                    </span>
+                  )}
                   {u.status !== 1 && <span className="ah-tag ah-tag-warn">已停用</span>}
                   {u.groups.map(g => <span key={g} className="ah-tag" title="专属分组">{g}</span>)}
                 </span>
@@ -266,7 +273,7 @@ export function UsersPage() {
                   <Toggle checked={u.status === 1} onChange={() => toggleStatus(u)} />
                   <button type="button" className="ah-btn is-ghost is-sm" onClick={() => setGroupUser(u)}>分组</button>
                   <button type="button" className="ah-btn is-ghost is-sm" onClick={() => adjust(u)}>调余额</button>
-                  <button type="button" className="ah-btn is-ghost is-sm" onClick={() => resetPassword(u)}>重置密码</button>
+                  <button type="button" className="ah-btn is-ghost is-sm" onClick={() => resetPassword(u)}>{u.has_password ? '重置密码' : '设置密码'}</button>
                   <IconButton title="删除" danger onClick={() => del(u)}><IconTrash size={16} /></IconButton>
                 </span>
               </div>

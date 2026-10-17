@@ -253,12 +253,12 @@ location / {
 
 | 页面 | 内容 |
 | --- | --- |
-| 登录 / 注册 | 用户名 + 密码；用户名 3～20 位字母、数字或下划线（不区分大小写），密码 8～128 个字符；注册后跳回登录页 |
+| 登录 / 注册 | 用户名 + 密码；开启 Discord 登录后另有「使用 Discord 登录 / 注册」按钮；用户名 3～20 位字母、数字或下划线（不区分大小写），密码 8～128 个字符；注册后跳回登录页 |
 | 概览 | 余额、今日消耗、历史消耗、请求次数及最近 7 天迷你图；签到月历；Base URL 接入信息与最新公告面板（最近 5 条，可查看全部） |
 | 模型列表 | 仿 new-api 模型广场：按分组、供应商、计费类型筛选，搜索、排序与视图切换，价格按所选分组倍率显示，点击模型查看各分组明细 |
 | 令牌 | 创建（名称 + 分组 + 可选过期时间）、复制、启停、改分组、删除；每个 Key 显示分组、已用额度和最近使用时间；被管理员停用的 Key 开关禁用并显示「管理员已停用」 |
 | 使用日志 | 按令牌、模型筛选，显示时间、模型、Token、花费、耗时和状态；错误信息经过脱敏 |
-| 个人中心 | 账户统计、修改密码、退出登录 |
+| 个人中心 | 账户统计、修改密码（Discord 注册的账号没有密码，不显示此项）、退出登录 |
 
 ### 模型列表
 
@@ -297,12 +297,45 @@ location / {
 - 停用用户会立即让其登录会话和所有 Key 失效；删除用户会一并删除其 Key、会话、签到和每日用量，请求日志保留。
 - 管理端请求日志里，门户用户的调用来源显示为「门户用户」，Key 标签为「用户名 / Key 名」。
 
+### Discord 登录
+
+门户的登录页与注册页可以显示「使用 Discord 登录 / 注册」，采用 Discord OAuth2 授权码流程：点击按钮后整页跳转到 Discord 授权页，授权完成后回跳到门户的 `/oauth/discord` 页面完成登录。该功能只面向门户普通用户，管理后台仍然只使用管理令牌。登录页调用 `POST /api/user/oauth/discord/start` 取得授权地址并写入 state Cookie，回跳页面用 `POST /api/user/oauth/discord/callback` 提交 `{ code, state }`，成功后写入登录 Cookie。
+
+**注册开关：**
+
+- 「开放注册」是总开关，关闭后用户名密码和 Discord 都不能新建账号，已有用户仍可登录。
+- 子开关为「允许用户名密码注册」（`portal_password_register_enabled`，默认开启）和「允许 Discord 登录注册」（`discord_enabled`，默认关闭）。只关掉密码注册时，注册页只保留 Discord 按钮，可以用来做到「只能用 Discord 注册」。
+- 同 IP 每日注册上限对两种注册方式共用；Discord 新建的账号同样获得「新用户赠送额度」。
+
+**账号规则：**
+
+- 已用 Discord 登录过的账号按 Discord 用户 ID 识别，直接登录；未注册过的自动建号。
+- 门户用户名取 Discord 用户名（`.` 换成 `_`，不合法字符去掉，最长 20 位）；被占用时截短并加 4 位随机数字，最后兜底 `dc_` + 36 进制的 Discord ID。
+- Discord 建的号没有密码，只能用 Discord 登录，个人中心不显示「修改密码」；管理员在用户页可以给这类账号「设置密码」，之后也能用用户名和密码登录。不支持给已有密码账号绑定 Discord，也不支持解绑。
+- 用户页会在用户名旁显示 Discord 标签（Discord 用户名，悬停显示 Discord ID）；搜索框支持按 Discord 用户名模糊搜索和按 Discord ID 精确搜索。
+
+**准入门槛（可选）：**
+
+- 设置「要求加入的服务器」（`discord_guild_id`）后，每次 Discord 登录都会检查用户是否是该服务器成员，并额外申请 `guilds.members.read` 权限；服务器开启成员审核时，未通过审核的成员也会被拒绝。
+- 设置「要求的身份组」（`discord_role_ids`，可填多个，拥有任一即可）后，还要求拥有其中一个身份组。
+- 门槛只在登录时检查：用户退群或被撤销身份组后，已有的登录会话（30 天）和 API Key 不会立即失效，只是下次无法再用 Discord 登录。
+- 获取服务器 ID、身份组 ID：Discord 设置 → 高级 → 打开开发者模式，右键服务器图标「复制服务器 ID」、右键身份组「复制身份组 ID」。只能填 ID，不能填名称。
+
+**配置步骤：**
+
+1. 在 Discord Developer Portal 创建应用，在 OAuth2 页面取得 Client ID 与 Client Secret。
+2. 在 Redirects 中添加回调地址 `{公网 Base URL}/oauth/discord`。管理后台设置页的「Discord 登录」卡片会显示并可复制该地址；没填公网 Base URL 时，回调地址跟随用户访问门户的地址，建议先填好公网 Base URL。
+3. 在设置页填入 Client ID / Secret 并开启。开启时 Client ID 和 Secret 必须已填写，否则保存报错。
+4. 请求 Discord API 走设置里的「HTTP 代理」（`proxy_url`），服务器在国内时需要配置代理。
+
 ### 会话与防刷
 
 - 登录后发放 30 天有效的会话 Cookie（`HttpOnly`、`SameSite=Lax`、只发往 `/api/user`，HTTPS 反代下带 `Secure`），数据库只保存令牌的 SHA-256；修改密码会让其他设备的登录失效。
 - 门户接口不开放跨域，写操作只接受 JSON 请求体，配合 `SameSite` 防止跨站请求伪造；页面带 `X-Frame-Options: DENY` 等安全响应头。
 - 同一 IP 每天最多注册「同 IP 每日注册上限」个账号（默认 3，`0` 不限，IPv6 按 /64 统计）；登录失败与 `/v1` 鉴权失败共用公网 IP 失败计数，5 分钟内失败 10 次封禁 15 分钟，带有效 Key 的 `/v1` 调用不受封禁影响。登录另按用户名单独计数，IP 或用户名任一维度被封都拒绝登录；同一 IP 对同一账号最多同时进行 2 个密码校验。注册时遇到「用户名已被占用」也计入该 IP 的失败次数，被封禁的 IP 不能注册。修改密码按账号与 IP 各自计数，同一账号同时只处理一个改密请求。全站密码哈希并发上限为 2，避免占满线程池。客户端 IP 的取法见下文[反向代理与客户端 IP](#反向代理与客户端-ip)。
-- 门户没有验证码、邮箱验证和找回密码，忘记密码需要管理员在用户页重置。
+- 发起 Discord 授权时会生成随机 state，同时写进只发往 `/api/user/oauth/discord` 的 10 分钟 HttpOnly Cookie；回调时比对，保证只有发起授权的浏览器能完成登录，防止登录 CSRF。state 一次性使用，回调时无论成败都会清除。
+- Discord 回调同样受 IP 鉴权失败封禁约束，state 不匹配计入失败次数。Client Secret 只保存在服务端，门户 `/api/user/status` 不下发。授权地址带 `prompt=none`，授权过的用户再次登录不会停在确认页。
+- 门户没有验证码、邮箱验证和找回密码，忘记密码需要管理员在用户页重置；Discord 注册的账号没有密码。
 
 ## 请求预处理
 
@@ -410,6 +443,12 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 | `model_ratios` | 一条全为 1 的 `*` | 模型定价表（每 Token 点数倍率，界面按每百万 Token 价格编辑） |
 | `public_base_url` | 空 | 令牌页复制接入信息和门户显示接入地址时使用；留空时门户按访问地址显示 |
 | `portal_register_enabled` | 开启 | 门户开放注册 |
+| `portal_password_register_enabled` | 开启 | 允许用户名密码注册；关闭后只能通过 Discord 注册 |
+| `discord_enabled` | 关闭 | 门户显示 Discord 登录 / 注册；开启前须填写 Client ID 与 Secret |
+| `discord_client_id` | 空 | Discord 应用 OAuth2 的 Client ID |
+| `discord_client_secret` | 空 | Discord 应用 OAuth2 的 Client Secret，只保存在服务端 |
+| `discord_guild_id` | 空 | 要求加入的 Discord 服务器 ID；留空不检查 |
+| `discord_role_ids` | `[]` | 要求的 Discord 身份组 ID，拥有任一即可；留空不检查 |
 | `portal_initial_quota` | `0` | 新用户赠送额度（点数，界面按金额填写） |
 | `portal_register_ip_daily` | `3` | 同 IP 每日注册上限，`0` 不限 |
 | `portal_max_keys` | `10` | 每个用户最多 Key 数 |
@@ -470,6 +509,7 @@ agghub/
 │   │   ├── caller.ts            调用方解析、鉴权失败限速与准入检查
 │   │   ├── keys.ts              分发 Key 的生成与读写
 │   │   ├── users.ts             门户用户、密码哈希与级联删除
+│   │   ├── discord.ts           门户 Discord 登录（授权地址、state Cookie、换取令牌、服务器与身份组门槛）
 │   │   ├── sessions.ts          门户登录会话与 Cookie
 │   │   ├── checkin.ts           每日签到
 │   │   ├── announcements.ts     门户通知与公告的读写
@@ -491,7 +531,7 @@ agghub/
 │   ├── charts/                  SVG 图表
 │   └── styles/                  设计变量与样式
 └── portal/src/                  用户门户（只在公网端口托管）
-    ├── pages/                   登录注册、概览、模型列表、令牌、使用日志、个人中心
+    ├── pages/                   登录注册与 Discord 回调页（DiscordCallbackPage，在 AuthPages.tsx 中）、概览、模型列表、令牌、使用日志、个人中心
     ├── components/              布局、按钮、弹层、图标、通知中心等组件
     └── styles/                  仿 new-api 的主题变量与样式
 ```

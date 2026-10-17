@@ -5,7 +5,7 @@ import { Card } from '../components/Card'
 import { Input, PointsInput, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
 import { setMoneyConfig } from '../lib/money'
-import { IconBolt, IconCopy, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWand, IconWarn } from '../components/Icons'
+import { IconBolt, IconCopy, IconDiscord, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWand, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Settings, SystemInfo } from '../types'
@@ -19,7 +19,11 @@ const KEYS: (keyof Settings)[] = [
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
   'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
   'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
+  'portal_password_register_enabled', 'discord_enabled', 'discord_client_id', 'discord_client_secret', 'discord_guild_id', 'discord_role_ids',
 ]
+
+/** 身份组 ID 输入：逗号（含全角）、空格或换行分隔 */
+const parseRoleIds = (text: string) => text.split(/[\s,，]+/).filter(Boolean)
 
 type IntegerKey = 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
 type PointsKey = 'portal_initial_quota' | 'checkin_min_points' | 'checkin_max_points'
@@ -46,6 +50,8 @@ export function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  /** 身份组输入框的原文；null 时按已存的 ID 列表显示 */
+  const [roleText, setRoleText] = useState<string | null>(null)
   const iconFile = useRef<HTMLInputElement>(null)
   /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
   const loaded = useRef<Settings | null>(null)
@@ -78,6 +84,7 @@ export function SettingsPage() {
       const saved = await api.updateSettings(Object.fromEntries(changed.map((k) => [k, s[k]])))
       loaded.current = saved
       setS(saved)
+      setRoleText(null)
       // 管理 API 与 /v1 共用该令牌，保存后同步本地凭证，避免下一个请求就 401
       setStoredToken(saved.access_token)
       setMoneyConfig(saved)
@@ -138,6 +145,9 @@ export function SettingsPage() {
   const pointsInput = (key: PointsKey, label: string) => (
     <PointsInput aria-label={label} value={s[key]} onChange={v => set(key, v)} />
   )
+  // 与后端 discordRedirectUri 一致：Base URL 留空时跟随用户访问门户的地址
+  const publicBase = s.public_base_url.trim().replace(/\/+$/, '')
+  const discordCallback = publicBase ? `${publicBase}/oauth/discord` : ''
 
   return (
     <div className="ah-fade-up">
@@ -197,11 +207,14 @@ export function SettingsPage() {
         </div>
         <div className="ah-set-desc">
           {system?.public_enabled
-            ? '公网端口上的自助门户：用户名密码注册登录、自建 Key、签到领额度、查看调用记录；用户 Key 直接扣用户余额'
+            ? '公网端口上的自助门户：用户名密码或 Discord 注册登录、自建 Key、签到领额度、查看调用记录；用户 Key 直接扣用户余额'
             : '门户随公网端口一起开放，当前公网端口未开启'}
         </div>
-        <SettingRow label="开放注册" desc="关闭后已有用户仍可登录">
+        <SettingRow label="开放注册" desc="注册总开关，关闭后用户名密码和 Discord 都不能新建账号；已有用户仍可登录">
           <Toggle checked={s.portal_register_enabled} onChange={(v) => set('portal_register_enabled', v)} />
+        </SettingRow>
+        <SettingRow label="允许用户名密码注册" desc="关闭后只能通过 Discord 注册；已有账号仍可用密码登录">
+          <Toggle checked={s.portal_password_register_enabled} onChange={(v) => set('portal_password_register_enabled', v)} />
         </SettingRow>
         <SettingRow label="新用户赠送额度" desc="注册时发放到用户余额">
           {pointsInput('portal_initial_quota', '新用户赠送额度')}
@@ -231,6 +244,47 @@ export function SettingsPage() {
             </SettingRow>
           </>
         )}
+      </Card>
+
+      {/* Discord 登录 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconDiscord size={18} /> Discord 登录
+        </div>
+        <div className="ah-set-desc">
+          门户登录注册页显示「使用 Discord 登录」；没注册过的 Discord 账号首次登录时自动建号（受开放注册和同 IP 每日上限约束），这类账号没有密码，只能用 Discord 登录。
+          在 Discord 开发者后台 → 应用 → OAuth2 里取得 Client ID / Secret，并把下方回调地址加入 Redirects；请求 Discord 走「HTTP 代理」设置
+        </div>
+        {discordCallback ? (
+          <EndpointRow label="回调地址" url={discordCallback} />
+        ) : (
+          <SettingRow label="回调地址" desc="未填写公网 Base URL，回调地址跟随用户访问门户的地址；建议先在「公网分发」里填写">
+            <code className="ah-mini ah-muted">{'<门户地址>/oauth/discord'}</code>
+          </SettingRow>
+        )}
+        <SettingRow label="允许 Discord 登录注册" desc="开启前须先填写 Client ID 和 Client Secret">
+          <Toggle checked={s.discord_enabled} onChange={(v) => set('discord_enabled', v)} />
+        </SettingRow>
+        <SettingRow label="Client ID" desc="应用的 Client ID（纯数字）">
+          <Input value={s.discord_client_id} onChange={(e) => set('discord_client_id', e.target.value)} placeholder="123456789012345678" autoComplete="off" />
+        </SettingRow>
+        <SettingRow label="Client Secret" desc="只保存在服务端，门户不会下发">
+          <Input value={s.discord_client_secret} onChange={(e) => set('discord_client_secret', e.target.value)} type="password" autoComplete="new-password" />
+        </SettingRow>
+        <SettingRow label="要求加入的服务器" desc="服务器 ID，用户必须是该服务器成员才能登录，留空不检查；Discord 开启开发者模式后右键服务器图标「复制服务器 ID」">
+          <Input value={s.discord_guild_id} onChange={(e) => set('discord_guild_id', e.target.value)} placeholder="留空不检查" autoComplete="off" />
+        </SettingRow>
+        <SettingRow label="要求的身份组" desc="身份组 ID，逗号或空格分隔，拥有任意一个即可登录；留空只要求是服务器成员。右键身份组「复制身份组 ID」">
+          <Input
+            value={roleText ?? s.discord_role_ids.join(', ')}
+            onChange={(e) => {
+              setRoleText(e.target.value)
+              set('discord_role_ids', parseRoleIds(e.target.value))
+            }}
+            placeholder="留空不检查"
+            autoComplete="off"
+          />
+        </SettingRow>
       </Card>
 
       {/* 品牌与金额显示 */}
@@ -314,7 +368,7 @@ export function SettingsPage() {
             </SettingRow>
           </>
         )}
-        <SettingRow label="HTTP 代理" desc="上游请求经此代理转发，留空不使用代理">
+        <SettingRow label="HTTP 代理" desc="上游请求和 Discord 登录经此代理转发，留空不使用代理">
           <Input
             value={s.proxy_url}
             onChange={(e) => set('proxy_url', e.target.value)}

@@ -93,7 +93,9 @@ CREATE TABLE IF NOT EXISTS users (
   created_at    INTEGER NOT NULL,
   last_login_at INTEGER,
   last_login_ip TEXT,
-  groups        TEXT    NOT NULL DEFAULT '[]'
+  groups        TEXT    NOT NULL DEFAULT '[]',
+  discord_id       TEXT,
+  discord_username TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_users_register ON users(register_ip, created_at);
 
@@ -229,7 +231,9 @@ addMissingColumns('request_logs', [
   ['group_name', 'TEXT'],
   ['channel_key', 'TEXT'],
 ])
-addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`]])
+addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT']])
+// 一个 Discord 账号只对应一个用户；Discord 建号依赖此约束兜底并发
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord ON users(discord_id) WHERE discord_id IS NOT NULL')
 // 管理员停用的 Key 标记：与 enabled 分开，门户用户不能自行解锁
 addMissingColumns('api_keys', [['admin_disabled', 'INTEGER NOT NULL DEFAULT 0']])
 db.exec('CREATE INDEX IF NOT EXISTS idx_logs_key ON request_logs(key_id)')

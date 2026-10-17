@@ -189,6 +189,10 @@ export interface PortalUser {
   last_login_ip: string | null
   /** 管理员分配的专属分组；公开分组不必分配 */
   groups: string[]
+  /** Discord 登录建的号 password_hash 为空串，只能用 Discord 登录 */
+  discord_id: string | null
+  /** 最近一次 Discord 登录时的用户名 */
+  discord_username: string | null
 }
 
 // ── 分组 ───────────────────────────────────────────────
@@ -357,7 +361,10 @@ export interface Settings {
   /** 仅用于显示：给分发用户的公网 Base URL */
   public_base_url: string
   // 用户门户
+  /** 注册总开关：关闭后密码注册和 Discord 都不能新建账号 */
   portal_register_enabled: boolean
+  /** 注册子开关：用户名密码注册 */
+  portal_password_register_enabled: boolean
   /** 新用户赠送点数 */
   portal_initial_quota: number
   /** 同一 IP 每天最多注册数，0 = 不限 */
@@ -386,6 +393,15 @@ export interface Settings {
   portal_notice: string
   /** 门户是否显示公告 */
   portal_announcements_enabled: boolean
+  // Discord 登录
+  /** 注册子开关：Discord 登录，未注册的 Discord 账号登录时自动建号 */
+  discord_enabled: boolean
+  discord_client_id: string
+  discord_client_secret: string
+  /** 要求加入的服务器 ID，空串不检查 */
+  discord_guild_id: string
+  /** 要求的身份组 ID，满足任一即可；空数组只要求是服务器成员 */
+  discord_role_ids: string[]
 }
 
 /** 规则「调用来源」作用域，三类规则共用 */
@@ -625,6 +641,10 @@ export interface UserView {
   last_login_ip: string | null
   key_count: number
   groups: string[]
+  discord_id: string | null
+  discord_username: string | null
+  /** 没有密码的账号只能用 Discord 登录 */
+  has_password: boolean
 }
 
 export interface UserListResult {

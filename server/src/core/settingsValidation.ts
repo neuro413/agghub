@@ -54,8 +54,13 @@ function strings(value: any): boolean {
 function ids(value: any): boolean {
   return Array.isArray(value) && value.every(v => Number.isSafeInteger(v) && v > 0)
 }
+/** Discord 的 ID（应用、服务器、身份组）都是 17～20 位数字 */
+const SNOWFLAKE = /^\d{17,20}$/
 /** 跨字段校验的错误记在前者上，提交任一字段都要报告 */
-const LINKED: Record<string, string[]> = { pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'], portal_concurrency: ['portal_register_enabled'] }
+const LINKED: Record<string, string[]> = {
+  pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'], portal_concurrency: ['portal_register_enabled'],
+  discord_enabled: ['discord_client_id', 'discord_client_secret'], discord_role_ids: ['discord_guild_id'],
+}
 
 /**
  * 对合并后的完整设置校验，但只报告本次提交涉及的字段：库里遗留的旧值（如早期版本允许的更大范围）
@@ -112,6 +117,26 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
     }
   } catch { errors.public_base_url = '须为空串或有效的 HTTP/HTTPS 地址' }
+  // Discord：ID 与密钥去掉首尾空白再存，身份组去重
+  for (const key of ['discord_client_id', 'discord_client_secret', 'discord_guild_id']) {
+    if (typeof merged[key] === 'string') merged[key] = merged[key].trim()
+    if (Object.hasOwn(patch, key)) patch[key] = merged[key]
+  }
+  if (Array.isArray(merged.discord_role_ids) && Object.hasOwn(patch, 'discord_role_ids')) {
+    merged.discord_role_ids = patch.discord_role_ids = [...new Set(merged.discord_role_ids)]
+  }
+  for (const key of ['discord_client_id', 'discord_guild_id']) {
+    check(typeof merged[key] === 'string' && (!merged[key] || SNOWFLAKE.test(merged[key])), key, '须为空或 17～20 位数字 ID')
+  }
+  check(typeof merged.discord_client_secret === 'string' && merged.discord_client_secret.length <= 256, 'discord_client_secret', '须为不超过 256 字符的字符串')
+  check(Array.isArray(merged.discord_role_ids) && merged.discord_role_ids.length <= 50 && merged.discord_role_ids.every((v: any) => typeof v === 'string' && SNOWFLAKE.test(v)),
+    'discord_role_ids', '须为不超过 50 个 17～20 位数字的身份组 ID')
+  if (merged.discord_enabled && !(merged.discord_client_id && merged.discord_client_secret)) {
+    check(false, 'discord_enabled', '开启 Discord 登录前须先填写 Client ID 和 Client Secret')
+  }
+  if (Array.isArray(merged.discord_role_ids) && merged.discord_role_ids.length && !merged.discord_guild_id) {
+    check(false, 'discord_role_ids', '设置身份组门槛须先填写服务器 ID')
+  }
   if (!Array.isArray(merged.model_ratios)) errors.model_ratios = '须为倍率数组'
   else {
     const ratioIds = new Set<string>()

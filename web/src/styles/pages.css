@@ -1183,6 +1183,12 @@
   background: #e8f1fb;
   color: #3b7fc4;
 }
+.ah-tag-discord {
+  align-items: center;
+  gap: 4px;
+  background: #eef0fe;
+  color: #5865f2;
+}
 
 /* ── 统计页 · Key 分布 ── */
 .ah-keydist {

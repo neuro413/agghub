@@ -258,6 +258,12 @@
 .pt-auth-form { display: grid; gap: 16px; }
 .pt-auth-form .pt-btn-block { margin-top: 8px; }
 .pt-auth-foot { color: var(--muted-fg); font-size: 12px; text-align: center; }
+.pt-auth-alt { display: grid; gap: 16px; }
+.pt-auth-divider { display: flex; align-items: center; gap: 12px; color: var(--muted-fg); font-size: 12px; }
+.pt-auth-divider::before,
+.pt-auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.pt-btn-discord svg { color: #5865f2; }
+.pt-auth-pending { display: flex; justify-content: center; padding: 16px 0; color: var(--muted-fg); }
 
 @media (min-width: 640px) {
   .pt-auth-brand { top: 32px; left: 32px; }

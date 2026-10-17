@@ -102,6 +102,42 @@ export function createUser(input: { username: string; password_hash: string; quo
   return info.changes ? getUserById(Number(info.lastInsertRowid)) : null
 }
 
+export function getUserByDiscordId(discordId: string): PortalUser | null {
+  return rowToUser(db.prepare('SELECT * FROM users WHERE discord_id = ?').get(discordId) as any)
+}
+
+/** 门户用户名候选：Discord 用户名（. 换成 _）→ 截短后加随机数字 → dc_ 加 36 进制的 Discord ID */
+function discordUsernames(discordName: string, discordId: string): string[] {
+  const base = discordName.replace(/\./g, '_').replace(/[^A-Za-z0-9_]/g, '').slice(0, 20)
+  const stem = base.slice(0, 15)
+  const names = [base]
+  if (stem) for (let i = 0; i < 3; i++) names.push(`${stem}_${crypto.randomInt(1000, 10000)}`)
+  names.push(`dc_${BigInt(discordId).toString(36)}`)
+  return names.filter(name => USERNAME_RE.test(name))
+}
+
+/**
+ * Discord 建号：没有密码，只能用 Discord 登录；用户名被占用时换下一个候选。
+ * 同一 Discord 账号并发建号时唯一索引兜底，返回已建好的那个；候选全部被占用时返回 null
+ */
+export function createDiscordUser(input: { discord_id: string; discord_username: string; quota: number; ip: string }, now = Date.now()): PortalUser | null {
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO users (username, password_hash, status, quota, register_ip, created_at, discord_id, discord_username)
+     VALUES (?, '', 1, ?, ?, ?, ?, ?)`,
+  )
+  for (const username of discordUsernames(input.discord_username, input.discord_id)) {
+    const info = insert.run(username, input.quota, input.ip || null, now, input.discord_id, input.discord_username)
+    if (info.changes) return getUserById(Number(info.lastInsertRowid))
+    const existing = getUserByDiscordId(input.discord_id)
+    if (existing) return existing
+  }
+  return null
+}
+
+export function setDiscordUsername(id: number, discordUsername: string): void {
+  db.prepare('UPDATE users SET discord_username = ? WHERE id = ?').run(discordUsername, id)
+}
+
 export function touchLogin(id: number, ip: string, now = Date.now()): void {
   db.prepare('UPDATE users SET last_login_at = ?, last_login_ip = ? WHERE id = ?').run(now, ip || null, id)
 }
@@ -139,23 +175,25 @@ export function deleteUser(id: number): boolean {
 }
 
 const VIEW_COLUMNS = `id, username, status, quota, used_quota, request_count, register_ip, created_at, last_login_at, last_login_ip, groups,
+  discord_id, discord_username, password_hash != '' AS has_password,
   (SELECT COUNT(*) FROM api_keys WHERE api_keys.user_id = users.id) AS key_count`
 
-type UserViewRow = Omit<UserView, 'groups'> & { groups: string }
-const toView = (row: UserViewRow): UserView => ({ ...row, groups: parseGroups(row.groups) })
+type UserViewRow = Omit<UserView, 'groups' | 'has_password'> & { groups: string; has_password: number }
+const toView = (row: UserViewRow): UserView => ({ ...row, groups: parseGroups(row.groups), has_password: !!row.has_password })
 
 export function getUserView(id: number): UserView | null {
   const row = db.prepare(`SELECT ${VIEW_COLUMNS} FROM users WHERE id = ?`).get(id) as UserViewRow | undefined
   return row ? toView(row) : null
 }
 
-/** 管理端分页列表，q 按用户名模糊匹配 */
+/** 管理端分页列表，q 按用户名或 Discord 用户名模糊匹配，或按 Discord ID 精确匹配 */
 export function listUsers(query: { q?: string; page?: number; size?: number }): UserListResult {
   const size = Math.min(100, Math.max(1, Math.floor(query.size || 20)))
   const page = Math.max(1, Math.floor(query.page || 1))
   const q = (query.q || '').trim()
-  const where = q ? "WHERE username LIKE ? ESCAPE '\\'" : ''
-  const args = q ? [`%${q.replace(/[\\%_]/g, m => '\\' + m)}%`] : []
+  const like = `%${q.replace(/[\\%_]/g, m => '\\' + m)}%`
+  const where = q ? "WHERE username LIKE ? ESCAPE '\\' OR discord_username LIKE ? ESCAPE '\\' OR discord_id = ?" : ''
+  const args = q ? [like, like, q] : []
   const total = db.prepare(`SELECT COUNT(*) FROM users ${where}`).pluck().get(...args) as number
   const rows = db
     .prepare(`SELECT ${VIEW_COLUMNS} FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)

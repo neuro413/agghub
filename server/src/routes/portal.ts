@@ -9,12 +9,16 @@ import { userGroups } from '../core/groups'
 import { countUserKeys, createUserKey, deleteKey, getUserKey, listUserKeys, updateKey } from '../core/keys'
 import { modelsVisibleTo } from '../core/selector'
 import { sanitizePublicError } from '../core/failover'
-import { createSession, deleteSession, deleteUserSessions, readSessionToken, sessionCookie, sessionUser } from '../core/sessions'
+import { createSession, deleteSession, deleteUserSessions, readCookie, readSessionToken, sessionCookie, sessionUser } from '../core/sessions'
 import {
-  burnPasswordCheck, countRegistrations, createUser, effectivePortalKey, getUserById, getUserByName, hashPassword,
-  passwordError, setUserPassword, touchLogin, USER_ENABLED, usernameError, verifyPassword,
+  authorizeDiscord, DISCORD_STATE_COOKIE, DiscordError, discordAuthorizeUrl, discordReady, discordRedirectUri, discordStateCookie,
+  discordStateMatches, newDiscordState,
+} from '../core/discord'
+import {
+  burnPasswordCheck, countRegistrations, createDiscordUser, createUser, effectivePortalKey, getUserByDiscordId, getUserById, getUserByName,
+  hashPassword, passwordError, setDiscordUsername, setUserPassword, touchLogin, USER_ENABLED, usernameError, verifyPassword,
 } from '../core/users'
-import type { ApiKey, Caller, PortalUser } from '../types'
+import type { ApiKey, Caller, PortalUser, Settings } from '../types'
 
 // 用户门户 API（只挂在公网 app 的 /api/user）；返回格式仿 new-api：{ success, message, data }
 export const portalRouter = Router()
@@ -33,6 +37,19 @@ const validId = (raw: string): number => {
 }
 
 const localMidnight = (now: number) => new Date(now).setHours(0, 0, 0, 0)
+
+/** 该 IP 今日注册数已达上限；密码注册与 Discord 建号共用 */
+const registerLimitReached = (s: Settings, ip: string) => s.portal_register_ip_daily > 0 && !!ip
+  && countRegistrations(ip, localMidnight(Date.now()), limitKey) >= s.portal_register_ip_daily
+
+/** 鉴权失败封禁中时写好 429 并返回 true */
+function rejectBlocked(res: Response, ids: string[], message: string): boolean {
+  const seconds = Math.max(...ids.map(id => blockedSeconds(id)))
+  if (seconds <= 0) return false
+  res.setHeader('Retry-After', String(seconds))
+  fail(res, `${message}，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
+  return true
+}
 
 /** sk-agh-XXXX**********YYYY */
 function maskKey(key: string): string {
@@ -72,6 +89,8 @@ function selfView(user: PortalUser) {
     created_at: user.created_at,
     today_requests: today?.requests ?? 0,
     today_points: today?.points ?? 0,
+    discord_username: user.discord_username,
+    has_password: !!user.password_hash,
   }
 }
 
@@ -91,6 +110,8 @@ portalRouter.get('/status', (req, res) => {
   const s = getSettings()
   ok(res, {
     register_enabled: s.portal_register_enabled,
+    password_register_enabled: s.portal_register_enabled && s.portal_password_register_enabled,
+    discord_enabled: discordReady(s),
     checkin_enabled: s.checkin_enabled,
     checkin_min_points: s.checkin_min_points,
     checkin_max_points: s.checkin_max_points,
@@ -107,19 +128,14 @@ portalRouter.get('/status', (req, res) => {
 portalRouter.post('/register', wrap(async (req, res) => {
   const s = getSettings()
   if (!s.portal_register_enabled) return fail(res, '管理员已关闭注册')
+  if (!s.portal_password_register_enabled) return fail(res, '管理员已关闭用户名密码注册')
   const { username, password } = req.body ?? {}
   const error = usernameError(username) ?? passwordError(password)
   if (error) return fail(res, error)
   const ip = clientIp(req)
-  const seconds = blockedSeconds(ip)
-  if (seconds > 0) {
-    res.setHeader('Retry-After', String(seconds))
-    return fail(res, `尝试次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
-  }
-  const ipLimitReached = () => s.portal_register_ip_daily > 0 && !!ip
-    && countRegistrations(ip, localMidnight(Date.now()), limitKey) >= s.portal_register_ip_daily
+  if (rejectBlocked(res, [ip], '尝试次数过多')) return
   // 先做一次廉价检查，超额请求不进入 scrypt
-  if (ipLimitReached()) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+  if (registerLimitReached(s, ip)) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
   // 用户名已被占用计入失败次数，让枚举用户名付出代价
   const taken = () => { recordAuthFailure(ip); return fail(res, '用户名已被占用') }
   if (getUserByName(username)) return taken()
@@ -128,7 +144,7 @@ portalRouter.post('/register', wrap(async (req, res) => {
   try {
     const passwordHash = await hashPassword(password)
     // scrypt 期间可能有并发注册写入；断言紧挨 INSERT，中间没有 await
-    if (ipLimitReached()) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+    if (registerLimitReached(s, ip)) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
     const user = createUser({ username, password_hash: passwordHash, quota: s.portal_initial_quota, ip })
     if (!user) return taken()
     ok(res, null, '注册成功')
@@ -142,18 +158,15 @@ portalRouter.post('/login', wrap(async (req, res) => {
   const { username, password } = req.body ?? {}
   // 只有合法用户名才有账号维度的计数，避免任意长字符串撑大限流表
   const account = usernameError(username) ? '' : `u:${String(username).toLowerCase()}`
-  const seconds = Math.max(blockedSeconds(ip), account ? blockedSeconds(account) : 0)
-  if (seconds > 0) {
-    res.setHeader('Retry-After', String(seconds))
-    return fail(res, `登录失败次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
-  }
+  if (rejectBlocked(res, account ? [ip, account] : [ip], '登录失败次数过多')) return
   if (typeof username !== 'string' || typeof password !== 'string' || !username || !password) return fail(res, '请输入用户名和密码')
   // 同一 IP 对同一账号最多 2 个并发校验，避免用突发请求在失败计数生效前全部进入 scrypt
   const release = beginAuthAttempt(`login:${limitKey(ip)}:${account}`, 2)
   if (!release) return fail(res, '登录请求过于频繁，请稍后再试', 429)
   try {
     const user = account ? getUserByName(username) : null
-    const valid = user && !passwordError(password) ? await verifyPassword(password, user.password_hash) : (await burnPasswordCheck(password), false)
+    // Discord 建的号没有密码，同样空跑一次校验，耗时不暴露账号类型
+    const valid = user?.password_hash && !passwordError(password) ? await verifyPassword(password, user.password_hash) : (await burnPasswordCheck(password), false)
     if (!user || !valid) {
       recordAuthFailure(ip)
       if (account) recordAuthFailure(account)
@@ -174,6 +187,60 @@ portalRouter.post('/logout', (req, res) => {
   res.setHeader('Set-Cookie', sessionCookie('', req.secure))
   ok(res)
 })
+
+// ── Discord 登录 ──
+/** 发起授权：state 同时写进 Cookie，回调时比对，只有发起授权的浏览器能完成登录 */
+portalRouter.post('/oauth/discord/start', (req, res) => {
+  const s = getSettings()
+  if (!discordReady(s)) return fail(res, '管理员未开启 Discord 登录')
+  const state = newDiscordState()
+  res.setHeader('Set-Cookie', discordStateCookie(state, req.secure))
+  ok(res, { url: discordAuthorizeUrl(s, discordRedirectUri(s, req), state), state })
+})
+
+/** 回调：换取 Discord 用户，已有账号直接登录，没有时按注册开关建号 */
+portalRouter.post('/oauth/discord/callback', wrap(async (req, res) => {
+  const s = getSettings()
+  if (!discordReady(s)) return fail(res, '管理员未开启 Discord 登录')
+  const ip = clientIp(req)
+  if (rejectBlocked(res, [ip], '尝试次数过多')) return
+  // state 一次性：无论成败都清掉
+  const clearState = discordStateCookie('', req.secure)
+  res.setHeader('Set-Cookie', clearState)
+  const { code, state } = req.body ?? {}
+  if (!discordStateMatches(state, readCookie(req, DISCORD_STATE_COOKIE))) {
+    recordAuthFailure(ip)
+    return fail(res, '登录状态已失效，请重新发起 Discord 登录')
+  }
+  if (typeof code !== 'string' || !code || code.length > 512) return fail(res, '缺少 Discord 授权码')
+  const release = beginAuthAttempt(`discord:${limitKey(ip)}`, 2)
+  if (!release) return fail(res, '登录请求过于频繁，请稍后再试', 429)
+  try {
+    const profile = await authorizeDiscord(s, code, discordRedirectUri(s, req))
+    let user = getUserByDiscordId(profile.id)
+    const created = !user
+    if (user) {
+      if (user.discord_username !== profile.username) setDiscordUsername(user.id, profile.username)
+    } else {
+      // 管理员可能在 Discord 往返期间改了设置，建号前按最新设置判断；之后到 INSERT 没有 await
+      const latest = getSettings()
+      if (!latest.portal_register_enabled) return fail(res, '该 Discord 账号尚未注册，管理员已关闭注册')
+      if (registerLimitReached(latest, ip)) return fail(res, '该 IP 今日注册次数已达上限，请明天再试')
+      user = createDiscordUser({ discord_id: profile.id, discord_username: profile.username, quota: latest.portal_initial_quota, ip })
+      if (!user) return fail(res, '创建账号失败，请稍后再试')
+    }
+    if (user.status !== USER_ENABLED) return fail(res, '账号已停用，请联系管理员')
+    const token = createSession(user.id, ip)
+    touchLogin(user.id, ip)
+    res.setHeader('Set-Cookie', [clearState, sessionCookie(token, req.secure)])
+    ok(res, selfView(getUserById(user.id) ?? user), created ? '注册成功' : '登录成功')
+  } catch (error) {
+    if (error instanceof DiscordError) return fail(res, error.message)
+    throw error
+  } finally {
+    release()
+  }
+}))
 
 // ── 以下需要登录 ────────────────────────────────────────
 portalRouter.use((req, res, next) => {
@@ -201,15 +268,12 @@ portalRouter.get('/notices', (_req, res) => {
 
 portalRouter.post('/password', wrap(async (req, res) => {
   const user = currentUser(res)
+  if (!user.password_hash) return fail(res, '该账号通过 Discord 登录，没有可修改的密码')
   const ip = clientIp(req)
   // 按账号与按 IP 各计一份失败，挡住「拿着会话无限次猜原密码」
   const userId = `pw:${user.id}`
   const ipId = `pwip:${limitKey(ip)}`
-  const seconds = Math.max(blockedSeconds(userId), blockedSeconds(ipId))
-  if (seconds > 0) {
-    res.setHeader('Retry-After', String(seconds))
-    return fail(res, `尝试次数过多，请 ${Math.ceil(seconds / 60)} 分钟后再试`, 429)
-  }
+  if (rejectBlocked(res, [userId, ipId], '尝试次数过多')) return
   const release = beginAuthAttempt(userId, 1)
   if (!release) return fail(res, '请求过于频繁，请稍后再试', 429)
   try {

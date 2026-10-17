@@ -44,13 +44,18 @@ export function cleanupSessions(now = Date.now()): void {
   db.prepare('DELETE FROM user_sessions WHERE expires_at <= ?').run(now)
 }
 
-/** 从 Cookie 头取会话令牌 */
-export function readSessionToken(req: Request): string {
+/** 从 Cookie 头取指定 Cookie，没有时为空串 */
+export function readCookie(req: Request, name: string): string {
   for (const part of (req.headers.cookie || '').split(';')) {
     const at = part.indexOf('=')
-    if (at > 0 && part.slice(0, at).trim() === SESSION_COOKIE) return part.slice(at + 1).trim()
+    if (at > 0 && part.slice(0, at).trim() === name) return part.slice(at + 1).trim()
   }
   return ''
+}
+
+/** 从 Cookie 头取会话令牌 */
+export function readSessionToken(req: Request): string {
+  return readCookie(req, SESSION_COOKIE)
 }
 
 /** Set-Cookie 值；token 为空时生成立即过期的清除指令 */

@@ -7,7 +7,7 @@ import { date, num, money } from '../lib/format'
 import { PageLayout } from '../components/Layout'
 import { useToast } from '../components/Toast'
 import { Button, Card, CardHeader, Field, IconBadge, PasswordInput } from '../components/ui'
-import { IconActivity, IconChartColumn, IconLock, IconLogOut, IconUser, IconWalletCards } from '../components/Icons'
+import { IconActivity, IconChartColumn, IconDiscord, IconLock, IconLogOut, IconUser, IconWalletCards } from '../components/Icons'
 
 function PasswordCard() {
   const toast = useToast()
@@ -82,6 +82,7 @@ export function ProfilePage() {
           <div>
             <div className="pt-profile-name">{user.username}</div>
             <div className="pt-profile-meta"><IconUser size={13} />用户 ID {user.id} · 注册于 {date(user.created_at)}</div>
+            {user.discord_username && <div className="pt-profile-meta"><IconDiscord size={13} />Discord：{user.discord_username}</div>}
           </div>
         </div>
         <div className="pt-profile-stats">
@@ -95,7 +96,12 @@ export function ProfilePage() {
         </div>
       </section>
       <div className="pt-profile-grid">
-        <PasswordCard />
+        {user.has_password ? <PasswordCard /> : (
+          <Card>
+            <CardHeader icon={<IconBadge tone="info" size="md"><IconDiscord /></IconBadge>} title="登录方式" desc="该账号通过 Discord 登录，没有设置密码" />
+            <div className="pt-card-content muted">请使用登录页的「使用 Discord 登录」进入控制台。</div>
+          </Card>
+        )}
         <Card>
           <CardHeader icon={<IconBadge tone="neutral" size="md"><IconLogOut /></IconBadge>} title="退出登录" desc="退出当前设备上的登录" />
           <div className="pt-card-content">

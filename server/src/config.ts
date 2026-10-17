@@ -81,6 +81,7 @@ export const DEFAULT_SETTINGS: Settings = {
   auto_ban_cooldown_minutes: 0,
   public_base_url: '',
   portal_register_enabled: true,
+  portal_password_register_enabled: true,
   portal_initial_quota: 0,
   portal_register_ip_daily: 3,
   portal_max_keys: 10,
@@ -97,6 +98,11 @@ export const DEFAULT_SETTINGS: Settings = {
   checkin_max_points: 250000,
   portal_notice: '',
   portal_announcements_enabled: true,
+  discord_enabled: false,
+  discord_client_id: '',
+  discord_client_secret: '',
+  discord_guild_id: '',
+  discord_role_ids: [],
 }
 
 /** 整数设置的取值范围（保存时校验） */
