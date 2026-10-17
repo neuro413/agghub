@@ -1459,6 +1459,62 @@
 .ah-user-key .ah-key-secret-val {
   flex: none;
 }
+.ah-user-guilds {
+  margin: -4px var(--sp-3) 10px 34px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: #f4f5fe;
+}
+.ah-user-guilds-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.ah-user-guilds-head svg {
+  color: #5865f2;
+}
+.ah-guild-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 4px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ah-guild {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+.ah-guild-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  object-fit: cover;
+  background: #e0e3fd;
+  color: #5865f2;
+  font-size: 11px;
+  font-weight: 700;
+}
+.ah-guild-search {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--ink-faint);
+  background: transparent;
+}
+.ah-guild-search:hover {
+  background: #e0e3fd;
+  color: #5865f2;
+}
 
 /* ── 分组页 ── */
 .ah-group-tools {

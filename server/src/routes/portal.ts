@@ -16,7 +16,7 @@ import {
 } from '../core/discord'
 import {
   burnPasswordCheck, countRegistrations, createDiscordUser, createUser, effectivePortalKey, getUserByDiscordId, getUserById, getUserByName,
-  hashPassword, passwordError, setDiscordUsername, setUserPassword, touchLogin, USER_ENABLED, usernameError, verifyPassword,
+  hashPassword, passwordError, setDiscordGuilds, setDiscordUsername, setUserPassword, touchLogin, USER_ENABLED, usernameError, verifyPassword,
 } from '../core/users'
 import type { ApiKey, Caller, PortalUser, Settings } from '../types'
 
@@ -229,6 +229,8 @@ portalRouter.post('/oauth/discord/callback', wrap(async (req, res) => {
       user = createDiscordUser({ discord_id: profile.id, discord_username: profile.username, quota: latest.portal_initial_quota, ip })
       if (!user) return fail(res, '创建账号失败，请稍后再试')
     }
+    // 服务器列表供管理端排查，停用的账号也照样记录；没拿到时保留上次的记录
+    if (profile.guilds) setDiscordGuilds(user.id, profile.guilds)
     if (user.status !== USER_ENABLED) return fail(res, '账号已停用，请联系管理员')
     const token = createSession(user.id, ip)
     touchLogin(user.id, ip)

@@ -11,7 +11,7 @@ import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
 import { fmtNum, fmtTime } from '../lib/format'
 import { currencySymbol, money, toPoints } from '../lib/money'
-import type { ApiKeyView, ChannelGroupView, UserListResult, UserView } from '../types'
+import type { ApiKeyView, ChannelGroupView, DiscordGuild, UserListResult, UserView } from '../types'
 import { MultiChips } from './preprocessShared'
 
 const PAGE_SIZE = 20
@@ -131,6 +131,65 @@ function UserKeys({ userId, usable, onChanged }: { userId: number; usable: strin
   )
 }
 
+/** Discord 服务器图标；没有图标或加载失败时显示名称首字 */
+function GuildIcon({ guild }: { guild: DiscordGuild }) {
+  const [failed, setFailed] = useState(false)
+  if (!guild.icon || failed) return <span className="ah-guild-icon">{[...guild.name][0] ?? '?'}</span>
+  return (
+    <img
+      className="ah-guild-icon"
+      src={`https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  )
+}
+
+/** 展开行：用户最近一次 Discord 登录时所在的服务器；onSearch 搜索同在某个服务器的用户 */
+function UserGuilds({ userId, recordedAt, onSearch }: { userId: number; recordedAt: number | null; onSearch: (guildId: string) => void }) {
+  const toast = useToast()
+  const [guilds, setGuilds] = useState<DiscordGuild[] | null>(null)
+  useEffect(() => {
+    if (recordedAt == null) return
+    const controller = new AbortController()
+    api.listUserDiscordGuilds(userId, controller.signal).then(
+      setGuilds,
+      (e: any) => { if (!controller.signal.aborted) toast('err', e.message) },
+    )
+    return () => controller.abort()
+  }, [userId, recordedAt, toast])
+
+  if (recordedAt == null) return <div className="ah-user-guilds ah-mini ah-muted">还没有记录 Discord 服务器，该用户下次用 Discord 登录时记录</div>
+  if (!guilds) return <div className="ah-user-guilds ah-mini ah-muted">读取中…</div>
+  return (
+    <div className="ah-user-guilds">
+      <div className="ah-user-guilds-head ah-mini ah-muted">
+        <IconDiscord size={13} />
+        <span>所在服务器 {guilds.length} 个 · 记录于 {fmtTime(recordedAt)}</span>
+      </div>
+      {!guilds.length ? (
+        <div className="ah-mini ah-faint">没有加入任何服务器</div>
+      ) : (
+        <div className="ah-guild-list">
+          {guilds.map(g => (
+            <div key={g.id} className="ah-guild">
+              <GuildIcon guild={g} />
+              <span className="ah-truncate" title={`${g.name}\n服务器 ID：${g.id}`}>{g.name}</span>
+              {g.owner && <span className="ah-tag">服主</span>}
+              <span className="sp" style={{ flex: 1 }} />
+              {g.member_count != null && <span className="ah-mini ah-faint ah-num">{fmtNum(g.member_count)} 人</span>}
+              <button type="button" className="ah-guild-search" title="搜索同在这个服务器的用户" onClick={() => onSearch(g.id)}>
+                <IconSearch size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function UsersPage() {
   const toast = useToast()
   const [qInput, setQInput] = useState('')
@@ -224,7 +283,7 @@ export function UsersPage() {
         <div className="ah-row">
           <div className="ah-user-search">
             <IconSearch size={16} />
-            <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord" />
+            <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord / 服务器" />
           </div>
           <IconButton title="刷新" onClick={reload}><IconRefresh size={18} /></IconButton>
         </div>
@@ -277,7 +336,12 @@ export function UsersPage() {
                   <IconButton title="删除" danger onClick={() => del(u)}><IconTrash size={16} /></IconButton>
                 </span>
               </div>
-              {openId === u.id && <UserKeys userId={u.id} usable={usableOf(u)} onChanged={reload} />}
+              {openId === u.id && (
+                <>
+                  <UserKeys userId={u.id} usable={usableOf(u)} onChanged={reload} />
+                  {u.discord_id && <UserGuilds userId={u.id} recordedAt={u.discord_guilds_at} onSearch={setQInput} />}
+                </>
+              )}
             </Fragment>
           ))
         )}

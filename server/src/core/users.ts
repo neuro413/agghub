@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { promisify } from 'node:util'
 import { db } from '../db'
 import { userGroups } from './groups'
-import type { ApiKey, PortalUser, Settings, UserListResult, UserView } from '../types'
+import type { ApiKey, DiscordGuild, PortalUser, Settings, UserListResult, UserView } from '../types'
 
 const scrypt = promisify(crypto.scrypt) as (password: string, salt: Buffer, keylen: number, options: crypto.ScryptOptions) => Promise<Buffer>
 
@@ -138,6 +138,24 @@ export function setDiscordUsername(id: number, discordUsername: string): void {
   db.prepare('UPDATE users SET discord_username = ? WHERE id = ?').run(discordUsername, id)
 }
 
+/** 用本次 Discord 登录拿到的服务器列表覆盖旧记录 */
+export function setDiscordGuilds(id: number, guilds: DiscordGuild[], now = Date.now()): void {
+  const insert = db.prepare('INSERT OR REPLACE INTO user_discord_guilds (user_id, guild_id, name, icon, owner, member_count) VALUES (?, ?, ?, ?, ?, ?)')
+  db.transaction(() => {
+    db.prepare('DELETE FROM user_discord_guilds WHERE user_id = ?').run(id)
+    for (const g of guilds) insert.run(id, g.id, g.name, g.icon, g.owner ? 1 : 0, g.member_count)
+    db.prepare('UPDATE users SET discord_guilds_at = ? WHERE id = ?').run(now, id)
+  })()
+}
+
+/** 服主的服务器排前面，其余按名称 */
+export function listDiscordGuilds(id: number): DiscordGuild[] {
+  const rows = db
+    .prepare('SELECT guild_id AS id, name, icon, owner, member_count FROM user_discord_guilds WHERE user_id = ? ORDER BY owner DESC, name COLLATE NOCASE')
+    .all(id) as (Omit<DiscordGuild, 'owner'> & { owner: number })[]
+  return rows.map(row => ({ ...row, owner: !!row.owner }))
+}
+
 export function touchLogin(id: number, ip: string, now = Date.now()): void {
   db.prepare('UPDATE users SET last_login_at = ?, last_login_ip = ? WHERE id = ?').run(now, ip || null, id)
 }
@@ -160,7 +178,7 @@ export function adjustUserQuota(id: number, delta: number): boolean {
   return db.prepare('UPDATE users SET quota = quota + ? WHERE id = ?').run(delta, id).changes > 0
 }
 
-/** 删除用户及其 Key、会话、签到和每日用量；请求日志保留 */
+/** 删除用户及其 Key、会话、签到、每日用量和 Discord 服务器记录；请求日志保留 */
 export function deleteUser(id: number): boolean {
   return db.transaction(() => {
     const keyIds = db.prepare('SELECT id FROM api_keys WHERE user_id = ?').pluck().all(id) as number[]
@@ -170,12 +188,13 @@ export function deleteUser(id: number): boolean {
     db.prepare("DELETE FROM usage_daily WHERE account_type = 'user' AND account_id = ?").run(id)
     db.prepare('DELETE FROM user_sessions WHERE user_id = ?').run(id)
     db.prepare('DELETE FROM user_checkins WHERE user_id = ?').run(id)
+    db.prepare('DELETE FROM user_discord_guilds WHERE user_id = ?').run(id)
     return db.prepare('DELETE FROM users WHERE id = ?').run(id).changes > 0
   })()
 }
 
 const VIEW_COLUMNS = `id, username, status, quota, used_quota, request_count, register_ip, created_at, last_login_at, last_login_ip, groups,
-  discord_id, discord_username, password_hash != '' AS has_password,
+  discord_id, discord_username, discord_guilds_at, password_hash != '' AS has_password,
   (SELECT COUNT(*) FROM api_keys WHERE api_keys.user_id = users.id) AS key_count`
 
 type UserViewRow = Omit<UserView, 'groups' | 'has_password'> & { groups: string; has_password: number }
@@ -186,14 +205,17 @@ export function getUserView(id: number): UserView | null {
   return row ? toView(row) : null
 }
 
-/** 管理端分页列表，q 按用户名或 Discord 用户名模糊匹配，或按 Discord ID 精确匹配 */
+/** 管理端分页列表，q 按用户名、Discord 用户名、所在服务器名模糊匹配，或按 Discord ID、服务器 ID 精确匹配 */
 export function listUsers(query: { q?: string; page?: number; size?: number }): UserListResult {
   const size = Math.min(100, Math.max(1, Math.floor(query.size || 20)))
   const page = Math.max(1, Math.floor(query.page || 1))
   const q = (query.q || '').trim()
   const like = `%${q.replace(/[\\%_]/g, m => '\\' + m)}%`
-  const where = q ? "WHERE username LIKE ? ESCAPE '\\' OR discord_username LIKE ? ESCAPE '\\' OR discord_id = ?" : ''
-  const args = q ? [like, like, q] : []
+  const where = q
+    ? `WHERE username LIKE ? ESCAPE '\\' OR discord_username LIKE ? ESCAPE '\\' OR discord_id = ?
+       OR id IN (SELECT user_id FROM user_discord_guilds WHERE guild_id = ? OR name LIKE ? ESCAPE '\\')`
+    : ''
+  const args = q ? [like, like, q, q, like] : []
   const total = db.prepare(`SELECT COUNT(*) FROM users ${where}`).pluck().get(...args) as number
   const rows = db
     .prepare(`SELECT ${VIEW_COLUMNS} FROM users ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
