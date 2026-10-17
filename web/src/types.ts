@@ -4,7 +4,7 @@ export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, KeyMode, ChannelKeyStatus, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
-  UserView, UserListResult, DiscordGuild, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
+  UserView, UserListResult, DiscordGuild, DiscordRuleGroup, DiscordGuildCondition, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
   Announcement, AnnouncementInput, AnnouncementType,
 } from '../../server/src/types'
 
@@ -28,15 +28,39 @@ export interface StatsOverview {
   total_points: number
 }
 
+/** 当前值为最近 60 秒；峰值为所选范围内的自然分钟，at 为该分钟起点 */
+export interface StatsThroughput {
+  current_rpm: number
+  current_tpm: number
+  peak_rpm: number
+  peak_rpm_at: number | null
+  peak_tpm: number
+  peak_tpm_at: number | null
+}
+
 export interface Stats {
   range: string
   bucketMs: number
   since: number
   overview: StatsOverview
-  trend: { bucket: number; requests: number; tokens: number; points: number }[]
+  throughput: StatsThroughput
+  /** peak_rpm / peak_tpm 为该桶内的峰值分钟 */
+  trend: { bucket: number; requests: number; tokens: number; points: number; peak_rpm: number; peak_tpm: number }[]
   by_channel: { channel_id: number; channel_name: string; count: number; success: number }[]
   by_model: { model: string; count: number }[]
   by_key: { key_id: number; key_name: string | null; count: number; success: number; points: number }[]
+  /** ip 为 null 表示未记录；keys 为用量最多的前 5 个，key_id 为 null 表示内网匿名调用 */
+  by_ip: {
+    ip: string | null
+    count: number
+    success: number
+    tokens: number
+    points: number
+    key_count: number
+    keys: { key_id: number | null; key_name: string | null; user_id: number | null; user_name: string | null; count: number }[]
+  }[]
+  /** ua 为 null 表示未记录（旧日志未存请求头或请求不带 UA） */
+  by_ua: { ua: string | null; count: number; success: number; tokens: number; points: number }[]
 }
 
 export interface LogItem {

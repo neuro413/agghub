@@ -49,6 +49,36 @@ export interface LogEntry {
   group_name?: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值） */
   channel_key?: string | null
+  /** 客户端请求头里的 User-Agent（渠道覆盖前的原值） */
+  user_agent?: string | null
+}
+
+const MAX_USER_AGENT_LENGTH = 512
+
+// UA 列晚于请求头存储加入：加列与从已存请求头回填放在同一事务，中途退出则下次启动整体重做；按 id 分页控制内存
+if (!db.prepare("SELECT 1 FROM pragma_table_info('request_logs') WHERE name = 'user_agent'").get()) {
+  const filled = db.transaction(() => {
+    db.exec('ALTER TABLE request_logs ADD COLUMN user_agent TEXT')
+    const page = db.prepare('SELECT id, request_headers_ref AS ref FROM request_logs WHERE id > ? AND request_headers_ref IS NOT NULL ORDER BY id LIMIT 1000')
+    const update = db.prepare('UPDATE request_logs SET user_agent = ? WHERE id = ?')
+    let count = 0
+    for (let after = 0; ;) {
+      const rows = page.all(after) as { id: number; ref: number }[]
+      if (!rows.length) return count
+      const reader = createBlobReader(rows.map(row => row.ref))
+      for (const row of rows) {
+        let value: unknown
+        // 损坏的块跳过，不阻塞启动
+        try { value = JSON.parse(reader.getBlob(row.ref) ?? 'null')?.['user-agent'] } catch { continue }
+        if (typeof value === 'string' && value) {
+          update.run(value.slice(0, MAX_USER_AGENT_LENGTH), row.id)
+          count++
+        }
+      }
+      after = rows[rows.length - 1].id
+    }
+  })()
+  if (filled) console.log(`[agghub] 已从存储的请求头回填 ${filled} 条日志的 User-Agent`)
 }
 
 const insertStmt = db.prepare(
@@ -58,14 +88,14 @@ const insertStmt = db.prepare(
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
-    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key)
+    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
-    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key)`,
+    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent)`,
 )
 
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
@@ -136,6 +166,7 @@ export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promis
       user_id: e.user_id ?? null,
       group_name: e.group_name ?? null,
       channel_key: e.channel_key ?? null,
+      user_agent: e.user_agent ? e.user_agent.slice(0, MAX_USER_AGENT_LENGTH) : null,
       ...refs,
     })
   } finally {

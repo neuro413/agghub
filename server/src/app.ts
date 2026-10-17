@@ -20,6 +20,7 @@ import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
 import { createTokenGuard } from './core/accessToken'
 import { BRAND_ICON_PATH, serveBrandIcon } from './core/siteAssets'
+import { sendPortalHtml } from './core/siteHtml'
 import { createAdmission, createCallerResolver } from './core/caller'
 import { sendEntryError } from './core/entryError'
 import type { Surface } from './types'
@@ -130,11 +131,15 @@ function createPublicApp(): Express {
   // ── 用户门户：会话走 Cookie，不开放跨域 ──
   app.get(BRAND_ICON_PATH, portalHeaders, serveBrandIcon)
   app.use('/api/user', portalHeaders, portalRouter)
+  // 首页 HTML 在服务端注入品牌，浏览器首屏直接拿到自定义标题与图标
+  app.get(['/', '/index.html'], portalHeaders, sendPortalHtml)
   app.use(portalHeaders, express.static(PORTAL_DIST))
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/v1')) return next()
-    res.sendFile(path.join(PORTAL_DIST, 'index.html'), (err) => {
-      if (err) res.status(404).type('text/plain').send('用户门户未构建，请先执行 npm run build')
+    sendPortalHtml(req, res, () => {
+      res.sendFile(path.join(PORTAL_DIST, 'index.html'), (err) => {
+        if (err) res.status(404).type('text/plain').send('用户门户未构建，请先执行 npm run build')
+      })
     })
   })
 

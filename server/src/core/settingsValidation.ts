@@ -56,10 +56,14 @@ function ids(value: any): boolean {
 }
 /** Discord 的 ID（应用、服务器、身份组）都是 17～20 位数字 */
 const SNOWFLAKE = /^\d{17,20}$/
+/** Discord 登录门槛的规模上限；每个服务器登录时要单独查询一次成员信息 */
+const DISCORD_MAX_GROUPS = 10
+const DISCORD_MAX_CONDITIONS = 10
+const DISCORD_MAX_GUILDS = 20
 /** 跨字段校验的错误记在前者上，提交任一字段都要报告 */
 const LINKED: Record<string, string[]> = {
   pseudo_thinking_open_tag: ['pseudo_thinking_close_tag'], checkin_min_points: ['checkin_max_points'], portal_concurrency: ['portal_register_enabled'],
-  discord_enabled: ['discord_client_id', 'discord_client_secret'], discord_role_ids: ['discord_guild_id'],
+  discord_enabled: ['discord_client_id', 'discord_client_secret'],
 }
 
 /**
@@ -117,25 +121,49 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
     }
   } catch { errors.public_base_url = '须为空串或有效的 HTTP/HTTPS 地址' }
-  // Discord：ID 与密钥去掉首尾空白再存，身份组去重
-  for (const key of ['discord_client_id', 'discord_client_secret', 'discord_guild_id']) {
+  // Discord：ID 与密钥去掉首尾空白再存
+  for (const key of ['discord_client_id', 'discord_client_secret']) {
     if (typeof merged[key] === 'string') merged[key] = merged[key].trim()
     if (Object.hasOwn(patch, key)) patch[key] = merged[key]
   }
-  if (Array.isArray(merged.discord_role_ids) && Object.hasOwn(patch, 'discord_role_ids')) {
-    merged.discord_role_ids = patch.discord_role_ids = [...new Set(merged.discord_role_ids)]
-  }
-  for (const key of ['discord_client_id', 'discord_guild_id']) {
-    check(typeof merged[key] === 'string' && (!merged[key] || SNOWFLAKE.test(merged[key])), key, '须为空或 17～20 位数字 ID')
-  }
+  check(typeof merged.discord_client_id === 'string' && (!merged.discord_client_id || SNOWFLAKE.test(merged.discord_client_id)), 'discord_client_id', '须为空或 17～20 位数字 ID')
   check(typeof merged.discord_client_secret === 'string' && merged.discord_client_secret.length <= 256, 'discord_client_secret', '须为不超过 256 字符的字符串')
-  check(Array.isArray(merged.discord_role_ids) && merged.discord_role_ids.length <= 50 && merged.discord_role_ids.every((v: any) => typeof v === 'string' && SNOWFLAKE.test(v)),
-    'discord_role_ids', '须为不超过 50 个 17～20 位数字的身份组 ID')
   if (merged.discord_enabled && !(merged.discord_client_id && merged.discord_client_secret)) {
     check(false, 'discord_enabled', '开启 Discord 登录前须先填写 Client ID 和 Client Secret')
   }
-  if (Array.isArray(merged.discord_role_ids) && merged.discord_role_ids.length && !merged.discord_guild_id) {
-    check(false, 'discord_role_ids', '设置身份组门槛须先填写服务器 ID')
+  // 登录门槛：只保留已知字段，服务器 ID 去掉首尾空白，身份组缺省为空并去重
+  if (!Array.isArray(merged.discord_rules)) errors.discord_rules = '须为规则组数组'
+  else {
+    check(merged.discord_rules.length <= DISCORD_MAX_GROUPS, 'discord_rules', `最多 ${DISCORD_MAX_GROUPS} 个规则组`)
+    const guilds = new Set<string>()
+    const rules = merged.discord_rules.map((group: any, index: number) => {
+      const at = `discord_rules[${index}]`
+      if (!object(group) || !Array.isArray(group.conditions) || !group.conditions.length || group.conditions.length > DISCORD_MAX_CONDITIONS) {
+        errors[at] = `规则组须包含 1～${DISCORD_MAX_CONDITIONS} 个服务器条件`
+        return group
+      }
+      const seen = new Set<string>()
+      const conditions = group.conditions.map((condition: any, i: number) => {
+        const where = `${at}.conditions[${i}]`
+        if (!object(condition)) { errors[where] = '服务器条件须为对象'; return condition }
+        const guildId = typeof condition.guild_id === 'string' ? condition.guild_id.trim() : condition.guild_id
+        check(typeof guildId === 'string' && SNOWFLAKE.test(guildId), `${where}.guild_id`, '须为 17～20 位数字的服务器 ID')
+        check(!seen.has(guildId), `${where}.guild_id`, '同一规则组内服务器不能重复')
+        seen.add(guildId)
+        guilds.add(guildId)
+        const normalized: Record<string, unknown> = { guild_id: guildId }
+        for (const key of ['all_roles', 'any_roles', 'deny_roles']) {
+          const roles = condition[key] ?? []
+          const valid = Array.isArray(roles) && roles.length <= 50 && roles.every((v: any) => typeof v === 'string' && SNOWFLAKE.test(v))
+          check(valid, `${where}.${key}`, '须为不超过 50 个 17～20 位数字的身份组 ID')
+          normalized[key] = valid ? [...new Set(roles)] : roles
+        }
+        return normalized
+      })
+      return { conditions }
+    })
+    check(guilds.size <= DISCORD_MAX_GUILDS, 'discord_rules', `规则最多涉及 ${DISCORD_MAX_GUILDS} 个不同的服务器`)
+    if (Object.hasOwn(patch, 'discord_rules')) patch.discord_rules = rules
   }
   if (!Array.isArray(merged.model_ratios)) errors.model_ratios = '须为倍率数组'
   else {

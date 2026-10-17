@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
 import { channelModelNames } from './core/channelModels'
-import type { Channel, ChannelRow, ChannelStatus, ParamRule, Settings } from './types'
+import type { Channel, ChannelRow, ChannelStatus, DiscordRuleGroup, ParamRule, Settings } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
@@ -297,6 +297,22 @@ function decodeSetting(raw: string, fallback: unknown): unknown {
         db.prepare("UPDATE settings SET value = ? WHERE key = 'param_rules'").run(encodeSetting(rules))
       }
       db.prepare("DELETE FROM settings WHERE key = 'strip_top_p'").run()
+    })()
+  }
+}
+
+// 单服务器门槛（服务器 ID + 拥有任一即可的身份组）迁移为一个规则组
+{
+  const guildId = db.prepare("SELECT value FROM settings WHERE key = 'discord_guild_id'").pluck().get() as string | undefined
+  if (guildId !== undefined) {
+    db.transaction(() => {
+      if (guildId) {
+        const raw = db.prepare("SELECT value FROM settings WHERE key = 'discord_role_ids'").pluck().get() as string | undefined
+        const roles = raw === undefined ? [] : decodeSetting(raw, []) as string[]
+        const rules: DiscordRuleGroup[] = [{ conditions: [{ guild_id: guildId, all_roles: [], any_roles: roles, deny_roles: [] }] }]
+        db.prepare("UPDATE settings SET value = ? WHERE key = 'discord_rules'").run(encodeSetting(rules))
+      }
+      db.prepare("DELETE FROM settings WHERE key IN ('discord_guild_id', 'discord_role_ids')").run()
     })()
   }
 }

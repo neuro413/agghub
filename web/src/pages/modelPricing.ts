@@ -41,9 +41,10 @@ export function pickPrices(r: Prices): Prices {
   return { input: r.input, output: r.output, cache_read: r.cache_read, cache_write: r.cache_write, per_request: r.per_request }
 }
 
-/** 价格必须填写且为不小于 0 的数字 */
+/** 价格须为不小于 0 的数字；留空按 0 处理，便于只设按次价 */
 export function validPrice(v: string): boolean {
-  return v.trim() !== '' && Number.isFinite(Number(v)) && Number(v) >= 0
+  const text = v.trim()
+  return text === '' || (Number.isFinite(Number(text)) && Number(text) >= 0)
 }
 
 /** 按编辑中的规则找命中的那条，与后端 findRatio 同一套规则：精确 > 通配非通配部分最长 > 列表顺序 */

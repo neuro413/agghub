@@ -9,6 +9,7 @@ import { resetLimiter } from '../src/core/limiter'
 import { listDiscordGuilds, listUsers } from '../src/core/users'
 import { SettingsValidationError, validateSettingsPatch } from '../src/core/settingsValidation'
 import { jsonResponse, reset } from './helpers/relay'
+import type { DiscordGuildCondition } from '../src/types'
 
 const realFetch = globalThis.fetch
 let server: Server
@@ -18,17 +19,25 @@ const DISCORD_API = 'https://discord.com/api/v10'
 const CLIENT_ID = '123456789012345678'
 const CLIENT_SECRET = 'secret'
 const GUILD_ID = '234567890123456789'
+const GUILD_2 = '234567890123456780'
+const GUILD_3 = '234567890123456781'
 const ROLE_A = '200000000000000001'
 const ROLE_B = '200000000000000002'
+const ROLE_C = '200000000000000003'
+const ROLE_D = '200000000000000004'
+const ROLE_E = '200000000000000005'
 
-/** 授权码 → 模拟的 Discord 用户与服务器成员身份 */
+type Reply = { status: number; body: unknown }
+/** 授权码 → 模拟的 Discord 用户与各服务器的成员信息；服务器列表缺省为成员信息返回 200 的那些服务器 */
 type Scenario = {
   profile: { id: string; username: string }
-  member?: { status: number; body: unknown }
-  guilds?: { status: number; body: unknown }
+  members?: Record<string, Reply>
+  guilds?: Reply
 }
 const scenarios = new Map<string, Scenario>()
 let tokenCalls = 0
+/** 查询过成员信息的服务器 ID，按调用顺序记录 */
+const memberCalls: string[] = []
 /** 换取令牌时收到的 redirect_uri，按调用顺序记录 */
 const tokenRedirects: string[] = []
 
@@ -56,12 +65,17 @@ before(async () => {
       if (!found) return jsonResponse({ message: '401: Unauthorized' }, 401)
       return jsonResponse(found.profile)
     }
-    if (new RegExp(`^${DISCORD_API.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/users/@me/guilds/[^/]+/member$`).test(url)) {
-      const reply = scenarios.get(code)?.member ?? { status: 200, body: { roles: [], pending: false } }
+    const memberPrefix = `${DISCORD_API}/users/@me/guilds/`
+    const memberGuild = url.startsWith(memberPrefix) && url.endsWith('/member') ? url.slice(memberPrefix.length, -'/member'.length) : ''
+    if (memberGuild) {
+      memberCalls.push(memberGuild)
+      const reply = scenarios.get(code)?.members?.[memberGuild] ?? { status: 404, body: { message: 'Unknown Member', code: 10007 } }
       return jsonResponse(reply.body, reply.status)
     }
     if (url === `${DISCORD_API}/users/@me/guilds?with_counts=true`) {
-      const reply = scenarios.get(code)?.guilds ?? { status: 200, body: [] }
+      const found = scenarios.get(code)
+      const joined = Object.entries(found?.members ?? {}).filter(([, reply]) => reply.status === 200).map(([id]) => ({ id, name: `guild-${id}` }))
+      const reply = found?.guilds ?? { status: 200, body: joined }
       return jsonResponse(reply.body, reply.status)
     }
     return jsonResponse({ message: 'not found' }, 404)
@@ -82,6 +96,7 @@ beforeEach(() => {
   scenarios.clear()
   tokenCalls = 0
   tokenRedirects.length = 0
+  memberCalls.length = 0
 })
 
 async function call(path: string, options: { method?: string; body?: unknown; cookie?: string; headers?: Record<string, string> } = {}) {
@@ -105,8 +120,30 @@ function enableDiscord(extra: Record<string, unknown> = {}) {
   })
 }
 
-function scenario(code: string, profile: { id: string; username: string }, member?: Scenario['member'], guilds?: Scenario['guilds']) {
-  scenarios.set(code, { profile, member, guilds })
+function scenario(code: string, profile: { id: string; username: string }, members?: Scenario['members'], guilds?: Scenario['guilds']) {
+  scenarios.set(code, { profile, members, guilds })
+}
+
+/** 服务器条件，身份组缺省为空 */
+function cond(guildId: string, roles: Partial<Omit<DiscordGuildCondition, 'guild_id'>> = {}): DiscordGuildCondition {
+  return { guild_id: guildId, all_roles: [], any_roles: [], deny_roles: [], ...roles }
+}
+
+/** 规则组：每个参数是一组服务器条件 */
+function rules(...groups: DiscordGuildCondition[][]) {
+  return groups.map(conditions => ({ conditions }))
+}
+
+function member(roles: string[], pending = false): Reply {
+  return { status: 200, body: { roles, pending } }
+}
+
+let userSeq = 0
+/** 每次用新的 Discord 账号登录，只关心门槛结果 */
+async function loginWith(members: Scenario['members'], guilds?: Reply) {
+  const code = `gate-${++userSeq}`
+  scenario(code, { id: String(700000000000000000n + BigInt(userSeq)), username: `gate.user${userSeq}` }, members, guilds)
+  return (await discordLogin(code)).json
 }
 
 async function startLogin() {
@@ -198,7 +235,7 @@ test('start：授权地址、state Cookie 与 scope', async () => {
     `agh_oauth_state=${started.json.data.state}; Path=/api/user/oauth/discord; Max-Age=600; HttpOnly; SameSite=Lax`,
   )
 
-  setSettings({ discord_guild_id: GUILD_ID })
+  setSettings({ discord_rules: rules([cond(GUILD_ID)]) })
   started = await startLogin()
   assert.equal(new URL(started.json.data.url).searchParams.get('scope'), 'identify guilds guilds.members.read')
 })
@@ -302,40 +339,79 @@ test('密码注册子开关关闭：密码注册被拒，Discord 建号仍正常
   assert.equal(login.json.data.username, 'discord_only')
 })
 
-test('服务器与身份组门槛', async () => {
-  enableDiscord({ discord_guild_id: GUILD_ID })
+test('单个服务器条件：成员、成员审核与三类身份组', async () => {
+  enableDiscord({ discord_rules: rules([cond(GUILD_ID)]) })
 
-  scenario('not-member', { id: '700000000000000001', username: 'no.member' }, {
-    status: 404,
-    body: { message: 'Unknown Member', code: 10007 },
-  })
-  const noMember = await discordLogin('not-member')
-  assert.equal(noMember.json.success, false)
-  assert.match(noMember.json.message, /加入指定的 Discord 服务器/)
+  // 服务器列表里没有该服务器时直接拒绝，不再查询成员信息
+  const noMember = await loginWith({})
+  assert.equal(noMember.success, false)
+  assert.match(noMember.message, /加入指定的 Discord 服务器/)
+  assert.deepEqual(memberCalls, [])
 
-  scenario('pending', { id: '700000000000000002', username: 'pending.user' }, {
-    status: 200,
-    body: { roles: [], pending: true },
-  })
-  const pending = await discordLogin('pending')
-  assert.equal(pending.json.success, false)
-  assert.match(pending.json.message, /成员验证/)
+  const pending = await loginWith({ [GUILD_ID]: member([], true) })
+  assert.equal(pending.success, false)
+  assert.match(pending.message, /成员验证/)
+  assert.deepEqual(memberCalls, [GUILD_ID])
 
-  setSettings({ discord_role_ids: [ROLE_A, ROLE_B] })
-  scenario('no-role', { id: '700000000000000003', username: 'no.role' }, {
-    status: 200,
-    body: { roles: ['200000000000000009'], pending: false },
-  })
-  const noRole = await discordLogin('no-role')
-  assert.equal(noRole.json.success, false)
-  assert.match(noRole.json.message, /身份组/)
+  assert.equal((await loginWith({ [GUILD_ID]: member([]) })).success, true)
 
-  scenario('has-role', { id: '700000000000000004', username: 'has.role' }, {
-    status: 200,
-    body: { roles: [ROLE_A], pending: false },
-  })
-  const hasRole = await discordLogin('has-role')
-  assert.equal(hasRole.json.success, true)
+  setSettings({ discord_rules: rules([cond(GUILD_ID, { all_roles: [ROLE_A, ROLE_B], any_roles: [ROLE_C, ROLE_D], deny_roles: [ROLE_E] })]) })
+  const missingAll = await loginWith({ [GUILD_ID]: member([ROLE_A, ROLE_C]) })
+  assert.equal(missingAll.success, false)
+  assert.match(missingAll.message, /没有登录所需的身份组/)
+
+  const missingAny = await loginWith({ [GUILD_ID]: member([ROLE_A, ROLE_B]) })
+  assert.equal(missingAny.success, false)
+  assert.match(missingAny.message, /没有登录所需的身份组/)
+
+  const denied = await loginWith({ [GUILD_ID]: member([ROLE_A, ROLE_B, ROLE_D, ROLE_E]) })
+  assert.equal(denied.success, false)
+  assert.match(denied.message, /不允许登录/)
+
+  assert.equal((await loginWith({ [GUILD_ID]: member([ROLE_A, ROLE_B, ROLE_D]) })).success, true)
+})
+
+test('多个规则组：满足任一组即可，组内服务器条件须全部满足', async () => {
+  enableDiscord({ discord_rules: rules([cond(GUILD_ID, { all_roles: [ROLE_A] }), cond(GUILD_2)], [cond(GUILD_3, { any_roles: [ROLE_B] })]) })
+
+  // 第一组只满足一半、第二组没加入：两组原因相同时照原因提示
+  const half = await loginWith({ [GUILD_ID]: member([ROLE_A]) })
+  assert.equal(half.success, false)
+  assert.match(half.message, /加入指定的 Discord 服务器/)
+
+  assert.equal((await loginWith({ [GUILD_ID]: member([ROLE_A]), [GUILD_2]: member([]) })).success, true)
+  assert.equal((await loginWith({ [GUILD_3]: member([ROLE_B]) })).success, true)
+
+  const noRoles = await loginWith({ [GUILD_ID]: member([]), [GUILD_2]: member([]), [GUILD_3]: member([ROLE_A]) })
+  assert.equal(noRoles.success, false)
+  assert.match(noRoles.message, /没有登录所需的身份组/)
+
+  // 两组原因不同时给出概括提示
+  const mixed = await loginWith({ [GUILD_ID]: member([]), [GUILD_2]: member([]) })
+  assert.equal(mixed.success, false)
+  assert.match(mixed.message, /不满足任何一组登录条件/)
+})
+
+test('成员查询失败：其他规则组满足时照常登录，否则报告查询失败', async () => {
+  enableDiscord({ discord_rules: rules([cond(GUILD_ID)], [cond(GUILD_2)]) })
+
+  // 列表里有 GUILD_ID 但查询成员失败，GUILD_2 满足即可登录
+  const joinedBoth = { status: 200, body: [{ id: GUILD_ID, name: 'a' }, { id: GUILD_2, name: 'b' }] }
+  assert.equal((await loginWith({ [GUILD_ID]: { status: 500, body: {} }, [GUILD_2]: member([]) }, joinedBoth)).success, true)
+
+  const joinedFirst = { status: 200, body: [{ id: GUILD_ID, name: 'a' }] }
+  const failed = await loginWith({ [GUILD_ID]: { status: 500, body: {} } }, joinedFirst)
+  assert.equal(failed.success, false)
+  assert.match(failed.message, /查询 Discord 服务器成员身份失败/)
+
+  const limited = await loginWith({ [GUILD_ID]: { status: 429, body: {} } }, joinedFirst)
+  assert.equal(limited.success, false)
+  assert.match(limited.message, /请求过于频繁/)
+
+  // 服务器列表获取失败时逐个查询成员信息
+  memberCalls.length = 0
+  assert.equal((await loginWith({ [GUILD_2]: member([]) }, { status: 500, body: {} })).success, true)
+  assert.deepEqual([...memberCalls].sort(), [GUILD_ID, GUILD_2].sort())
 })
 
 test('管理员停用的 Discord 账号不能登录', async () => {
@@ -402,17 +478,26 @@ test('Discord 设置校验', () => {
   }
 
   expectError({ discord_enabled: true }, 'discord_enabled')
-  expectError({ discord_role_ids: ['123456789012345678'] }, 'discord_role_ids')
   expectError({ discord_client_id: 'abc' }, 'discord_client_id')
+  expectError({ discord_rules: {} }, 'discord_rules')
+  expectError({ discord_rules: [{ conditions: [] }] }, 'discord_rules[0]')
+  expectError({ discord_rules: rules([cond('abc')]) }, 'discord_rules[0].conditions[0].guild_id')
+  expectError({ discord_rules: rules([cond(GUILD_ID), cond(GUILD_ID)]) }, 'discord_rules[0].conditions[1].guild_id')
+  expectError({ discord_rules: rules([cond(GUILD_ID, { deny_roles: ['abc'] })]) }, 'discord_rules[0].conditions[0].deny_roles')
+  const manyGuilds = Array.from({ length: 21 }, (_, i) => cond(String(300000000000000000n + BigInt(i))))
+  expectError({ discord_rules: rules(manyGuilds.slice(0, 7), manyGuilds.slice(7, 14), manyGuilds.slice(14)) }, 'discord_rules')
 
   const trimmed = validateSettingsPatch(current, { discord_client_id: ' 123456789012345678 ' })
   assert.equal(trimmed.discord_client_id, '123456789012345678')
 
-  const deduped = validateSettingsPatch(current, {
-    discord_guild_id: GUILD_ID,
-    discord_role_ids: ['123456789012345678', '123456789012345678'],
+  // 服务器 ID 去空白、身份组去重、缺省身份组补空数组、未知字段丢弃；不同规则组可以用同一个服务器
+  const normalized = validateSettingsPatch(current, {
+    discord_rules: [
+      { name: 'x', conditions: [{ guild_id: ` ${GUILD_ID} `, any_roles: [ROLE_A, ROLE_A], extra: 1 }] },
+      { conditions: [cond(GUILD_ID, { all_roles: [ROLE_B] })] },
+    ],
   })
-  assert.deepEqual(deduped.discord_role_ids, ['123456789012345678'])
+  assert.deepEqual(normalized.discord_rules, rules([cond(GUILD_ID, { any_roles: [ROLE_A] })], [cond(GUILD_ID, { all_roles: [ROLE_B] })]))
 })
 
 test('listUsers 支持按 Discord 用户名模糊与 Discord ID 精确搜索', async () => {

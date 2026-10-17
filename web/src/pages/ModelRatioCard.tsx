@@ -76,7 +76,7 @@ export function ModelRatioCard({ ratios, onSaved }: { ratios: ModelRatio[]; onSa
       }
       seen.add(p)
       if (PRICE_FIELDS.some((k) => !validPrice(r[k]))) {
-        toast('err', `「${p}」的价格必须填写为不小于 0 的数字`)
+        toast('err', `「${p}」的价格必须是不小于 0 的数字（留空按 0 计）`)
         return
       }
     }

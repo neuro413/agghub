@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import type { Request } from 'express'
 import { getProxyAgent } from './proxy'
-import type { DiscordGuild, Settings } from '../types'
+import type { DiscordGuild, DiscordGuildCondition, Settings } from '../types'
 
 // 门户 Discord 登录：授权码模式，请求 Discord 一律走设置里的全局代理
 
@@ -46,7 +46,7 @@ export function discordAuthorizeUrl(s: Settings, redirectUri: string, state: str
     client_id: s.discord_client_id,
     response_type: 'code',
     redirect_uri: redirectUri,
-    scope: s.discord_guild_id ? 'identify guilds guilds.members.read' : 'identify guilds',
+    scope: s.discord_rules.length ? 'identify guilds guilds.members.read' : 'identify guilds',
     state,
     // 授权过同样权限的用户直接跳回，首次授权仍会显示确认页
     prompt: 'none',
@@ -110,23 +110,71 @@ async function fetchProfile(s: Settings, token: string): Promise<Omit<DiscordPro
   return { id: body.id, username: body.username }
 }
 
-/** 服务器与身份组门槛；没有设置服务器时直接通过 */
-async function checkMembership(s: Settings, token: string): Promise<void> {
-  if (!s.discord_guild_id) return
-  const r = await discordFetch(`/users/@me/guilds/${s.discord_guild_id}/member`, { headers: { authorization: `Bearer ${token}` } }, s)
+interface GuildMember {
+  roles: string[]
+  pending: boolean
+}
+
+/** 用户在某个服务器的成员信息；不是成员时返回 null，查询失败时抛出 DiscordError */
+async function fetchMember(s: Settings, token: string, guildId: string): Promise<GuildMember | null> {
+  const r = await discordFetch(`/users/@me/guilds/${guildId}/member`, { headers: { authorization: `Bearer ${token}` } }, s)
   const body: any = await r.json().catch(() => null)
-  if (r.status === 404) throw new DiscordError('需要先加入指定的 Discord 服务器才能登录')
+  if (r.status === 404) return null
   if (r.status === 429) throw new DiscordError('Discord 请求过于频繁，请稍后再试')
   if (!r.ok || !body || typeof body !== 'object') {
     console.warn(`[agghub] 查询 Discord 服务器成员失败: HTTP ${r.status} ${body?.message ?? ''}`)
     throw new DiscordError('查询 Discord 服务器成员身份失败，请稍后再试')
   }
+  return { roles: Array.isArray(body.roles) ? body.roles.filter((id: unknown) => typeof id === 'string') : [], pending: body.pending === true }
+}
+
+/** 服务器条件不满足的原因，满足时返回 null */
+function conditionFailure(condition: DiscordGuildCondition, member: GuildMember | null): string | null {
+  if (!member) return '需要先加入指定的 Discord 服务器才能登录'
   // 服务器开启了成员审核时，没通过审核的成员 pending 为 true
-  if (body.pending === true) throw new DiscordError('请先在 Discord 服务器中完成成员验证')
-  const roles: unknown[] = Array.isArray(body.roles) ? body.roles : []
-  if (s.discord_role_ids.length && !s.discord_role_ids.some(id => roles.includes(id))) {
-    throw new DiscordError('你在 Discord 服务器中没有登录所需的身份组')
+  if (member.pending) return '请先在 Discord 服务器中完成成员验证'
+  const has = (id: string) => member.roles.includes(id)
+  if (condition.deny_roles.some(has)) return '你在 Discord 服务器中的身份组不允许登录'
+  if (!condition.all_roles.every(has) || (condition.any_roles.length && !condition.any_roles.some(has))) {
+    return '你在 Discord 服务器中没有登录所需的身份组'
   }
+  return null
+}
+
+/**
+ * 服务器与身份组门槛：满足任一规则组即可，组内每个服务器条件都要满足；没有规则时直接通过。
+ * 拿到了服务器列表时，不在列表里的服务器直接按非成员处理，只查询用户加入了的服务器
+ */
+async function checkMembership(s: Settings, token: string, guilds: DiscordGuild[] | null): Promise<void> {
+  if (!s.discord_rules.length) return
+  const joined = guilds && new Set(guilds.map(g => g.id))
+  const guildIds = [...new Set(s.discord_rules.flatMap(group => group.conditions.map(c => c.guild_id)))]
+  const members = new Map(await Promise.all(guildIds.map(async (id): Promise<[string, GuildMember | null | DiscordError]> => {
+    if (joined && !joined.has(id)) return [id, null]
+    try {
+      return [id, await fetchMember(s, token, id)]
+    } catch (error) {
+      if (error instanceof DiscordError) return [id, error]
+      throw error
+    }
+  })))
+  const reasons: string[] = []
+  let queryError: DiscordError | null = null
+  for (const group of s.discord_rules) {
+    let failure: string | null = null
+    let error: DiscordError | null = null
+    for (const condition of group.conditions) {
+      const member = members.get(condition.guild_id) ?? null
+      if (member instanceof DiscordError) error ??= member
+      else if ((failure = conditionFailure(condition, member))) break
+    }
+    if (failure) reasons.push(failure)
+    else if (error) queryError ??= error
+    else return
+  }
+  // 有规则组因查询失败没法判断时报告查询失败，不能当作不满足条件
+  if (queryError) throw queryError
+  throw new DiscordError(new Set(reasons).size === 1 ? reasons[0] : '你的 Discord 账号不满足任何一组登录条件（服务器或身份组）')
 }
 
 /** 用户所在的服务器（Discord 一次最多返回 200 个，普通用户上限 100、Nitro 200，一次取完）；失败时返回 null */
@@ -154,10 +202,11 @@ async function fetchGuilds(s: Settings, token: string): Promise<DiscordGuild[] |
     }))
 }
 
-/** 用授权码换取 Discord 用户，并检查服务器与身份组门槛；服务器列表与门槛检查并行请求 */
+/** 用授权码换取 Discord 用户，并检查服务器与身份组门槛；门槛检查用服务器列表减少成员查询，所以先取列表 */
 export async function authorizeDiscord(s: Settings, code: string, redirectUri: string): Promise<DiscordProfile> {
   const token = await exchangeCode(s, code, redirectUri)
   const profile = await fetchProfile(s, token)
-  const [, guilds] = await Promise.all([checkMembership(s, token), fetchGuilds(s, token)])
+  const guilds = await fetchGuilds(s, token)
+  await checkMembership(s, token, guilds)
   return { ...profile, guilds }
 }

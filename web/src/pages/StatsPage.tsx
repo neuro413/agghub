@@ -20,6 +20,24 @@ const RANGES: { k: string; label: string }[] = [
   { k: '30d', label: '30 天' },
 ]
 
+type IpCaller = Stats['by_ip'][number]['keys'][number]
+
+/** IP 关联的调用方：门户用户显示「用户名 / Key 名」，内网匿名调用没有 Key */
+function callerLabel(k: IpCaller): string {
+  if (k.key_id == null) return '内网匿名'
+  const key = k.key_name || `#${k.key_id}`
+  return k.user_id == null ? key : `${k.user_name ?? `用户#${k.user_id}`} / ${key}`
+}
+
+const successPct = (success: number, count: number) => (count ? Math.round((success / count) * 100) : 100)
+
+function EmptyData() {
+  return (
+    <div className="ah-muted ah-mini" style={{ padding: '34px 0', textAlign: 'center' }}>
+      暂无数据
+    </div>
+  )
+}
 
 export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   const [range, setRange] = useState('24h')
@@ -57,7 +75,9 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
   }, [])
 
   const ov = stats?.overview
+  const tp = stats?.throughput
   const rate = Math.round((ov?.success_rate ?? 1) * 100)
+  const peakLabel = (stats?.bucketMs ?? 0) >= 86_400_000 ? '每天峰值' : '每小时峰值'
 
   return (
     <div className="ah-fade-up">
@@ -95,6 +115,23 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
         <StatCard icon={<IconTrend size={19} />} label="平均延迟" value={`${ov?.avg_latency ?? 0}`} sub="毫秒 / 请求" />
       </div>
 
+      <div className="ah-stats-grid">
+        <StatCard icon={<IconBolt size={19} />} label="当前 RPM" value={tp?.current_rpm ?? 0} sub="最近 60 秒请求数" />
+        <StatCard icon={<IconSpark size={19} />} label="当前 TPM" value={fmtNum(tp?.current_tpm)} sub="最近 60 秒 Token" />
+        <StatCard
+          icon={<IconTrend size={19} />}
+          label="峰值 RPM"
+          value={tp?.peak_rpm ?? 0}
+          sub={tp?.peak_rpm_at != null ? `出现在 ${fmtTime(tp.peak_rpm_at)}` : '暂无调用'}
+        />
+        <StatCard
+          icon={<IconTrend size={19} />}
+          label="峰值 TPM"
+          value={fmtNum(tp?.peak_tpm)}
+          sub={tp?.peak_tpm_at != null ? `出现在 ${fmtTime(tp.peak_tpm_at)}` : '暂无调用'}
+        />
+      </div>
+
       <div className="ah-charts-row">
         <Card className="ah-chart-card">
           <div className="ah-chart-title">
@@ -123,27 +160,101 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
         </Card>
       </div>
 
+      <div className="ah-charts-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <Card className="ah-chart-card">
+          <div className="ah-chart-title">
+            <IconBolt size={17} /> RPM 趋势
+            <span className="sp" />
+            <span className="ah-mini ah-muted">{peakLabel}</span>
+          </div>
+          <LineChart data={stats?.trend.map((t) => t.peak_rpm) ?? []} />
+        </Card>
+        <Card className="ah-chart-card">
+          <div className="ah-chart-title">
+            <IconSpark size={17} /> TPM 趋势
+            <span className="sp" />
+            <span className="ah-mini ah-muted">{peakLabel}</span>
+          </div>
+          <LineChart data={stats?.trend.map((t) => t.peak_tpm) ?? []} />
+        </Card>
+      </div>
+
       <Card className="ah-chart-card" style={{ marginBottom: 'var(--sp-5)' }}>
         <div className="ah-chart-title">Key 分布</div>
         {!stats?.by_key?.length ? (
-          <div className="ah-muted ah-mini" style={{ padding: '34px 0', textAlign: 'center' }}>
-            暂无数据
-          </div>
+          <EmptyData />
         ) : (
           <div className="ah-keydist">
-            {stats.by_key.map((b) => {
-              const bRate = b.count ? Math.round((b.success / b.count) * 100) : 100
-              return (
-                <div key={b.key_id} className="ah-keydist-row">
-                  <span className="ah-truncate ah-keydist-name">{b.key_name || '#' + b.key_id}</span>
-                  <span className="ah-mini ah-muted ah-num">{b.count} 次</span>
-                  <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
-                    {bRate}%
-                  </span>
-                  <span className="ah-mini ah-num">{money(b.points)}</span>
-                </div>
-              )
-            })}
+            {stats.by_key.map((b) => (
+              <div key={b.key_id} className="ah-keydist-row">
+                <span className="ah-truncate ah-keydist-name">{b.key_name || '#' + b.key_id}</span>
+                <span className="ah-mini ah-muted ah-num">{b.count} 次</span>
+                <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
+                  {successPct(b.success, b.count)}%
+                </span>
+                <span className="ah-mini ah-num">{money(b.points)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="ah-chart-card" style={{ marginBottom: 'var(--sp-5)' }}>
+        <div className="ah-chart-title">
+          IP 分布
+          <span className="sp" />
+          <span className="ah-mini ah-muted">按请求数 Top 50</span>
+        </div>
+        {!stats?.by_ip?.length ? (
+          <EmptyData />
+        ) : (
+          <div className="ah-keydist ah-dist-scroll">
+            {stats.by_ip.map((b) => (
+              <div key={b.ip ?? ''} className="ah-keydist-row ah-ipdist-row">
+                <span className="ah-truncate ah-keydist-name ah-mono" title={b.ip ?? undefined}>{b.ip || '未记录'}</span>
+                <span className="ah-mini ah-muted ah-num">{b.count} 次</span>
+                <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
+                  {successPct(b.success, b.count)}%
+                </span>
+                <span className="ah-mini ah-muted ah-num">{fmtNum(b.tokens)} tok</span>
+                <span className="ah-mini ah-num">{money(b.points)}</span>
+                <span className="ah-ipdist-callers">
+                  {b.keys.map((k) => (
+                    <span key={k.key_id ?? 'owner'} className="ah-tag ah-truncate" title={`${callerLabel(k)} · ${k.count} 次`}>
+                      {callerLabel(k)}
+                    </span>
+                  ))}
+                  {b.key_count > b.keys.length && <span className="ah-mini ah-faint">+{b.key_count - b.keys.length}</span>}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="ah-chart-card" style={{ marginBottom: 'var(--sp-5)' }}>
+        <div className="ah-chart-title">
+          UA 分布
+          <span className="sp" />
+          <span className="ah-mini ah-muted">按请求数 Top 50</span>
+        </div>
+        {!stats?.by_ua?.length ? (
+          <EmptyData />
+        ) : (
+          <div className="ah-keydist ah-dist-scroll">
+            {stats.by_ua.map((b) => (
+              <div key={b.ua ?? ''} className="ah-keydist-row ah-uadist-row">
+                <span className={`ah-truncate ah-mono ${b.ua ? 'ah-keydist-name' : 'ah-muted'}`} title={b.ua ?? '旧日志未存请求头，或请求未带 User-Agent'}>
+                  {b.ua || '未记录'}
+                </span>
+                <span className="ah-mini ah-muted ah-num">{b.count} 次</span>
+                <span className="ah-mini ah-num" style={{ color: 'var(--ok)', fontWeight: 700 }}>
+                  {successPct(b.success, b.count)}%
+                </span>
+                <span className="ah-mini ah-muted ah-num">{fmtNum(b.tokens)} tok</span>
+                <span className="ah-mini ah-num">{money(b.points)}</span>
+              </div>
+            ))}
           </div>
         )}
       </Card>

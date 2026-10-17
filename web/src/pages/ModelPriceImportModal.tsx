@@ -121,7 +121,7 @@ export function ModelPriceImportModal({
     const items = (cands ?? []).filter((c) => selected.has(c.model))
     const bad = items.find((c) => PRICE_FIELDS.some((k) => !validPrice(c.prices[k])))
     if (bad) {
-      toast('err', `「${bad.model}」的价格还没有填完整`)
+      toast('err', `「${bad.model}」的价格必须是不小于 0 的数字（留空按 0 计）`)
       return
     }
     onImport(items.map((c) => ({ pattern: c.model, prices: c.prices })))

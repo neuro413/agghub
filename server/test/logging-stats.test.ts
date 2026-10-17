@@ -105,3 +105,41 @@ test('D07: 真实 SQLite REAL 参数分桶，24h/7d/30d 的趋势与总览相等
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
   }
 })
+
+test('RPM/TPM 取自然分钟峰值，IP 归并关联调用方，UA 按原值分组且写入时截断', async () => {
+  await recordLog({ ...entry, request_id: 'long-ua', user_agent: 'u'.repeat(600) })
+  assert.equal((db.prepare("SELECT length(user_agent) n FROM request_logs WHERE request_id='long-ua'").get() as any).n, 512)
+  db.exec('DELETE FROM request_logs')
+  const now = 1790043967123
+  const originalNow = Date.now
+  Date.now = () => now
+  const insert = db.prepare('INSERT INTO request_logs(created_at,status,total_tokens,is_retry,client_ip,key_id,key_name,user_agent) VALUES (?,?,?,?,?,?,?,?)')
+  // 当前分钟 3 次；两小时前的分钟 2 次但 token 更多；重试中间尝试不计
+  insert.run(now - 1000, 'success', 10, 0, '1.1.1.1', 1, 'k1', 'UA-A')
+  insert.run(now - 2000, 'error', 10, 0, '1.1.1.1', 2, 'k2', 'UA-A')
+  insert.run(now - 3000, 'success', 10, 0, '2.2.2.2', null, null, null)
+  insert.run(now - 7200000, 'success', 500, 0, '1.1.1.1', 1, 'k1', 'UA-B')
+  insert.run(now - 7199999, 'success', 500, 0, '1.1.1.1', 1, 'k1', 'UA-B')
+  insert.run(now - 1000, 'error', 999, 1, '3.3.3.3', null, null, 'UA-C')
+  const app = express()
+  app.use('/stats', statsRouter)
+  const server = app.listen(0, '127.0.0.1')
+  await new Promise<void>(resolve => server.once('listening', resolve))
+  try {
+    const result = await (await fetch(`http://127.0.0.1:${(server.address() as { port: number }).port}/stats`)).json() as any
+    const minute = (t: number) => Math.floor(t / 60000) * 60000
+    assert.deepEqual(result.throughput, {
+      current_rpm: 3, current_tpm: 30, peak_rpm: 3, peak_rpm_at: minute(now), peak_tpm: 1000, peak_tpm_at: minute(now - 7200000),
+    })
+    const hour = (t: number) => result.trend.find((row: any) => row.bucket === Math.floor(t / 3600000) * 3600000)
+    assert.equal(hour(now).peak_rpm, 3)
+    assert.equal(hour(now - 7200000).peak_tpm, 1000)
+    assert.deepEqual(result.by_ip.map((row: any) => [row.ip, row.count, row.success, row.key_count]), [['1.1.1.1', 4, 3, 2], ['2.2.2.2', 1, 1, 1]])
+    assert.deepEqual(result.by_ip[0].keys.map((k: any) => [k.key_name, k.count]), [['k1', 3], ['k2', 1]])
+    assert.equal(result.by_ip[1].keys[0].key_id, null)
+    assert.deepEqual(new Map(result.by_ua.map((row: any) => [row.ua, row.count])), new Map([['UA-A', 2], ['UA-B', 2], [null, 1]]))
+  } finally {
+    Date.now = originalNow
+    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))
+  }
+})

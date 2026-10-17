@@ -266,6 +266,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         response_body_truncated: state?.response.truncated, upstream_response_body_truncated: state?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
         user_id: caller.user?.id ?? null, group_name: (state && groupOf.get(state.channel.id)?.name) ?? null, channel_key: state?.keyLabel ?? null,
+        user_agent: typeof ctx.rawHeaders?.['user-agent'] === 'string' ? ctx.rawHeaders['user-agent'] : null,
       }
     }, settings, requestId)
   }

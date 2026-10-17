@@ -392,6 +392,82 @@
   color: var(--orange-700);
   min-width: 0;
 }
+/* 占满整行的设置项（标题、说明在上，控件在下） */
+.ah-set-block {
+  padding: var(--sp-4) 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ah-set-block .ah-set-row-desc {
+  margin-bottom: var(--sp-3);
+}
+/* Discord 登录门槛 */
+.ah-dc-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ah-dc-or {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--ink-faint);
+}
+.ah-dc-or::before,
+.ah-dc-or::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--line);
+}
+.ah-dc-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--paper);
+}
+.ah-dc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ah-dc-group-title {
+  font-weight: 700;
+  font-size: var(--fs-sm);
+}
+.ah-dc-group-head .ah-iconbtn {
+  margin-left: auto;
+}
+.ah-dc-cond {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--r-md);
+  background: var(--white);
+}
+.ah-dc-label {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+.ah-dc-guild {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ah-dc-cond .ah-input {
+  min-width: 0;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
 @media (max-width: 640px) {
   .ah-set-row {
     flex-direction: column;
@@ -1205,6 +1281,30 @@
 .ah-keydist-name {
   font-weight: 700;
   color: var(--ink);
+}
+/* IP / UA 分布：Top 50 行数较多，卡片内滚动 */
+.ah-dist-scroll {
+  max-height: 400px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.ah-ipdist-row {
+  grid-template-columns: 1.3fr 0.6fr 0.45fr 0.7fr 0.7fr 2.2fr;
+}
+.ah-uadist-row {
+  grid-template-columns: 3.4fr 0.6fr 0.45fr 0.7fr 0.7fr;
+}
+.ah-ipdist-callers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* inline-flex 下省略号不生效 */
+.ah-ipdist-callers .ah-tag {
+  display: inline-block;
+  max-width: 180px;
 }
 
 /* ── 模型倍率卡片 ── */

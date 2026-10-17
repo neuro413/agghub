@@ -400,10 +400,24 @@ export interface Settings {
   discord_enabled: boolean
   discord_client_id: string
   discord_client_secret: string
-  /** 要求加入的服务器 ID，空串不检查 */
-  discord_guild_id: string
-  /** 要求的身份组 ID，满足任一即可；空数组只要求是服务器成员 */
-  discord_role_ids: string[]
+  /** 服务器与身份组门槛：满足任一规则组即可登录；空数组不检查 */
+  discord_rules: DiscordRuleGroup[]
+}
+
+/** Discord 登录门槛的规则组：组内每个服务器条件都满足才算通过 */
+export interface DiscordRuleGroup {
+  conditions: DiscordGuildCondition[]
+}
+
+/** 服务器条件：须为该服务器成员（已通过成员审核），身份组按三个列表判断，空列表不检查 */
+export interface DiscordGuildCondition {
+  guild_id: string
+  /** 必须全部拥有 */
+  all_roles: string[]
+  /** 至少拥有其中一个 */
+  any_roles: string[]
+  /** 拥有其中任一即不满足 */
+  deny_roles: string[]
 }
 
 /** 规则「调用来源」作用域，三类规则共用 */

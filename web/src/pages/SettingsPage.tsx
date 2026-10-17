@@ -9,6 +9,7 @@ import { IconBolt, IconCopy, IconDiscord, IconExternal, IconSettings, IconSpark,
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Settings, SystemInfo } from '../types'
+import { DiscordRulesEditor } from './DiscordRulesEditor'
 
 // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
 const KEYS: (keyof Settings)[] = [
@@ -19,11 +20,8 @@ const KEYS: (keyof Settings)[] = [
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
   'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
   'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
-  'portal_password_register_enabled', 'discord_enabled', 'discord_client_id', 'discord_client_secret', 'discord_guild_id', 'discord_role_ids',
+  'portal_password_register_enabled', 'discord_enabled', 'discord_client_id', 'discord_client_secret', 'discord_rules',
 ]
-
-/** 身份组 ID 输入：逗号（含全角）、空格或换行分隔 */
-const parseRoleIds = (text: string) => text.split(/[\s,，]+/).filter(Boolean)
 
 type IntegerKey = 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
 type PointsKey = 'portal_initial_quota' | 'checkin_min_points' | 'checkin_max_points'
@@ -50,8 +48,6 @@ export function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
-  /** 身份组输入框的原文；null 时按已存的 ID 列表显示 */
-  const [roleText, setRoleText] = useState<string | null>(null)
   const iconFile = useRef<HTMLInputElement>(null)
   /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
   const loaded = useRef<Settings | null>(null)
@@ -84,7 +80,6 @@ export function SettingsPage() {
       const saved = await api.updateSettings(Object.fromEntries(changed.map((k) => [k, s[k]])))
       loaded.current = saved
       setS(saved)
-      setRoleText(null)
       // 管理 API 与 /v1 共用该令牌，保存后同步本地凭证，避免下一个请求就 401
       setStoredToken(saved.access_token)
       setMoneyConfig(saved)
@@ -271,20 +266,14 @@ export function SettingsPage() {
         <SettingRow label="Client Secret" desc="只保存在服务端，门户不会下发">
           <Input value={s.discord_client_secret} onChange={(e) => set('discord_client_secret', e.target.value)} type="password" autoComplete="new-password" />
         </SettingRow>
-        <SettingRow label="要求加入的服务器" desc="服务器 ID，用户必须是该服务器成员才能登录，留空不检查；Discord 开启开发者模式后右键服务器图标「复制服务器 ID」">
-          <Input value={s.discord_guild_id} onChange={(e) => set('discord_guild_id', e.target.value)} placeholder="留空不检查" autoComplete="off" />
-        </SettingRow>
-        <SettingRow label="要求的身份组" desc="身份组 ID，逗号或空格分隔，拥有任意一个即可登录；留空只要求是服务器成员。右键身份组「复制身份组 ID」">
-          <Input
-            value={roleText ?? s.discord_role_ids.join(', ')}
-            onChange={(e) => {
-              setRoleText(e.target.value)
-              set('discord_role_ids', parseRoleIds(e.target.value))
-            }}
-            placeholder="留空不检查"
-            autoComplete="off"
-          />
-        </SettingRow>
+        <div className="ah-set-block">
+          <div className="ah-set-row-label">服务器与身份组门槛</div>
+          <div className="ah-set-row-desc">
+            满足任一规则组即可登录，组内的服务器条件需全部满足；每个条件要求用户是该服务器成员（服务器开启成员审核时须已通过），三类身份组留空不检查，多个 ID 用逗号或空格分隔。
+            只在登录时检查。Discord 设置 → 高级 → 打开开发者模式后，右键服务器图标「复制服务器 ID」、右键身份组「复制身份组 ID」
+          </div>
+          <DiscordRulesEditor rules={s.discord_rules} onChange={(v) => set('discord_rules', v)} />
+        </div>
       </Card>
 
       {/* 品牌与金额显示 */}

@@ -101,8 +101,7 @@ export const DEFAULT_SETTINGS: Settings = {
   discord_enabled: false,
   discord_client_id: '',
   discord_client_secret: '',
-  discord_guild_id: '',
-  discord_role_ids: [],
+  discord_rules: [],
 }
 
 /** 整数设置的取值范围（保存时校验） */
