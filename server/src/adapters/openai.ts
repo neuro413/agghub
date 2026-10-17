@@ -1,7 +1,7 @@
 import * as oai from '../convert/openai'
 import type { Channel } from '../types'
 import type { Adaptor, UpstreamRequest } from './base'
-import { endpointUrl } from './base'
+import { endpointUrl, isOfficialOpenAI } from './base'
 
 function request(channel: Channel, body: any, stream: boolean): UpstreamRequest {
   body.stream = stream
@@ -15,7 +15,7 @@ function request(channel: Channel, body: any, stream: boolean): UpstreamRequest 
 
 export const openaiAdaptor: Adaptor = {
   wireFormat: 'openai',
-  buildRequest: (channel, ir, upstreamModel, stream) => request(channel, oai.buildRequest(ir, upstreamModel), stream),
+  buildRequest: (channel, ir, upstreamModel, stream) => request(channel, oai.buildRequest(ir, upstreamModel, { official: isOfficialOpenAI(channel.base_url) }), stream),
   buildPassthroughRequest: (channel, rawBody, upstreamModel, stream) => request(channel, { ...rawBody, model: upstreamModel }, stream),
   parseResponse: (json, context) => oai.parseResponse(json, context.requestedModel),
   createStreamDecoder: context => oai.createStreamDecoder(context.requestedModel),

@@ -39,6 +39,12 @@ export function withV1(root: string): string {
   return /\/v1$/.test(root) ? root : root + '/v1'
 }
 
+/** 官方 OpenAI 端点（Base URL 留空或指向 api.openai.com）；第三方兼容实现不一定支持 safety_identifier 等字段 */
+export function isOfficialOpenAI(baseUrl: string | null | undefined): boolean {
+  const b = (baseUrl || '').trim()
+  return !b || /api\.openai\.com/i.test(b)
+}
+
 /** 上游请求地址：完整地址模式下 Base URL 原样使用，否则补 /v1 再拼接口路径 */
 export function endpointUrl(channel: Channel, defaultRoot: string, path: string): string {
   const base = channel.base_url?.trim()

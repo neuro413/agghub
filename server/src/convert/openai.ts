@@ -12,8 +12,11 @@ function normalizeUsage(json: any): any {
 }
 
 // ── 作为上游渠道（IR → OpenAI 请求 / OpenAI 响应 → IR）──
-export function buildRequest(ir: any, upstreamModel: string): any {
+export function buildRequest(ir: any, upstreamModel: string, opts?: { official?: boolean }): any {
   const out: any = { ...ir, model: upstreamModel }
+  // safety_identifier 由 Anthropic 入口的 metadata.user_id 派生，官方 Chat Completions 接受；
+  // NVIDIA NIM 等第三方兼容上游会把它当作未知参数直接 400，非官方端点一律不发。
+  if (opts?.official === false) delete out.safety_identifier
   // Anthropic 入口带来的 Claude 特有参数，OpenAI 官方 API 收到未知字段会报 400
   delete out.top_k
   // IR 扩展字段：Chat 上游没有对应物
