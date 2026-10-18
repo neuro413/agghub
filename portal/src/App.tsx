@@ -14,11 +14,13 @@ import { DashboardPage } from './pages/DashboardPage'
 import { KeysPage } from './pages/KeysPage'
 import { LogsPage } from './pages/LogsPage'
 import { ModelsPage } from './pages/ModelsPage'
+import { AvailabilityPage } from './pages/AvailabilityPage'
 import { ProfilePage } from './pages/ProfilePage'
 
 const CONSOLE_PAGES: Record<string, () => JSX.Element> = {
   '/console': DashboardPage,
   '/console/models': ModelsPage,
+  '/console/status': AvailabilityPage,
   '/console/keys': KeysPage,
   '/console/logs': LogsPage,
   '/console/profile': ProfilePage,

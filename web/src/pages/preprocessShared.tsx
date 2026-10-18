@@ -24,6 +24,7 @@ export const SOURCE_OPTIONS: Opt[] = [
   { value: 'lan_key', label: '内网 Key' },
   { value: 'public_key', label: '公网 Key' },
   { value: 'user', label: '门户用户' },
+  { value: 'probe', label: '自动测活' },
 ]
 
 /** 入口格式显示名 */

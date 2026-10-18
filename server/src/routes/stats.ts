@@ -35,7 +35,7 @@ statsRouter.get('/', (req, res) => {
   }
   if (req.query.source === 'owner') {
     extra.push("(source = 'owner' OR source IS NULL)")
-  } else if (req.query.source === 'lan_key' || req.query.source === 'public_key' || req.query.source === 'user') {
+  } else if (['lan_key', 'public_key', 'user', 'probe'].includes(String(req.query.source))) {
     extra.push('source = ?')
     extraArgs.push(req.query.source)
   }
