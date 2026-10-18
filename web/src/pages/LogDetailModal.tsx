@@ -21,6 +21,7 @@ function sourceLabel(s: CallerSource | null): string {
   if (s === 'lan_key') return '内网 Key'
   if (s === 'public_key') return '公网 Key'
   if (s === 'user') return '门户用户'
+  if (s === 'probe') return '自动测活'
   return '内网匿名'
 }
 

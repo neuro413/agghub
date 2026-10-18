@@ -1,4 +1,4 @@
-import type { CheckinInfo, LogPage, Notices, PortalGroup, PortalKey, PortalStatus, PricingData, Self, UsageDay } from './types'
+import type { AvailabilityData, CheckinInfo, LogPage, Notices, PortalGroup, PortalKey, PortalStatus, PricingData, Self, UsageDay } from './types'
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) {
@@ -47,6 +47,8 @@ export const api = {
   /** 可用分组与模型基础价格 */
   pricing: (signal?: AbortSignal) => request<PricingData>('/pricing', 'GET', undefined, signal),
   notices: (signal?: AbortSignal) => request<Notices>('/notices', 'GET', undefined, signal),
+  /** 可用分组里各模型最近 2 小时的分格结果数 */
+  availability: (signal?: AbortSignal) => request<AvailabilityData>('/availability', 'GET', undefined, signal),
 
   keys: (signal?: AbortSignal) => request<PortalKey[]>('/keys', 'GET', undefined, signal),
   createKey: (name: string, group: string, expires_at: number | null) => request<PortalKey>('/keys', 'POST', { name, group, expires_at }),

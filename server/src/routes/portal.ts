@@ -5,6 +5,7 @@ import { beginAuthAttempt, blockedSeconds, clientIp, limitKey, recordAuthFailure
 import { checkin, checkinStatus } from '../core/checkin'
 import { findRatio, localDay } from '../core/billing'
 import { PORTAL_ANNOUNCEMENTS, publishedAnnouncements } from '../core/announcements'
+import { availabilityView } from '../core/availability'
 import { userGroups } from '../core/groups'
 import { countUserKeys, createUserKey, deleteKey, getUserKey, listUserKeys, updateKey } from '../core/keys'
 import { modelsVisibleTo } from '../core/selector'
@@ -343,6 +344,11 @@ portalRouter.get('/pricing', (req, res) => {
       return { model, input, output, cache_read, cache_write, per_request, groups: modelGroups.get(model)! }
     }),
   })
+})
+
+/** 可用性：用户可用分组里各模型最近 2 小时每 10 分钟的结果数与失败数 */
+portalRouter.get('/availability', (_req, res) => {
+  ok(res, availabilityView(userGroups(currentUser(res))))
 })
 
 // ── 令牌 ──

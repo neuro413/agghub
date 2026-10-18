@@ -4,6 +4,7 @@ import { getSettings } from './db'
 import { cleanupOldLogs } from './stats/recorder'
 import { recoverChannels } from './core/channelHealth'
 import { cleanupSessions } from './core/sessions'
+import { startProbes } from './core/availability'
 
 if (PUBLIC_PORT && PUBLIC_PORT === PORT) throw new Error('AGGHUB_PUBLIC_PORT 不能与 PORT 相同')
 
@@ -24,6 +25,8 @@ if (PUBLIC_PORT) {
   createApp('public').listen(PUBLIC_PORT, PUBLIC_HOST, () => {
     console.log(`🌐 AggHub 公网入口已启动: http://${PUBLIC_HOST}:${PUBLIC_PORT}（/v1 需要 API Key，/ 为用户门户）`)
   })
+  // 可用性页面只在门户里，没开公网端口时不测活
+  startProbes()
 }
 
 // ── 定时清理过期日志 + 恢复到期熔断渠道 + 清理过期门户会话 ──

@@ -226,6 +226,7 @@ export function LogsPage() {
             { value: 'lan_key', label: '内网 Key' },
             { value: 'public_key', label: '公网 Key' },
             { value: 'user', label: '门户用户' },
+            { value: 'probe', label: '自动测活' },
           ]}
         />
         <Dropdown
@@ -279,6 +280,7 @@ export function LogsPage() {
                 </span>
                 <span className="ah-mini ah-muted ah-truncate">
                   {l.channel_name || '—'}
+                  {l.source === 'probe' && <span className="ah-tag" style={{ marginLeft: 6 }}>测活</span>}
                   {l.key_id != null && (
                     <span className={`ah-tag${l.source === 'public_key' || l.source === 'user' ? ' ah-tag-pub' : ''}`} style={{ marginLeft: 6 }}>
                       {keyLabel(l)}

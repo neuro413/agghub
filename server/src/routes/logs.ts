@@ -45,7 +45,7 @@ logsRouter.get('/', (req, res) => {
   if (req.query.source === 'owner') {
     // 旧日志 source 为 NULL，视同 owner
     where.push("(source = 'owner' OR source IS NULL)")
-  } else if (req.query.source === 'lan_key' || req.query.source === 'public_key' || req.query.source === 'user') {
+  } else if (['lan_key', 'public_key', 'user', 'probe'].includes(String(req.query.source))) {
     where.push('source = ?')
     args.push(req.query.source)
   }

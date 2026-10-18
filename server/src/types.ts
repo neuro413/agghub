@@ -98,8 +98,8 @@ export interface ChannelKeyStatus {
 /** 请求从哪个监听器进入：内网 app / 公网 app */
 export type Surface = 'lan' | 'public'
 
-/** 调用来源：内网匿名或管理令牌 / 内网带 Key / 公网带 Key / 门户用户的 Key（不区分端口） */
-export type CallerSource = 'owner' | 'lan_key' | 'public_key' | 'user'
+/** 调用来源：内网匿名或管理令牌 / 内网带 Key / 公网带 Key / 门户用户的 Key（不区分端口）/ 可用性页面的自动测活 */
+export type CallerSource = 'owner' | 'lan_key' | 'public_key' | 'user' | 'probe'
 
 /** api_keys 数据库原始行 */
 export interface ApiKeyRow {
@@ -168,6 +168,8 @@ export interface Caller {
   key: ApiKey | null
   /** source 为 user 时存在：Key 所属的门户用户 */
   user?: PortalUser | null
+  /** source 为 probe 时存在：测活限定的分组，没有 Key 也按这些分组选渠道 */
+  groups?: string[]
   /** 客户端 IP（已去掉 ::ffff: 前缀），未知时为空串 */
   ip: string
 }

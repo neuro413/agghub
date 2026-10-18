@@ -8,7 +8,7 @@ import { money } from '../lib/format'
 import { NoticeProvider } from '../lib/notices'
 import { NoticeBell } from './NoticeCenter'
 import { Button } from './ui'
-import { IconBox, IconFileText, IconKeyRound, IconLayoutDashboard, IconLogOut, IconPanelLeft, IconUser } from './Icons'
+import { IconActivity, IconBox, IconFileText, IconKeyRound, IconLayoutDashboard, IconLogOut, IconPanelLeft, IconUser } from './Icons'
 
 const NAV = [
   {
@@ -16,6 +16,7 @@ const NAV = [
     items: [
       { to: '/console', label: '概览', Icon: IconLayoutDashboard },
       { to: '/console/models', label: '模型列表', Icon: IconBox },
+      { to: '/console/status', label: '可用性', Icon: IconActivity },
       { to: '/console/keys', label: '令牌', Icon: IconKeyRound },
       { to: '/console/logs', label: '使用日志', Icon: IconFileText },
     ],

@@ -22,10 +22,10 @@ export function keyAllowsModel(caller: Caller, model: string): boolean {
   return !models?.length || models.some(pattern => matchesPattern(pattern, model))
 }
 
-/** 调用方 Key 引用的分组（已删除的忽略）；owner 返回 null，表示不受分组限制 */
+/** 调用方 Key（或测活）引用的分组（已删除的忽略）；owner 返回 null，表示不受分组限制 */
 function callerGroups(caller: Caller): ChannelGroup[] | null {
-  if (!caller.key) return null
-  const names = caller.key.groups
+  const names = caller.key?.groups ?? caller.groups
+  if (!names) return null
   return listGroups().filter(g => names.includes(g.name))
 }
 

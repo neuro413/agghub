@@ -29,7 +29,7 @@ export function normalizeAccessToken(value: unknown): string {
 const booleans = Object.keys(DEFAULT_SETTINGS).filter(key => typeof DEFAULT_SETTINGS[key as keyof Settings] === 'boolean')
 const formats = new Set(['openai', 'anthropic', 'responses'])
 const roles = new Set(['system', 'user', 'assistant', 'tool'])
-const sources = new Set(['owner', 'lan_key', 'public_key', 'user'])
+const sources = new Set(['owner', 'lan_key', 'public_key', 'user', 'probe'])
 const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write']
 /** 按次点数的上限与额度一致，Token 倍率 100 万已相当于每百万 Token 上百万美元 */
 const PER_REQUEST_MAX = 1_000_000_000_000

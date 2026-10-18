@@ -62,6 +62,28 @@ export interface PricingData {
   models: ModelPrice[]
 }
 
+/** 可用性：一格内计入统计的结果数 */
+export interface AvailabilityCell {
+  total: number
+  errors: number
+  /** 其中自动测活的次数 */
+  probes: number
+}
+
+export interface AvailabilityModel {
+  model: string
+  /** 用户可用分组里提供该模型的分组 */
+  groups: string[]
+  cells: AvailabilityCell[]
+}
+
+export interface AvailabilityData {
+  cell_ms: number
+  /** 第一格的开始时间；最后一格是当前尚未结束的格子 */
+  start: number
+  models: AvailabilityModel[]
+}
+
 export type AnnouncementType = 'default' | 'ongoing' | 'success' | 'warning' | 'error'
 
 export interface Announcement {
