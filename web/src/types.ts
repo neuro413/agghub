@@ -4,7 +4,7 @@ export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, KeyMode, ChannelKeyStatus, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
-  UserView, UserListResult, DiscordGuild, DiscordRuleGroup, DiscordGuildCondition, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
+  UserView, UserListResult, DiscordGuild, DiscordGuildRanking, DiscordRuleGroup, DiscordGuildCondition, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
   Announcement, AnnouncementInput, AnnouncementType,
 } from '../../server/src/types'
 

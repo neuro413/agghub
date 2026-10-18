@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { promisify } from 'node:util'
 import { db } from '../db'
 import { userGroups } from './groups'
-import type { ApiKey, DiscordGuild, PortalUser, Settings, UserListResult, UserView } from '../types'
+import type { ApiKey, DiscordGuild, DiscordGuildRank, DiscordGuildRanking, PortalUser, Settings, UserListResult, UserView } from '../types'
 
 const scrypt = promisify(crypto.scrypt) as (password: string, salt: Buffer, keylen: number, options: crypto.ScryptOptions) => Promise<Buffer>
 
@@ -154,6 +154,23 @@ export function listDiscordGuilds(id: number): DiscordGuild[] {
     .prepare('SELECT guild_id AS id, name, icon, owner, member_count FROM user_discord_guilds WHERE user_id = ? ORDER BY owner DESC, name COLLATE NOCASE')
     .all(id) as (Omit<DiscordGuild, 'owner'> & { owner: number })[]
   return rows.map(row => ({ ...row, owner: !!row.owner }))
+}
+
+/** 按库内加入人数给服务器排名 */
+export function rankDiscordGuilds(limit = 50): DiscordGuildRanking {
+  // 只有一个 MAX 聚合时 SQLite 的裸列取自 MAX 所在行，名称、图标、成员数因此来自最近一次记录
+  const rows = db
+    .prepare(
+      `SELECT g.guild_id AS id, g.name, g.icon, g.member_count, COUNT(*) AS user_count, MAX(u.discord_guilds_at) AS latest
+       FROM user_discord_guilds g JOIN users u ON u.id = g.user_id
+       GROUP BY g.guild_id ORDER BY user_count DESC, g.member_count DESC, g.name COLLATE NOCASE LIMIT ?`,
+    )
+    .all(limit) as (DiscordGuildRank & { latest: number | null })[]
+  return {
+    recorded_users: db.prepare('SELECT COUNT(*) FROM users WHERE discord_guilds_at IS NOT NULL').pluck().get() as number,
+    total_guilds: db.prepare('SELECT COUNT(DISTINCT guild_id) FROM user_discord_guilds').pluck().get() as number,
+    items: rows.map(({ latest, ...row }) => row),
+  }
 }
 
 export function touchLogin(id: number, ip: string, now = Date.now()): void {

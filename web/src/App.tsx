@@ -55,6 +55,8 @@ function TokenGate() {
 
 export default function App() {
   const [tab, setTab] = useState<TabKey>('channels')
+  // 统计页点服务器跳到用户页时带上的搜索词；从顶栏切页时清空
+  const [usersQuery, setUsersQuery] = useState('')
   const [needToken, setNeedToken] = useState(false)
   // 金额换算比例和符号来自设置，读到之后再渲染页面；失败（如需要令牌）时按默认值继续
   const [moneyReady, setMoneyReady] = useState(false)
@@ -65,15 +67,15 @@ export default function App() {
   return (
     <ToastProvider>
       <div className="ah-app">
-        <TopNav tab={tab} onTab={setTab} />
+        <TopNav tab={tab} onTab={(t) => { setUsersQuery(''); setTab(t) }} />
         {moneyReady && (
           <main className="ah-main">
             {tab === 'channels' && <ChannelsPage />}
             {tab === 'groups' && <GroupsPage />}
             {tab === 'keys' && <KeysPage />}
-            {tab === 'users' && <UsersPage />}
+            {tab === 'users' && <UsersPage initialQuery={usersQuery} />}
             {tab === 'notices' && <NoticesPage />}
-            {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} />}
+            {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} onSearchUsers={(q) => { setUsersQuery(q); setTab('users') }} />}
             {tab === 'logs' && <LogsPage />}
             {tab === 'preprocess' && <PreprocessPage />}
             {tab === 'settings' && <SettingsPage />}

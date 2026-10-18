@@ -11,6 +11,7 @@ import type {
   ChannelGroupInput,
   ChannelGroupView,
   DiscordGuild,
+  DiscordGuildRanking,
   KeyQuotaOp,
   KeyUsageDay,
   UserListResult,
@@ -143,6 +144,7 @@ export const api = {
     if (filters.source) query.set('source', filters.source)
     return req<Stats>(`/stats?${query.toString()}`, { signal })
   },
+  getDiscordGuildRanking: (signal?: AbortSignal) => req<DiscordGuildRanking>('/stats/discord-guilds', { signal }),
 
   // ── 日志 ──
   listLogs: (

@@ -5,7 +5,7 @@ import { Card } from '../components/Card'
 import { Input } from '../components/Form'
 import { IconChevron, IconChevronLeft, IconChevronRight, IconCopy, IconDiscord, IconRefresh, IconSearch, IconTrash, IconUsers } from '../components/Icons'
 import { Modal } from '../components/Modal'
-import { Loading } from '../components/Primitives'
+import { GuildIcon, Loading } from '../components/Primitives'
 import { useToast } from '../components/Toast'
 import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
@@ -131,21 +131,6 @@ function UserKeys({ userId, usable, onChanged }: { userId: number; usable: strin
   )
 }
 
-/** Discord 服务器图标；没有图标或加载失败时显示名称首字 */
-function GuildIcon({ guild }: { guild: DiscordGuild }) {
-  const [failed, setFailed] = useState(false)
-  if (!guild.icon || failed) return <span className="ah-guild-icon">{[...guild.name][0] ?? '?'}</span>
-  return (
-    <img
-      className="ah-guild-icon"
-      src={`https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64`}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
-  )
-}
-
 /** 展开行：用户最近一次 Discord 登录时所在的服务器；onSearch 搜索同在某个服务器的用户 */
 function UserGuilds({ userId, recordedAt, onSearch }: { userId: number; recordedAt: number | null; onSearch: (guildId: string) => void }) {
   const toast = useToast()
@@ -190,10 +175,11 @@ function UserGuilds({ userId, recordedAt, onSearch }: { userId: number; recorded
   )
 }
 
-export function UsersPage() {
+/** initialQuery：从其他页面跳过来时预填的搜索词 */
+export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
   const toast = useToast()
-  const [qInput, setQInput] = useState('')
-  const [q, setQ] = useState('')
+  const [qInput, setQInput] = useState(initialQuery)
+  const [q, setQ] = useState(initialQuery)
   const [page, setPage] = useState(1)
   const [data, setData] = useState<UserListResult | null>(null)
   const [openId, setOpenId] = useState<number | null>(null)

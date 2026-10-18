@@ -1294,6 +1294,15 @@
 .ah-uadist-row {
   grid-template-columns: 3.4fr 0.6fr 0.45fr 0.7fr 0.7fr;
 }
+.ah-guildrank-row {
+  grid-template-columns: 36px 2.4fr 1.4fr 0.6fr 0.45fr 0.8fr 24px;
+}
+.ah-guildrank-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
 .ah-ipdist-callers {
   display: flex;
   flex-wrap: wrap;

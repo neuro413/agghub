@@ -1,4 +1,5 @@
-import type { ChannelType, LogItem } from '../types'
+import { useState } from 'react'
+import type { ChannelType, DiscordGuild, LogItem } from '../types'
 
 const TYPE_LABEL: Record<ChannelType, string> = {
   openai: 'OpenAI',
@@ -32,5 +33,20 @@ export function Loading() {
     <div className="ah-logt-empty">
       <span className="ah-spin ah-spin-orange" /> 加载中…
     </div>
+  )
+}
+
+/** Discord 服务器图标；没有图标或加载失败时显示名称首字 */
+export function GuildIcon({ guild }: { guild: Pick<DiscordGuild, 'id' | 'name' | 'icon'> }) {
+  const [failed, setFailed] = useState(false)
+  if (!guild.icon || failed) return <span className="ah-guild-icon">{[...guild.name][0] ?? '?'}</span>
+  return (
+    <img
+      className="ah-guild-icon"
+      src={`https://cdn.discordapp.com/icons/${guild.id}/${guild.icon}.png?size=64`}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   )
 }

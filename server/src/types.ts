@@ -676,6 +676,20 @@ export interface DiscordGuild {
   member_count: number | null
 }
 
+/** 统计页服务器排名的一项；名称、图标、成员数取最近一次记录 */
+export interface DiscordGuildRank extends Omit<DiscordGuild, 'owner'> {
+  /** 库内加入了该服务器的用户数 */
+  user_count: number
+}
+
+export interface DiscordGuildRanking {
+  /** 已记录过服务器列表的用户数，用来算占比 */
+  recorded_users: number
+  /** 库内用户加入的服务器总数（去重） */
+  total_guilds: number
+  items: DiscordGuildRank[]
+}
+
 export interface UserListResult {
   items: UserView[]
   total: number

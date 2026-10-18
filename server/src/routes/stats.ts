@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { db } from '../db'
+import { rankDiscordGuilds } from '../core/users'
 
 export const statsRouter = Router()
 
@@ -207,4 +208,9 @@ statsRouter.get('/', (req, res) => {
     by_ip: byIp,
     by_ua: byUa,
   })
+})
+
+// 服务器排名：来自用户最近一次 Discord 登录记录的服务器列表，不受时间范围和 Key 筛选影响
+statsRouter.get('/discord-guilds', (_req, res) => {
+  res.json(rankDiscordGuilds())
 })

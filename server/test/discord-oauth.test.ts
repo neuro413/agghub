@@ -6,7 +6,7 @@ import { db, getSettings, setSettings } from '../src/db'
 import { createApp } from '../src/app'
 import { resetAuthFailures } from '../src/core/caller'
 import { resetLimiter } from '../src/core/limiter'
-import { listDiscordGuilds, listUsers } from '../src/core/users'
+import { listDiscordGuilds, listUsers, rankDiscordGuilds } from '../src/core/users'
 import { SettingsValidationError, validateSettingsPatch } from '../src/core/settingsValidation'
 import { jsonResponse, reset } from './helpers/relay'
 import type { DiscordGuildCondition } from '../src/types'
@@ -546,4 +546,26 @@ test('登录时记录服务器列表：每次覆盖、获取失败保留旧记�
   assert.equal((await discordLogin('g3')).json.success, true)
   assert.deepEqual(listDiscordGuilds(userId).map(g => g.id), [guildB.id])
   assert.equal(listUsers({ q: guildA.id }).total, 0)
+})
+
+test('服务器排名：按库内人数排序，名称与成员数取最近一次记录', async () => {
+  enableDiscord()
+  const shared = { id: '500000000000000001', name: 'Old Name', approximate_member_count: 30 }
+  const solo = { id: '500000000000000002', name: 'Solo', approximate_member_count: 8 }
+  scenario('r1', { id: '444444444444444441', username: 'rank.one' }, undefined, { status: 200, body: [shared, solo] })
+  scenario('r2', { id: '444444444444444442', username: 'rank.two' }, undefined, { status: 200, body: [{ ...shared, name: 'New Name', approximate_member_count: 31 }] })
+  scenario('r3', { id: '444444444444444443', username: 'rank.three' }, undefined, { status: 200, body: [] })
+  for (const code of ['r1', 'r2', 'r3']) assert.equal((await discordLogin(code)).json.success, true)
+  // 同一毫秒内登录时记录时间相同，手动把第一位用户的记录调早
+  db.prepare('UPDATE users SET discord_guilds_at = 1 WHERE discord_id = ?').run('444444444444444441')
+
+  assert.deepEqual(rankDiscordGuilds(), {
+    recorded_users: 3,
+    total_guilds: 2,
+    items: [
+      { id: shared.id, name: 'New Name', icon: null, member_count: 31, user_count: 2 },
+      { id: solo.id, name: 'Solo', icon: null, member_count: 8, user_count: 1 },
+    ],
+  })
+  assert.deepEqual(rankDiscordGuilds(1).items.map(g => g.id), [shared.id])
 })

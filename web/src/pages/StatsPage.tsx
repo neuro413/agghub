@@ -9,10 +9,10 @@ import { StatCard } from '../charts/StatCard'
 import { IconButton, Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { Dropdown } from '../components/Form'
-import { IconBolt, IconCheck, IconChevronRight, IconKey, IconRefresh, IconSpark, IconStats, IconTrend } from '../components/Icons'
+import { IconBolt, IconCheck, IconChevronRight, IconDiscord, IconKey, IconRefresh, IconSearch, IconSpark, IconStats, IconTrend } from '../components/Icons'
 import { useToast } from '../components/Toast'
-import type { ApiKeyView, LogItem, Stats } from '../types'
-import { StatusPill } from '../components/Primitives'
+import type { ApiKeyView, DiscordGuildRanking, LogItem, Stats } from '../types'
+import { GuildIcon, StatusPill } from '../components/Primitives'
 
 const RANGES: { k: string; label: string }[] = [
   { k: '24h', label: '24 小时' },
@@ -31,20 +31,22 @@ function callerLabel(k: IpCaller): string {
 
 const successPct = (success: number, count: number) => (count ? Math.round((success / count) * 100) : 100)
 
-function EmptyData() {
+function EmptyData({ text = '暂无数据' }: { text?: string }) {
   return (
     <div className="ah-muted ah-mini" style={{ padding: '34px 0', textAlign: 'center' }}>
-      暂无数据
+      {text}
     </div>
   )
 }
 
-export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
+/** onSearchUsers：跳到用户页并按服务器 ID 搜索 */
+export function StatsPage({ onOpenLogs, onSearchUsers }: { onOpenLogs: () => void; onSearchUsers: (q: string) => void }) {
   const [range, setRange] = useState('24h')
   const [keyId, setKeyId] = useState('')
   const [keys, setKeys] = useState<ApiKeyView[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
   const [logs, setLogs] = useState<LogItem[]>([])
+  const [guilds, setGuilds] = useState<DiscordGuildRanking | null>(null)
   const [refresh, setRefresh] = useState(0)
   const toast = useToast()
 
@@ -74,10 +76,21 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
     return () => controller.abort()
   }, [])
 
+  // 服务器排名与时间范围、Key 筛选无关，只跟着刷新按钮重新读取
+  useEffect(() => {
+    const controller = new AbortController()
+    api.getDiscordGuildRanking(controller.signal).then(
+      (value) => { if (!controller.signal.aborted) setGuilds(value) },
+      (e: any) => { if (!controller.signal.aborted) toast('err', e.message) },
+    )
+    return () => controller.abort()
+  }, [refresh, toast])
+
   const ov = stats?.overview
   const tp = stats?.throughput
   const rate = Math.round((ov?.success_rate ?? 1) * 100)
   const peakLabel = (stats?.bucketMs ?? 0) >= 86_400_000 ? '每天峰值' : '每小时峰值'
+  const topGuildUsers = guilds?.items[0]?.user_count || 1
 
   return (
     <div className="ah-fade-up">
@@ -253,6 +266,42 @@ export function StatsPage({ onOpenLogs }: { onOpenLogs: () => void }) {
                 </span>
                 <span className="ah-mini ah-muted ah-num">{fmtNum(b.tokens)} tok</span>
                 <span className="ah-mini ah-num">{money(b.points)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <Card className="ah-chart-card" style={{ marginBottom: 'var(--sp-5)' }}>
+        <div className="ah-chart-title">
+          <IconDiscord size={17} /> 服务器排名
+          <span className="sp" />
+          <span className="ah-mini ah-muted">
+            {guilds?.recorded_users ? `${guilds.recorded_users} 名用户 · ${guilds.total_guilds} 个服务器 · ` : ''}按库内人数 Top 50
+          </span>
+        </div>
+        {!guilds?.items.length ? (
+          <EmptyData text="暂无数据，用户用 Discord 登录后会记录其所在的服务器" />
+        ) : (
+          <div className="ah-keydist ah-dist-scroll">
+            {guilds.items.map((g, i) => (
+              <div key={g.id} className="ah-keydist-row ah-guildrank-row">
+                <span className="ah-mini ah-faint ah-num">#{i + 1}</span>
+                <span className="ah-guildrank-name">
+                  <GuildIcon guild={g} />
+                  <span className="ah-truncate ah-keydist-name" title={`${g.name}\n服务器 ID：${g.id}`}>{g.name}</span>
+                </span>
+                <span className="ah-bar"><i style={{ width: `${(g.user_count / topGuildUsers) * 100}%` }} /></span>
+                <span className="ah-mini ah-num" style={{ fontWeight: 700 }}>{g.user_count} 人</span>
+                <span className="ah-mini ah-muted ah-num" title="占已记录服务器列表的用户">
+                  {Math.round((g.user_count / guilds.recorded_users) * 100)}%
+                </span>
+                <span className="ah-mini ah-faint ah-num" title="Discord 给出的服务器近似成员数">
+                  {g.member_count != null ? `共 ${fmtNum(g.member_count)}` : '—'}
+                </span>
+                <button type="button" className="ah-guild-search" title="在用户页查看加入了这个服务器的用户" onClick={() => onSearchUsers(g.id)}>
+                  <IconSearch size={13} />
+                </button>
               </div>
             ))}
           </div>
