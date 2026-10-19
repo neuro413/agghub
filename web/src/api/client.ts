@@ -136,6 +136,7 @@ export const api = {
   getSettings: (signal?: AbortSignal) => req<Settings>('/settings', { signal }),
   updateSettings: (data: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(data) }),
   uploadBrandIcon: (data: string) => req<Settings>('/settings/brand-icon', { method: 'PUT', body: JSON.stringify({ data }) }),
+  uploadBackground: (data: string) => req<Settings>('/settings/background', { method: 'PUT', body: JSON.stringify({ data }) }),
 
   // ── 统计 ──
   getStats: (range: string, signal?: AbortSignal, filters: { key_id?: number; source?: string } = {}) => {

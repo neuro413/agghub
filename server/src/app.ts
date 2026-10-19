@@ -19,7 +19,7 @@ import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
 import { createTokenGuard } from './core/accessToken'
-import { BRAND_ICON_PATH, serveBrandIcon } from './core/siteAssets'
+import { BACKGROUND_PATH, BRAND_ICON_PATH, serveBackground, serveBrandIcon } from './core/siteAssets'
 import { sendPortalHtml } from './core/siteHtml'
 import { createAdmission, createCallerResolver } from './core/caller'
 import { sendEntryError } from './core/entryError'
@@ -59,8 +59,9 @@ function createLanApp(): Express {
     res.json({ ok: true, name: 'AggHub', ts: Date.now() })
   })
 
-  // 门户品牌图标是公开资源，放在令牌校验之前，设置页才能直接用 <img> 预览
+  // 门户品牌图标与背景图是公开资源，放在令牌校验之前，设置页才能直接用 <img> 预览
   app.get(BRAND_ICON_PATH, serveBrandIcon)
+  app.get(BACKGROUND_PATH, serveBackground)
 
   // ── 访问令牌校验（内网默认 access_token 为空 = 不校验）──
   app.use('/api', createTokenGuard(() => getSettings().access_token))
@@ -130,6 +131,7 @@ function createPublicApp(): Express {
 
   // ── 用户门户：会话走 Cookie，不开放跨域 ──
   app.get(BRAND_ICON_PATH, portalHeaders, serveBrandIcon)
+  app.get(BACKGROUND_PATH, portalHeaders, serveBackground)
   app.use('/api/user', portalHeaders, portalRouter)
   // 首页 HTML 在服务端注入品牌，浏览器首屏直接拿到自定义标题与图标
   app.get(['/', '/index.html'], portalHeaders, sendPortalHtml)

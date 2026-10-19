@@ -93,6 +93,10 @@ export const DEFAULT_SETTINGS: Settings = {
   portal_brand_name: 'AggHub',
   portal_brand_icon: '🍊',
   portal_site_title: 'AggHub 控制台',
+  portal_background: '',
+  portal_background_opacity: 80,
+  portal_background_blur: 12,
+  portal_background_dim: 10,
   checkin_enabled: false,
   checkin_min_points: 50000,
   checkin_max_points: 250000,
@@ -115,4 +119,5 @@ export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> =
   portal_initial_quota: [0, 1_000_000_000_000], portal_register_ip_daily: [0, 10_000], portal_max_keys: [1, 1000],
   portal_rpm: [0, 100_000], portal_concurrency: [0, 100_000], portal_points_per_usd: [1, 1_000_000_000_000],
   checkin_min_points: [0, 1_000_000_000_000], checkin_max_points: [0, 1_000_000_000_000],
+  portal_background_opacity: [0, 100], portal_background_blur: [0, 40], portal_background_dim: [0, 90],
 }

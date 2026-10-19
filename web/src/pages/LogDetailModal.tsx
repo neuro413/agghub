@@ -157,7 +157,7 @@ export function LogDetailModal({
       ) : (
         <>
           <LogMeta detail={detail} />
-          {detail.request_id && <div className="ah-mini ah-muted">请求 ID：{detail.request_id} · 总耗时 {detail.latency_ms ?? 0}ms · 最后尝试 {detail.attempt_latency_ms ?? '—'}ms</div>}
+          {detail.request_id && <div className="ah-mini ah-muted">请求 ID：{detail.request_id} · 总耗时 {detail.latency_ms ?? 0}ms{detail.first_token_ms != null && ` · 首字 ${detail.first_token_ms}ms`} · 最后尝试 {detail.attempt_latency_ms ?? '—'}ms</div>}
           {!!(detail.response_body_truncated || detail.upstream_response_body_truncated) && <div role="note" className="ah-detail-empty">日志正文已截断，仅保存前缀；复制得到的也只有已保存内容。实际业务输出不受日志上限影响。</div>}
           {detail.preprocessed_body?.includes('"contents"') && !showOriginal && <div className="ah-mini ah-muted">当前为 Gemini 上游请求体，请在「原始」标签查看 contents；切换原始请求可查看客户端对话。</div>}
           {hasField('preprocessed_body') && (
@@ -215,6 +215,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       {detail.channel_key && <span className="ah-mini ah-muted ah-num" title="多 key 渠道本次使用的上游 key">上游 key：{detail.channel_key}</span>}
       <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
       {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
+      {detail.user_discord_name && <span className="ah-mini ah-muted ah-truncate">Discord：{detail.user_discord_name}</span>}
       {detail.key_name && <span className="ah-mini ah-muted ah-truncate">Key：{detail.key_name}</span>}
       {detail.group_name && <span className="ah-mini ah-muted ah-truncate">分组：{detail.group_name}</span>}
       {detail.client_ip && <span className="ah-mini ah-muted ah-num">IP：{detail.client_ip}</span>}
@@ -223,6 +224,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
         {detail.prompt_tokens || 0}+{detail.completion_tokens || 0}（{detail.cache_read_tokens || 0}+{detail.cache_write_tokens || 0}）token
       </span>
       <span className="ah-mini ah-muted ah-num">{detail.latency_ms ?? 0}ms</span>
+      {detail.first_token_ms != null && <span className="ah-mini ah-muted ah-num" title="首字延迟：从网关收到请求到开始向客户端输出首个内容（含思考）">首字 {detail.first_token_ms}ms</span>}
       <span className="ah-mini ah-faint ah-num">{time}</span>
     </div>
   )

@@ -14,6 +14,8 @@ export interface LogEntry {
   latency_ms: number | null
   request_id?: string | null
   attempt_latency_ms?: number | null
+  /** 首字延迟：从收到请求到开始向客户端输出首个内容（含思考）；非流式或未输出时为 null */
+  first_token_ms?: number | null
   response_body_truncated?: boolean
   upstream_response_body_truncated?: boolean
   prompt_tokens?: number
@@ -88,14 +90,14 @@ const insertStmt = db.prepare(
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
-    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent)
+    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent, first_token_ms)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
-    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent)`,
+    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent, @first_token_ms)`,
 )
 
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
@@ -144,6 +146,7 @@ export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promis
       latency_ms: e.latency_ms ?? null,
       request_id: e.request_id ?? null,
       attempt_latency_ms: e.attempt_latency_ms ?? null,
+      first_token_ms: e.first_token_ms ?? null,
       response_body_truncated: e.response_body_truncated ? 1 : 0,
       upstream_response_body_truncated: e.upstream_response_body_truncated ? 1 : 0,
       prompt_tokens: e.prompt_tokens ?? 0,

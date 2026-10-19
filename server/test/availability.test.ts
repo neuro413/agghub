@@ -3,7 +3,7 @@ import test, { after, afterEach, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { db } from '../src/db'
 import { createGroup } from '../src/core/groups'
-import { availabilityView, CELL_MS, probeIdleModels, probeModel } from '../src/core/availability'
+import { availabilityView, CELL_COUNT, CELL_MS, probeIdleModels, probeModel } from '../src/core/availability'
 import { channel, jsonResponse, logs, oaiBody, reset } from './helpers/relay'
 
 const originalFetch = globalThis.fetch
@@ -60,17 +60,17 @@ test('可用性只统计本组渠道的结果，排除调用方原因的失败',
   insertLog({ created_at: cell, channel_id: null, status: 'error', status_code: 429, source: 'user' })
   insertLog({ created_at: cell, channel_id: privateId, status: 'success', status_code: 200 })
   insertLog({ created_at: cell, channel_id: publicId, status: 'error', status_code: 502, is_retry: 1 })
-  insertLog({ created_at: cell - 12 * CELL_MS, channel_id: publicId, status: 'error', status_code: 502 })
+  insertLog({ created_at: cell - CELL_COUNT * CELL_MS, channel_id: publicId, status: 'error', status_code: 502 })
   insertLog({ created_at: cell - CELL_MS, channel_id: publicId, status: 'success', status_code: 200 })
 
   const view = availabilityView([group], now)
-  assert.equal(view.start, cell - 11 * CELL_MS)
+  assert.equal(view.start, cell - (CELL_COUNT - 1) * CELL_MS)
   assert.deepEqual(view.models.map(m => m.model), ['alias'])
   const cells = view.models[0].cells
-  assert.equal(cells.length, 12)
-  assert.deepEqual(cells[11], { total: 4, errors: 3, probes: 1 })
-  assert.deepEqual(cells[10], { total: 1, errors: 0, probes: 0 })
-  assert.equal(cells.slice(0, 10).reduce((s, c) => s + c.total, 0), 0)
+  assert.equal(cells.length, CELL_COUNT)
+  assert.deepEqual(cells[CELL_COUNT - 1], { total: 4, errors: 3, probes: 1 })
+  assert.deepEqual(cells[CELL_COUNT - 2], { total: 1, errors: 0, probes: 0 })
+  assert.equal(cells.slice(0, CELL_COUNT - 2).reduce((s, c) => s + c.total, 0), 0)
 
   // 熔断停用的渠道照样显示，手动停用的不显示
   db.prepare('UPDATE channels SET status = 2 WHERE id = ?').run(publicId)

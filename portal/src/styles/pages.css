@@ -417,10 +417,10 @@
 .pt-av-rate-value { font-size: 13.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .pt-av-rate-desc { color: var(--muted-fg); font-size: 12px; white-space: nowrap; }
 
-.pt-av-strip { display: flex; height: 28px; margin: 0 -1.5px; border-radius: 6px; outline: none; }
+.pt-av-strip { display: flex; height: 28px; margin: 0 -1px; border-radius: 6px; outline: none; }
 .pt-av-strip:focus-visible { box-shadow: 0 0 0 3px var(--ring-soft); }
 /* 格子连同两侧间隙都是悬浮区域，色块画在伪元素上 */
-.pt-av-cell { min-width: 6px; flex: 1; padding: 0 1.5px; }
+.pt-av-cell { min-width: 4px; flex: 1; padding: 0 1px; }
 .pt-av-cell::before { content: ''; display: block; height: 100%; border-radius: 4px; background: var(--av-tone); }
 .pt-av-cell.is-good { --av-tone: var(--success); }
 .pt-av-cell.is-warn { --av-tone: var(--warning); }

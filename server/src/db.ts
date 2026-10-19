@@ -243,6 +243,7 @@ addMissingColumns('request_logs', [
   ['user_id', 'INTEGER'],
   ['group_name', 'TEXT'],
   ['channel_key', 'TEXT'],
+  ['first_token_ms', 'INTEGER'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT'], ['discord_guilds_at', 'INTEGER']])
 // 一个 Discord 账号只对应一个用户；Discord 建号依赖此约束兜底并发

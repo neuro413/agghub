@@ -3,6 +3,8 @@ import path from 'node:path'
 import type { RequestHandler } from 'express'
 import { PORTAL_DIST } from '../config'
 import { getSettings } from '../db'
+import { validBackground } from './settingsValidation'
+import type { Settings } from '../types'
 
 const INDEX_PATH = path.join(PORTAL_DIST, 'index.html')
 /** 模板里 link 标签跨行，href 的 data URI 还带 ">"，必须让 href 值整体跳过 */
@@ -42,9 +44,16 @@ function iconHref(icon: string): string | null {
   return /^(https?:\/\/|\/)/i.test(icon) ? icon : textIcon(icon)
 }
 
+/** 背景图与面板参数写成 CSS 变量，与前端 lib/brand.ts 的 applyBackground 保持一致；地址经校验不含引号、括号与尖括号 */
+function backgroundStyle(s: Settings): string {
+  if (!s.portal_background || !validBackground(s.portal_background)) return ''
+  return `<style id="pt-background">:root{--pt-bg-image:url("${s.portal_background}");--pt-panel-alpha:${s.portal_background_opacity / 100};`
+    + `--pt-panel-blur:${s.portal_background_blur}px;--pt-bg-dim:${s.portal_background_dim / 100}}</style>`
+}
+
 /**
- * 把站点标题和图标直接写进首屏 HTML。
- * 浏览器解析 <head> 时就能拿到品牌，避免先闪一下静态默认标题与 🍊。
+ * 把站点标题、图标和背景直接写进首屏 HTML。
+ * 浏览器解析 <head> 时就能拿到品牌，避免先闪一下静态默认标题、🍊 与白底。
  */
 export function renderPortalHtml(): string | null {
   let html = template()
@@ -63,6 +72,9 @@ export function renderPortalHtml(): string | null {
     : link
       ? html.replace(/<\/head>/i, () => `${link}</head>`)
       : html
+
+  const style = backgroundStyle(s)
+  if (style) html = html.replace(/<html\b/i, '<html data-bg').replace(/<\/head>/i, () => `${style}</head>`)
   return html
 }
 

@@ -389,6 +389,14 @@ export interface Settings {
   portal_brand_icon: string
   /** 门户网页标题 */
   portal_site_title: string
+  /** 门户背景图：留空不启用；http(s) 图片链接，或上传后的 /api/user/background 地址 */
+  portal_background: string
+  /** 有背景图时内容面板的不透明度（%） */
+  portal_background_opacity: number
+  /** 有背景图时内容面板的毛玻璃模糊半径（px） */
+  portal_background_blur: number
+  /** 背景图上叠加的白色遮罩浓度（%），保证直接压在图上的顶栏 / 侧栏文字可读 */
+  portal_background_dim: number
   checkin_enabled: boolean
   /** 签到奖励随机区间（点数，含两端） */
   checkin_min_points: number

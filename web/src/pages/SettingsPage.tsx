@@ -20,6 +20,7 @@ const KEYS: (keyof Settings)[] = [
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
   'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
   'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
+  'portal_background', 'portal_background_opacity', 'portal_background_blur', 'portal_background_dim',
   'portal_password_register_enabled', 'discord_enabled', 'discord_client_id', 'discord_client_secret', 'discord_rules',
 ]
 
@@ -28,6 +29,9 @@ type PointsKey = 'portal_initial_quota' | 'checkin_min_points' | 'checkin_max_po
 
 /** 与后端 BRAND_ICON_MAX_BYTES 一致 */
 const BRAND_ICON_MAX_BYTES = 512 * 1024
+
+/** 与后端 BACKGROUND_MAX_BYTES 一致 */
+const BACKGROUND_MAX_BYTES = 5 * 1024 * 1024
 
 /** 图标是 http(s) 链接或上传地址时按图片显示，否则当作 emoji / 文字 */
 function isImageIcon(icon: string): boolean {
@@ -48,7 +52,9 @@ export function SettingsPage() {
   const [system, setSystem] = useState<SystemInfo | null>(null)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadingBg, setUploadingBg] = useState(false)
   const iconFile = useRef<HTMLInputElement>(null)
+  const bgFile = useRef<HTMLInputElement>(null)
   /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
   const loaded = useRef<Settings | null>(null)
   const toast = useToast()
@@ -107,6 +113,25 @@ export function SettingsPage() {
       toast('err', e.message)
     } finally {
       setUploading(false)
+    }
+  }
+
+  // 上传后服务端立即把背景设置指向上传地址，这里同步快照，不算作未保存的改动
+  const uploadBackground = async (file: File) => {
+    if (file.size > BACKGROUND_MAX_BYTES) {
+      toast('err', `背景图不能超过 ${BACKGROUND_MAX_BYTES / 1024 / 1024} MB`)
+      return
+    }
+    setUploadingBg(true)
+    try {
+      const saved = await api.uploadBackground(await readAsDataUrl(file))
+      if (loaded.current) loaded.current = { ...loaded.current, portal_background: saved.portal_background }
+      set('portal_background', saved.portal_background)
+      toast('ok', '背景图已上传并生效')
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setUploadingBg(false)
     }
   }
 
@@ -313,6 +338,53 @@ export function SettingsPage() {
               if (file) uploadIcon(file)
             }}
           />
+        </SettingRow>
+      </Card>
+
+      {/* 门户背景 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconWand size={18} /> 门户背景
+        </div>
+        <div className="ah-set-desc">给用户门户（登录注册页与控制台）铺一张背景图，内容面板随之变为半透明毛玻璃；未设置背景图时门户保持原来的纯白外观</div>
+        <SettingRow
+          label="背景图片"
+          desc={`留空不启用；可填 http(s) 图片链接（门户走 HTTPS 时请用 https 链接），也可以上传 PNG / JPEG / GIF / WebP（不超过 ${BACKGROUND_MAX_BYTES / 1024 / 1024} MB，上传后立即生效）`}
+        >
+          <Input value={s.portal_background} onChange={(e) => set('portal_background', e.target.value)} placeholder="https://…" />
+          <Button variant="soft" size="sm" loading={uploadingBg} onClick={() => bgFile.current?.click()}>
+            上传
+          </Button>
+          {s.portal_background && (
+            <IconButton title="清除（保存后生效）" onClick={() => set('portal_background', '')}>
+              <IconTrash size={16} />
+            </IconButton>
+          )}
+          <input
+            ref={bgFile}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            hidden
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) uploadBackground(file)
+            }}
+          />
+        </SettingRow>
+        {s.portal_background && (
+          <div className="ah-bg-preview">
+            <img src={s.portal_background} alt="背景预览" />
+          </div>
+        )}
+        <SettingRow label="面板不透明度" desc="有背景图时内容面板与卡片白底的不透明度；越低背景越清楚，文字越难看清">
+          <Slider value={s.portal_background_opacity} min={0} max={100} onChange={(v) => set('portal_background_opacity', v)} suffix=" %" />
+        </SettingRow>
+        <SettingRow label="毛玻璃模糊" desc="内容面板对背后图片的模糊程度，0 为不模糊">
+          <Slider value={s.portal_background_blur} min={0} max={40} onChange={(v) => set('portal_background_blur', v)} suffix=" px" />
+        </SettingRow>
+        <SettingRow label="背景遮罩" desc="在背景图上叠一层白色；图片较花时调高，保证顶栏与侧栏文字可读">
+          <Slider value={s.portal_background_dim} min={0} max={90} onChange={(v) => set('portal_background_dim', v)} suffix=" %" />
         </SettingRow>
       </Card>
 

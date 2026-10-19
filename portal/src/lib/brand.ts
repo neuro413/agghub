@@ -16,8 +16,23 @@ function textIcon(text: string): string {
   return `data:image/svg+xml,${encodeURIComponent(svg)}`
 }
 
-/** 标签页标题和图标跟随站点设置；图标留空时去掉 favicon */
+/** 背景写成根元素上的 CSS 变量，与服务端 siteHtml 首屏注入的一致；未设置时去掉 data-bg，恢复纯白外观 */
+function applyBackground(s: PortalStatus): void {
+  const root = document.documentElement
+  if (!s.background) {
+    delete root.dataset.bg
+    return
+  }
+  root.dataset.bg = ''
+  root.style.setProperty('--pt-bg-image', `url("${s.background}")`)
+  root.style.setProperty('--pt-panel-alpha', String(s.background_opacity / 100))
+  root.style.setProperty('--pt-panel-blur', `${s.background_blur}px`)
+  root.style.setProperty('--pt-bg-dim', String(s.background_dim / 100))
+}
+
+/** 标签页标题、图标和背景跟随站点设置；图标留空时去掉 favicon */
 export function applyBranding(s: PortalStatus): void {
+  applyBackground(s)
   document.title = s.site_title
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!s.brand_icon) {

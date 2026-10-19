@@ -7,6 +7,8 @@ export const logsRouter = Router()
 
 /** 门户用户名（当前名称；用户已删除时为 null） */
 const USER_NAME = '(SELECT username FROM users WHERE users.id = request_logs.user_id) AS user_name'
+/** 门户用户绑定的 Discord 用户名 */
+const USER_DISCORD_NAME = '(SELECT discord_username FROM users WHERE users.id = request_logs.user_id) AS user_discord_name'
 
 // 列表（不含大正文，节省流量；展开时再取详情）
 logsRouter.get('/', (req, res) => {
@@ -49,10 +51,14 @@ logsRouter.get('/', (req, res) => {
     where.push('source = ?')
     args.push(req.query.source)
   }
-  if (req.query.q) {
-    const kw = `%${String(req.query.q).trim()}%`
-    where.push('(model LIKE ? OR channel_name LIKE ? OR upstream_model LIKE ? OR error_message LIKE ? OR key_name LIKE ?)')
-    args.push(kw, kw, kw, kw, kw)
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : ''
+  if (q) {
+    // 关键词按字面匹配；门户用户名 / Discord 用户名经 users 表反查，Discord ID 与请求 ID 精确匹配
+    const kw = `%${q.replace(/[\\%_]/g, m => '\\' + m)}%`
+    where.push(`(model LIKE ? ESCAPE '\\' OR channel_name LIKE ? ESCAPE '\\' OR upstream_model LIKE ? ESCAPE '\\'
+      OR error_message LIKE ? ESCAPE '\\' OR key_name LIKE ? ESCAPE '\\' OR client_ip LIKE ? ESCAPE '\\' OR request_id = ?
+      OR user_id IN (SELECT id FROM users WHERE username LIKE ? ESCAPE '\\' OR discord_username LIKE ? ESCAPE '\\' OR discord_id = ?))`)
+    args.push(kw, kw, kw, kw, kw, kw, q, kw, kw, q)
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
@@ -61,12 +67,12 @@ logsRouter.get('/', (req, res) => {
   const rows = db
     .prepare(
       `SELECT id, created_at, channel_id, channel_name, entry_format, model, upstream_model,
-              status, status_code, latency_ms, request_id, attempt_latency_ms,
+              status, status_code, latency_ms, request_id, attempt_latency_ms, first_token_ms,
               response_body_truncated, upstream_response_body_truncated,
               prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
               retry_count, is_stream, error_message, preprocessed, pseudo_thinking,
-              source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, ${USER_NAME}
+              source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, ${USER_NAME}, ${USER_DISCORD_NAME}
        FROM request_logs ${whereSql}
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     )
@@ -104,7 +110,7 @@ logsRouter.get('/:id', (req, res) => {
     if (names.some(field => !LOG_BODY_FIELDS.includes(field as LogBodyField))) return res.status(400).json({ error: '未知日志正文字段' })
     fields = [...new Set(names)] as LogBodyField[]
   }
-  const row = db.prepare(`SELECT *, ${USER_NAME} FROM request_logs WHERE id = ?`).get(Number(req.params.id))
+  const row = db.prepare(`SELECT *, ${USER_NAME}, ${USER_DISCORD_NAME} FROM request_logs WHERE id = ?`).get(Number(req.params.id))
   if (!row) return res.status(404).json({ error: 'not found' })
   res.json(hydrateLogRow(row, fields))
 })

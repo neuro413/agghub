@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { getSettings, setSettings } from '../db'
 import { SettingsValidationError, validateSettingsPatch } from '../core/settingsValidation'
-import { saveBrandIcon } from '../core/siteAssets'
+import { saveBackground, saveBrandIcon } from '../core/siteAssets'
 
 export const settingsRouter = Router()
 
@@ -13,6 +13,16 @@ settingsRouter.get('/', (_req, res) => {
 settingsRouter.put('/brand-icon', (req, res) => {
   try {
     setSettings({ portal_brand_icon: saveBrandIcon(req.body?.data) })
+    res.json(getSettings())
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message })
+  }
+})
+
+// 上传门户背景图（data URI），保存后立即把背景设置指向上传地址
+settingsRouter.put('/background', (req, res) => {
+  try {
+    setSettings({ portal_background: saveBackground(req.body?.data) })
     res.json(getSettings())
   } catch (error) {
     res.status(400).json({ error: (error as Error).message })
