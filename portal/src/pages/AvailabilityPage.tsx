@@ -9,7 +9,7 @@ import { Badge, Button, Card, Empty, Input, Skeleton } from '../components/ui'
 import { IconActivity, IconCircleCheck, IconCircleDashed, IconCircleX, IconRefresh, IconSearch, IconTriangleAlert } from '../components/Icons'
 import type { IconProps } from '../components/Icons'
 
-// 可用性：最近 2 小时每 10 分钟一格，按错误率给每格定健康度；10 分钟内没人调用的模型由服务端自动测活
+// 可用性：最近 6 小时每 10 分钟一格，按错误率给每格定健康度；10 分钟内没人调用的模型由服务端自动测活
 
 type Level = 'good' | 'warn' | 'bad' | 'none'
 
@@ -126,7 +126,7 @@ function Strip({ data, row, tip, onTip }: { data: AvailabilityData; row: Row; ti
       className="pt-av-strip"
       tabIndex={0}
       role="group"
-      aria-label={`${row.model} 最近 2 小时，方向键逐格查看`}
+      aria-label={`${row.model} 最近 6 小时，方向键逐格查看`}
       // 鼠标点击也会聚焦，只有键盘聚焦才跳到最新一格
       onFocus={e => { if (e.currentTarget.matches(':focus-visible')) show(row.cells.length - 1) }}
       onBlur={() => onTip(null)}
@@ -157,7 +157,7 @@ function ModelRow({ data, row, showGroups, tip, onTip }: { data: AvailabilityDat
       <div className="pt-av-current"><Status level={row.level} /></div>
       <Strip data={data} row={row} tip={tip} onTip={onTip} />
       <div className="pt-av-rate">
-        <span className="pt-av-rate-label">2 小时错误率</span>
+        <span className="pt-av-rate-label">6 小时错误率</span>
         <span className="pt-av-rate-value">{row.total ? rateText(row.errors, row.total) : '—'}</span>
         <span className="pt-av-rate-desc">{row.total ? `${num(row.total)} 次请求` : '暂无请求'}</span>
       </div>
@@ -258,7 +258,7 @@ export function AvailabilityPage() {
             <span className="pt-av-model">模型</span>
             <span className="pt-av-current">当前</span>
             <span className="pt-av-axis"><span>{hm(firstCell)}</span><span>{hm(mid)}</span><span>现在</span></span>
-            <span className="pt-av-rate">2 小时错误率</span>
+            <span className="pt-av-rate">6 小时错误率</span>
           </div>
           {visible.map(row => <ModelRow key={row.model} data={data} row={row} showGroups={showGroups} tip={tip} onTip={setTip} />)}
           {!visible.length && (
@@ -271,7 +271,7 @@ export function AvailabilityPage() {
   }
 
   return (
-    <PageLayout title="可用性" desc="最近 2 小时各模型的健康度与错误率，每格 10 分钟" actions={actions}>
+    <PageLayout title="可用性" desc="最近 6 小时各模型的健康度与错误率，每格 10 分钟" actions={actions}>
       <div className="pt-av-stats">
         {LEVEL_ORDER.map(level => (
           <button

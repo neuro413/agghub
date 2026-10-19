@@ -17,6 +17,12 @@ export interface PortalStatus {
   /** emoji / 文字，或图片地址 */
   brand_icon: string
   site_title: string
+  /** 背景图地址；空串表示不启用 */
+  background: string
+  /** 有背景图时：内容面板不透明度（%）、模糊半径（px）、背景白色遮罩浓度（%） */
+  background_opacity: number
+  background_blur: number
+  background_dim: number
   base_url: string
   log_retention_days: number
 }

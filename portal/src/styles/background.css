@@ -1,0 +1,58 @@
+/* ── 自定义背景：设置了背景图时根元素带 data-bg，变量由服务端首屏注入或 lib/brand.ts 写入 ── */
+/* 毛玻璃画在 ::before 上：容器自身带 backdrop-filter 会成为 fixed 子元素（可用性悬浮提示、移动端通知弹层）的定位基准 */
+
+[data-bg] body { background: transparent; }
+[data-bg] body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(rgb(255 255 255 / var(--pt-bg-dim)), rgb(255 255 255 / var(--pt-bg-dim))), var(--pt-bg-image) center / cover no-repeat;
+  pointer-events: none;
+}
+
+[data-bg] .pt-shell,
+[data-bg] .pt-header,
+[data-bg] .pt-sidebar,
+[data-bg] .pt-auth { background: transparent; }
+
+[data-bg] .pt-header::before,
+[data-bg] .pt-inset::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: blur(var(--pt-panel-blur));
+  -webkit-backdrop-filter: blur(var(--pt-panel-blur));
+  pointer-events: none;
+}
+/* 顶栏吸顶，内容滚到它下面时靠模糊压住 */
+[data-bg] .pt-header::before { background: rgb(255 255 255 / calc(var(--pt-panel-alpha) * 0.5)); }
+
+/* 面板不建层叠上下文，::before 落在根层、排在背景层之后，面板内悬浮提示的 z-index 仍能盖过顶栏；
+   面板里的卡片、表头再叠一层更淡的白，随不透明度一起变化 */
+[data-bg] .pt-inset {
+  --background: rgb(255 255 255 / calc(var(--pt-panel-alpha) * 0.5));
+  --table-header: transparent;
+  --row-hover: rgb(0 0 0 / 0.03);
+  position: relative;
+  background: transparent;
+}
+[data-bg] .pt-inset::before { background: rgb(255 255 255 / var(--pt-panel-alpha)); }
+
+/* 浮在内容上的弹层保持不透明 */
+[data-bg] :is(.pt-menu, .pt-group-menu, .pt-notice-pop, .pt-av-tip) { --background: #fff; }
+
+[data-bg] .pt-auth-col {
+  border-radius: var(--radius-xl);
+  background: rgb(255 255 255 / var(--pt-panel-alpha));
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(var(--pt-panel-blur));
+  -webkit-backdrop-filter: blur(var(--pt-panel-blur));
+}
+
+@media (max-width: 767px) {
+  /* 移动端侧栏是盖在内容上的抽屉，保持不透明 */
+  [data-bg] .pt-sidebar { background: var(--sidebar); }
+}

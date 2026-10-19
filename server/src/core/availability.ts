@@ -8,10 +8,10 @@ import { handleRelay } from './relay'
 import { USER_ENABLED } from './users'
 import type { Caller, Channel, ChannelGroup, ModelRatio } from '../types'
 
-// 门户可用性页面：最近 2 小时按 10 分钟一格统计各模型的错误率；10 分钟内没有结果的模型自动测活一次
+// 门户可用性页面：最近 6 小时按 10 分钟一格统计各模型的错误率；10 分钟内没有结果的模型自动测活一次
 
 export const CELL_MS = 10 * 60_000
-export const CELL_COUNT = 12
+export const CELL_COUNT = 36
 /** 当前格子只剩这么久仍没有结果时补测一次，避免测活间隔逐轮漂移、跳过整格 */
 const COVER_MS = 60_000
 const PROBE_TICK_MS = 30_000

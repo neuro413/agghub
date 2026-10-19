@@ -47,7 +47,7 @@ export const api = {
   /** 可用分组与模型基础价格 */
   pricing: (signal?: AbortSignal) => request<PricingData>('/pricing', 'GET', undefined, signal),
   notices: (signal?: AbortSignal) => request<Notices>('/notices', 'GET', undefined, signal),
-  /** 可用分组里各模型最近 2 小时的分格结果数 */
+  /** 可用分组里各模型最近 6 小时的分格结果数 */
   availability: (signal?: AbortSignal) => request<AvailabilityData>('/availability', 'GET', undefined, signal),
 
   keys: (signal?: AbortSignal) => request<PortalKey[]>('/keys', 'GET', undefined, signal),

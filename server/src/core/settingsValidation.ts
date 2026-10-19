@@ -48,6 +48,15 @@ function brandIcon(value: any): boolean {
   }
   return [...value].length <= 16
 }
+/** 门户背景图：留空、上传后的门户地址或 http(s) 图片链接；会写进 CSS url("…")，不允许引号、括号、反斜杠、尖括号与空白 */
+export function validBackground(value: any): boolean {
+  if (typeof value !== 'string') return false
+  if (!value) return true
+  if (value.length > 2048 || /["'()\\<>\s]/.test(value)) return false
+  if (/^\/api\/user\/background(\?v=\d+)?$/.test(value)) return true
+  if (!/^https?:\/\//i.test(value)) return false
+  try { return !!new URL(value) } catch { return false }
+}
 function strings(value: any): boolean {
   return Array.isArray(value) && value.every(v => typeof v === 'string' && v.length > 0)
 }
@@ -97,6 +106,7 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   check(text(merged.portal_brand_name, 64), 'portal_brand_name', '须为 1～64 字符的非空文本')
   check(text(merged.portal_site_title, 128), 'portal_site_title', '须为 1～128 字符的非空文本')
   check(brandIcon(merged.portal_brand_icon), 'portal_brand_icon', '须为图片链接或不超过 16 字符的 emoji / 文字')
+  check(validBackground(merged.portal_background), 'portal_background', '须留空，或为不含引号、括号、空白的 http(s) 图片链接')
   check(typeof merged.portal_notice === 'string' && merged.portal_notice.length <= 20_000, 'portal_notice', '须为不超过 20000 字符的字符串')
   check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')

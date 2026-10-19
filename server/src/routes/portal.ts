@@ -121,6 +121,10 @@ portalRouter.get('/status', (req, res) => {
     brand_name: s.portal_brand_name,
     brand_icon: s.portal_brand_icon,
     site_title: s.portal_site_title,
+    background: s.portal_background,
+    background_opacity: s.portal_background_opacity,
+    background_blur: s.portal_background_blur,
+    background_dim: s.portal_background_dim,
     base_url: s.public_base_url || `${req.protocol}://${req.get('host') ?? ''}`,
     log_retention_days: s.log_retention_days,
   })
@@ -346,7 +350,7 @@ portalRouter.get('/pricing', (req, res) => {
   })
 })
 
-/** 可用性：用户可用分组里各模型最近 2 小时每 10 分钟的结果数与失败数 */
+/** 可用性：用户可用分组里各模型最近 6 小时每 10 分钟的结果数与失败数 */
 portalRouter.get('/availability', (_req, res) => {
   ok(res, availabilityView(userGroups(currentUser(res))))
 })

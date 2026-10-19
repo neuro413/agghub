@@ -76,6 +76,8 @@ export interface LogItem {
   latency_ms: number | null
   request_id: string | null
   attempt_latency_ms: number | null
+  /** 首字延迟：从网关收到请求到开始输出首个内容（含思考）；非流式与旧日志为 null */
+  first_token_ms: number | null
   response_body_truncated: number
   upstream_response_body_truncated: number
   prompt_tokens: number
@@ -99,6 +101,8 @@ export interface LogItem {
   /** 门户用户 id 与当前用户名（用户已删除时用户名为 null） */
   user_id: number | null
   user_name: string | null
+  /** 门户用户绑定的 Discord 用户名 */
+  user_discord_name: string | null
   /** 计费所用分组；owner 调用为 null */
   group_name: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值） */

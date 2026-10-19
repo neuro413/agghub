@@ -36,9 +36,16 @@ interface Filters {
 
 const EMPTY: Filters = { q: '', status: '', entry_format: '', is_stream: '', channel_id: '', model: '', source: '', key_id: '' }
 
+/** 门户用户名；Discord 用户名与之不同时附在括号里（Discord 建号的用户名由 Discord 名把 . 换成 _ 得来，相同时不重复显示） */
+function userLabel(l: LogItem): string {
+  const name = l.user_name ?? '#' + l.user_id
+  const dc = l.user_discord_name
+  return dc && dc.replace(/\./g, '_').toLowerCase() !== name.toLowerCase() ? `${name}（${dc}）` : name
+}
+
 /** Key 标签：公网 / 内网前缀 + Key 名称快照；门户用户显示「用户名 / Key 名」 */
 function keyLabel(l: LogItem): string {
-  if (l.source === 'user') return `${l.user_name ?? '#' + l.user_id} / ${l.key_name || '#' + l.key_id}`
+  if (l.source === 'user') return `${userLabel(l)} / ${l.key_name || '#' + l.key_id}`
   const prefix = l.source === 'public_key' ? '公网 ' : l.source === 'lan_key' ? '内网 ' : ''
   return prefix + (l.key_name || '#' + l.key_id)
 }
@@ -170,7 +177,8 @@ export function LogsPage() {
           <Input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
-            placeholder="搜索模型 / 渠道 / 错误信息…"
+            placeholder="搜索模型 / 渠道 / 用户 / IP…"
+            title="可搜索：模型、渠道、上游模型、错误信息、Key 名、门户用户名、Discord 用户名 / ID、客户端 IP、请求 ID"
           />
         </div>
         <Dropdown
@@ -299,7 +307,10 @@ export function LogsPage() {
                 </span>
               </span>
               <span className="c-tok ah-mini ah-muted ah-num">{fmtNum(l.total_tokens)}</span>
-              <span className="c-lat ah-mini ah-muted ah-num">{l.latency_ms ?? 0}ms</span>
+              <span className="c-lat ah-mini ah-muted ah-num">
+                <span>{l.latency_ms ?? 0}ms</span>
+                {l.first_token_ms != null && <span className="ah-faint" title="首字延迟">首字 {l.first_token_ms}ms</span>}
+              </span>
               <span className="c-act">
                 <IconButton title="查看详情" onClick={() => setOpenId(l.id)}>
                   <IconEye size={16} />

@@ -77,6 +77,8 @@ interface AttemptState extends UpstreamContext {
   claim?: () => boolean
   /** 本次尝试结束时的耗时 */
   elapsedMs?: number
+  /** 首个有效内容（含思考）开始向客户端输出的时刻（performance.now） */
+  firstTokenAt?: number
   adaptor: Adaptor
   passthrough: boolean
   lifecycle: AttemptLifecycle
@@ -258,6 +260,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         entry_format: ctx.entryFormat, model: loggedModel, upstream_model: state?.upstreamModel ?? null,
         status: outcome.status, status_code: outcome.code, error_message: outcome.error,
         latency_ms: intermediate ? attemptMs : lifecycle.elapsed, attempt_latency_ms: attemptMs,
+        first_token_ms: state?.firstTokenAt === undefined ? null : Math.round(state.firstTokenAt - lifecycle.started),
         ...outcome.usage, ...cacheParts(outcome.usage), retry_count: Math.max(0, attempts - 1), is_stream: ctx.stream, is_retry: intermediate,
         request_body: rawJson, request_headers: headersJson,
         preprocessed: state?.preprocessed, preprocessed_body: state?.preprocessedBody,
@@ -520,6 +523,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     ctx.res.setHeader('X-Accel-Buffering', 'no')
     ctx.res.flushHeaders?.()
     opened = true
+    state.firstTokenAt = performance.now()
     for (const frame of pending) await write(frame)
     pending = []
   }
