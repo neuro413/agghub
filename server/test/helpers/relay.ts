@@ -24,7 +24,7 @@ export class FakeResponse extends EventEmitter {
   json(value: any) { this.jsonBody = value; this.headersSent = true; this.end(); return this }
   type(_value: string) { return this }
   send(text: string) { return this.json(JSON.parse(text)) }
-  end() { this.writableEnded = true; this.emit('close'); return this }
+  end(text?: string) { if (text) this.chunks.push(text); this.writableEnded = true; this.emit('close'); return this }
   disconnect() { this.destroyed = true; this.emit('close') }
 }
 

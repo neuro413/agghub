@@ -45,6 +45,8 @@ export const DEFAULT_SETTINGS: Settings = {
   retry_interval_ms: 0,
   request_timeout_ms: 120000,
   request_max_duration_ms: 1800000,
+  /** 流式超过该时长没有向客户端输出就发 SSE 注释保活；0 关闭 */
+  stream_keepalive_ms: 30000,
   log_response_max_bytes: 4194304,
   stream_buffer_max_bytes: 16777216,
   image_max_bytes: 20971520,
@@ -111,7 +113,7 @@ export const DEFAULT_SETTINGS: Settings = {
 /** 整数设置的取值范围（保存时校验） */
 export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   single_retry_times: [0, 100], channel_retry_times: [0, 20], retry_interval_ms: [0, 300_000],
-  request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000],
+  request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000], stream_keepalive_ms: [0, 600_000],
   log_retention_days: [1, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
   image_max_bytes: [1, 100 * 1024 * 1024],
