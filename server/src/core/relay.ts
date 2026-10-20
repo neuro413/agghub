@@ -26,7 +26,7 @@ import { AttemptLifecycle, RequestLifecycle, RequestStopped, sleep } from './req
 import { BoundedCapture } from './capture'
 import { ResponsesSseLog, logResponsesBody } from './upstreamLog'
 import { readBodyText } from './bodyReader'
-import { createStreamWriter } from './streamWriter'
+import { StreamKeepAlive, createStreamWriter, openEventStream } from './streamWriter'
 import { StreamState, meaningfulDelta } from './streamState'
 import { accumulateUsage, isEmptyIRResponse, isEmptyPassthroughBody, passthroughUsage, streamDeltaText } from './responseSemantics'
 import { OWNER_CALLER, callerSettings } from './caller'
@@ -223,6 +223,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
   const caller = ctx.caller ?? OWNER_CALLER
   const settings = callerSettings(getSettings(), caller)
   const lifecycle = new RequestLifecycle(ctx.res, settings.request_max_duration_ms)
+  const keepAlive = ctx.stream && settings.stream_keepalive_ms > 0 ? new StreamKeepAlive(ctx.res, settings.stream_keepalive_ms) : undefined
   const requestId = randomUUID()
   const model = ctx.ir?.model
   // 超长模型名只截断写日志，不参与计费匹配
@@ -342,7 +343,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         let winner: { state: AttemptState; outcome: Outcome } | undefined
         // 按结束先后排列；竞速落选的尝试不算失败
         const failures: { state: AttemptState; error: unknown }[] = []
-        await Promise.all(states.map(state => runAttempt(ctx, state, settings, caller, lifecycle.signal).then(
+        await Promise.all(states.map(state => runAttempt(ctx, state, settings, caller, lifecycle.signal, keepAlive).then(
           outcome => { winner = { state, outcome } },
           error => { if (!isRaceLost(error)) failures.push({ state, error }) },
         )))
@@ -372,8 +373,9 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const { state: lastFailed, error } = failures[failures.length - 1]
         last = lastFailed
         final = { ...errorOutcome(error), usage: lastFailed.usage }
-        // 本地确定的输入错误、以及上游已返回 2xx 后的处理失败阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理
-        const canContinue = !lifecycle.signal.aborted && !ctx.res.headersSent
+        // 本地确定的输入错误、以及上游已返回 2xx 后的处理失败阻止跨渠道尝试；上游 400/413/422 仍可能由备用渠道处理。
+        // 输出内容后响应必然已结束；流式保活只提交了响应头，仍可继续尝试
+        const canContinue = !lifecycle.signal.aborted && !ctx.res.writableEnded
           && !failures.some(f => f.error instanceof LocalRequestError || f.error instanceof UpstreamResponseError)
         const hasKey = canContinue && keysLeft(channel).length > 0
         const switchKey = channel.key_mode === 'poll' && hasKey && keyFailed
@@ -382,7 +384,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
         if (!switchKey && !retrySame && !nextChannel) {
           await recordFailures(failures.slice(0, -1))
-          if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
+          if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final))
           return
         }
         await recordFailures(failures)
@@ -394,11 +396,12 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       tried.add(channel.id)
     }
     lifecycle.signal.throwIfAborted()
-    sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
+    sendErrorMessage(ctx, final.code, clientError(caller, final))
   } catch (error) {
     final = errorOutcome(lifecycle.signal.aborted ? lifecycle.signal.reason : error)
-    if (!isClientGone()) sendErrorMessage(ctx.res, ctx.entryFormat, final.code, clientError(caller, final))
+    if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final))
   } finally {
+    keepAlive?.dispose()
     bill(last, final.usage)
     // 按所有到达结算的尝试累计计费：重试与换渠道中已消耗的上游 Token 同样计入
     const points = settleRequest({
@@ -416,7 +419,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
 }
 
 /** 单次上游尝试：准备请求 → 发送 → 按流式 / 非流式转发；失败时抛出，超时与中断换成 signal 的原因 */
-async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, requestSignal: AbortSignal): Promise<Outcome> {
+async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, requestSignal: AbortSignal, keepAlive?: StreamKeepAlive): Promise<Outcome> {
   const attempt = state.lifecycle
   let response: globalThis.Response | undefined
   try {
@@ -435,7 +438,7 @@ async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Sett
       throw new UpstreamError(response.status, text, parseRetryAfter(response.headers.get('retry-after')))
     }
     return ctx.stream
-      ? await pipeResponse(ctx, state, response, settings, requestSignal, caller)
+      ? await pipeResponse(ctx, state, response, settings, requestSignal, caller, keepAlive)
       : await sendResponse(ctx, state, response, settings)
   } catch (caught) {
     throw attempt.signal.aborted ? attempt.signal.reason : caught
@@ -500,7 +503,7 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
   return { status: 'success', code: 200, usage: state.usage }
 }
 
-async function pipeResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings, requestSignal: AbortSignal, caller: Caller): Promise<Outcome> {
+async function pipeResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings, requestSignal: AbortSignal, caller: Caller, keepAlive?: StreamKeepAlive): Promise<Outcome> {
   if (!response.body) throw new UpstreamError(502, 'no response body from upstream')
   const passthrough = state.passthrough && !state.pseudo
   const decoder = passthrough ? null : state.adaptor.createStreamDecoder(state)
@@ -508,7 +511,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   const transform: ChunkTransform | undefined = state.pseudo
     ? createPseudoThinkingTransform(settings, text => thinkingStore.save(text, settings.pseudo_thinking_store_max)) : undefined
   const observer = new StreamState(state.upstreamWire)
-  const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle)
+  const write = createStreamWriter(ctx.res, requestSignal, state.lifecycle, keepAlive)
   const upstreamLog = state.upstreamWire === 'responses' ? new ResponsesSseLog(state.upstream) : state.upstream
   let pending: string[] = []
   let opened = false
@@ -517,11 +520,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     if (opened) return
     requestSignal.throwIfAborted()
     if (state.claim && !state.claim()) throw new RequestStopped('race_lost')
-    ctx.res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
-    ctx.res.setHeader('Cache-Control', 'no-cache')
-    ctx.res.setHeader('Connection', 'keep-alive')
-    ctx.res.setHeader('X-Accel-Buffering', 'no')
-    ctx.res.flushHeaders?.()
+    openEventStream(ctx.res)
     opened = true
     state.firstTokenAt = performance.now()
     for (const frame of pending) await write(frame)
@@ -589,9 +588,11 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   }
 }
 
-function sendErrorMessage(res: Response, entryFormat: EntryFormat, status: number, message: string): void {
+function sendErrorMessage(ctx: RelayContext, status: number, message: string): void {
+  const { res, entryFormat } = ctx
   if (res.destroyed || res.writableEnded) return
-  if (res.headersSent) { res.end(); return }
+  // 响应头已提交但未结束只会是流式保活：状态码无法再改，按入口格式写 SSE 错误事件
+  if (res.headersSent) { res.end(entryEncoder(entryFormat, ctx.ir).fail(message)); return }
   if (entryFormat === 'anthropic') res.status(status).json({ type: 'error', error: { type: 'api_error', message } })
   else res.status(status).json({ error: { message, type: 'upstream_error', code: status } })
 }

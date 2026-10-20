@@ -14,7 +14,7 @@ import { DiscordRulesEditor } from './DiscordRulesEditor'
 // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
 const KEYS: (keyof Settings)[] = [
   'single_retry_times', 'channel_retry_times', 'retry_interval_ms', 'request_timeout_ms', 'request_max_duration_ms',
-  'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
+  'stream_keepalive_ms', 'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
   'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
@@ -410,6 +410,16 @@ export function SettingsPage() {
             max={900}
             step={5}
             onChange={(v) => set('request_timeout_ms', v * 1000)}
+            suffix=" 秒"
+          />
+        </SettingRow>
+        <SettingRow label="流式保活间隔" desc="流式请求超过这么久没向客户端输出，就发一行 SSE 注释，防止 Cloudflare 隧道等反代断开；0 = 关闭">
+          <Slider
+            value={Math.round(s.stream_keepalive_ms / 1000)}
+            min={0}
+            max={90}
+            step={5}
+            onChange={(v) => set('stream_keepalive_ms', v * 1000)}
             suffix=" 秒"
           />
         </SettingRow>

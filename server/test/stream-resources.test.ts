@@ -9,7 +9,7 @@ import { parseSSEEvents } from '../src/convert/ir'
 import { StreamState } from '../src/core/streamState'
 import { createStreamWriter } from '../src/core/streamWriter'
 import { AttemptLifecycle, RequestLifecycle, RequestStopped } from '../src/core/requestLifecycle'
-import { FakeResponse, reset, relay, channel, logs, sse, oaiEvents } from './helpers/relay'
+import { FakeResponse, reset, relay, channel, logs, sse, oaiEvents, jsonResponse } from './helpers/relay'
 const originalFetch = globalThis.fetch
 beforeEach(reset)
 afterEach(() => { globalThis.fetch = originalFetch })
@@ -151,4 +151,32 @@ test('R02: 真实回环 socket 暂停读取产生背压，客户端关闭可中�
     await done
     assert.equal(sawBackpressure, true)
   } finally { client.destroy(); await new Promise<void>(resolve => server.close(() => resolve())) }
+})
+
+test('流式保活：等待上游时发 SSE 注释，只发过保活仍可换渠道', async () => {
+  setSettings({ stream_keepalive_ms: 10 })
+  channel('openai', 1); channel('openai', 0)
+  let calls = 0
+  globalThis.fetch = (async () => ++calls === 1 ? wait(35).then(() => jsonResponse({ error: { message: '上游繁忙' } }, 500)) : sse(oaiEvents())) as typeof fetch
+  const request = relay('openai', true)
+  await request.run()
+  const output = request.res.chunks.join('')
+  assert.equal(calls, 2)
+  assert.match(output, /^: keepalive\n\n/)
+  assert.match(output, /你好🙂/)
+  assert.equal(request.res.headers['Content-Type'], 'text/event-stream; charset=utf-8')
+  assert.equal(logs().at(-1).status, 'success')
+})
+
+test('流式保活后全部失败：按入口格式写 SSE 错误事件，日志保留真实状态码', async () => {
+  setSettings({ stream_keepalive_ms: 10, channel_retry_times: 0 })
+  channel('openai')
+  globalThis.fetch = (async () => wait(35).then(() => jsonResponse({ error: { message: '上游繁忙' } }, 500))) as typeof fetch
+  const request = relay('anthropic', true)
+  await request.run()
+  const output = request.res.chunks.join('')
+  assert.match(output, /^: keepalive\n\n/)
+  assert.match(output, /event: error\ndata: .*上游繁忙/)
+  assert.equal(request.res.writableEnded, true)
+  assert.equal(logs().at(-1).status_code, 500)
 })
