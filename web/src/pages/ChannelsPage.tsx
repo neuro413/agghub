@@ -108,6 +108,7 @@ export function ChannelsPage() {
         <ChannelModal
           channel={editing === 'new' ? null : editing}
           onClose={() => setEditing(null)}
+          onChanged={load}
           onSaved={() => {
             setEditing(null)
             setLoading(true)
@@ -117,6 +118,12 @@ export function ChannelsPage() {
       )}
     </div>
   )
+}
+
+/** 压缩「不支持」记忆的到期说明 */
+function untilText(until: number | null): string {
+  if (until === null) return '直到重启'
+  return `${new Date(until).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 到期`
 }
 
 function ChannelCard({
@@ -166,6 +173,12 @@ function ChannelCard({
             <div className="v" style={c.key_available === 0 ? { color: 'var(--warn)' } : undefined}>
               {c.key_available}/{c.key_total}
             </div>
+          </div>
+        )}
+        {!!c.compression_unsupported?.length && (
+          <div className="ah-meta-box" title={c.compression_unsupported.map((u) => `${u.algorithm} 不支持，${untilText(u.until)}`).join('\n')}>
+            <div className="k">压缩回退</div>
+            <div className="v" style={{ color: 'var(--warn)' }}>{c.compression_unsupported.map((u) => u.algorithm).join(' / ')}</div>
           </div>
         )}
       </div>

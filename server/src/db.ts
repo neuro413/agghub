@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import { DATA_DIR, DB_PATH, DEFAULT_SETTINGS } from './config'
 import { channelModelNames } from './core/channelModels'
-import type { Channel, ChannelRow, ChannelStatus, DiscordRuleGroup, ParamRule, Settings } from './types'
+import type { Channel, ChannelRow, ChannelStatus, DiscordRuleGroup, ParamRule, RequestCompression, Settings } from './types'
 
 fs.mkdirSync(DATA_DIR, { recursive: true })
 
@@ -233,6 +233,7 @@ addMissingColumns('channels', [
   ['key_mode', 'TEXT'],
   ['key_concurrency', 'INTEGER NOT NULL DEFAULT 2'],
   ['key_cooldown_seconds', 'INTEGER NOT NULL DEFAULT 300'],
+  ['request_compression', 'TEXT'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -244,6 +245,12 @@ addMissingColumns('request_logs', [
   ['group_name', 'TEXT'],
   ['channel_key', 'TEXT'],
   ['first_token_ms', 'INTEGER'],
+  ['upstream_encoding', 'TEXT'],
+  ['upstream_raw_bytes', 'INTEGER'],
+  ['upstream_sent_bytes', 'INTEGER'],
+  ['compress_ms', 'REAL'],
+  ['compress_status', 'TEXT'],
+  ['compress_note', 'TEXT'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT'], ['discord_guilds_at', 'INTEGER']])
 // 一个 Discord 账号只对应一个用户；Discord 建号依赖此约束兜底并发
@@ -355,6 +362,8 @@ function safeObject(s: string | null | undefined): Record<string, string> | null
   }
 }
 
+const REQUEST_COMPRESSIONS: RequestCompression[] = ['off', 'gzip', 'br', 'zstd']
+
 export function rowToChannel(r: ChannelRow): Channel {
   return {
     id: r.id,
@@ -382,6 +391,7 @@ export function rowToChannel(r: ChannelRow): Channel {
     key_concurrency: r.key_concurrency ?? 2,
     key_cooldown_seconds: r.key_cooldown_seconds ?? 300,
     ban_until: r.ban_until ?? null,
+    request_compression: REQUEST_COMPRESSIONS.includes(r.request_compression as RequestCompression) ? r.request_compression as RequestCompression : null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   }

@@ -31,6 +31,9 @@ const formats = new Set(['openai', 'anthropic', 'responses'])
 const roles = new Set(['system', 'user', 'assistant', 'tool'])
 const sources = new Set(['owner', 'lan_key', 'public_key', 'user', 'probe'])
 const RATIO_FIELDS = ['input', 'output', 'cache_read', 'cache_write']
+/** 逗号分隔的 HTTP 状态码或空串 */
+const STATUS_CODES = /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/
+const COMPRESSION_ALGORITHMS = new Set(['gzip', 'br', 'zstd'])
 /** 按次点数的上限与额度一致，Token 倍率 100 万已相当于每百万 Token 上百万美元 */
 const PER_REQUEST_MAX = 1_000_000_000_000
 function object(value: any): value is Record<string, any> {
@@ -108,7 +111,16 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   check(brandIcon(merged.portal_brand_icon), 'portal_brand_icon', '须为图片链接或不超过 16 字符的 emoji / 文字')
   check(validBackground(merged.portal_background), 'portal_background', '须留空，或为不含引号、括号、空白的 http(s) 图片链接')
   check(typeof merged.portal_notice === 'string' && merged.portal_notice.length <= 20_000, 'portal_notice', '须为不超过 20000 字符的字符串')
-  check(typeof merged.auto_ban_codes === 'string' && /^(?:[1-5]\d{2}(?:\s*,\s*[1-5]\d{2})*)?$/.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
+  check(typeof merged.auto_ban_codes === 'string' && STATUS_CODES.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
+  // 上游请求体压缩；运行时是否支持 zstd 不在这里检查，由 runtime_unsupported 兜底
+  check(COMPRESSION_ALGORITHMS.has(merged.upstream_compression_default), 'upstream_compression_default', '须为 gzip / br / zstd')
+  check(!(merged.upstream_compression_zstd_window_log > 0 && merged.upstream_compression_zstd_window_log < 10), 'upstream_compression_zstd_window_log', '须为 0 或 10～23 的整数')
+  check(typeof merged.upstream_compression_fallback_codes === 'string' && STATUS_CODES.test(merged.upstream_compression_fallback_codes),
+    'upstream_compression_fallback_codes', '须为逗号分隔的 HTTP 状态码或空串')
+  try {
+    if (typeof merged.upstream_compression_fallback_pattern !== 'string' || merged.upstream_compression_fallback_pattern.length > 500) throw new Error()
+    new RegExp(merged.upstream_compression_fallback_pattern, 'i')
+  } catch { errors.upstream_compression_fallback_pattern = '须为不超过 500 字符的有效正则表达式' }
   check(typeof merged.pseudo_thinking_prompt === 'string' && merged.pseudo_thinking_prompt.length <= 100_000, 'pseudo_thinking_prompt', '须为不超过 100000 字符的字符串')
   try { validateThinkingTags(merged.pseudo_thinking_open_tag, merged.pseudo_thinking_close_tag) } catch (error) {
     errors.pseudo_thinking_open_tag = (error as Error).message

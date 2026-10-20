@@ -108,6 +108,25 @@ export const DEFAULT_SETTINGS: Settings = {
   discord_client_id: '',
   discord_client_secret: '',
   discord_rules: [],
+  // 上游请求体压缩：默认关闭，级别按手机（Cortex-A53）的甜点取值
+  upstream_compression_enabled: false,
+  upstream_compression_default: 'zstd',
+  upstream_compression_gzip_level: 1,
+  upstream_compression_br_quality: 2,
+  upstream_compression_zstd_level: 2,
+  upstream_compression_zstd_window_log: 23,
+  upstream_compression_min_bytes: 4096,
+  upstream_compression_fallback: true,
+  upstream_compression_fallback_codes: '400,415',
+  /** 「prompt is too long」「Unsupported parameter」这类真实的 400 不触发回退，避免把大请求体再明文传一遍 */
+  upstream_compression_fallback_pattern: 'json|pars|decod|encod|compress|gzip|zstd|brotli|invalid character|unexpected token|unsupported (media|content|encoding)',
+  upstream_compression_unsupported_minutes: 360,
+  response_compression_enabled: true,
+  response_compression_level: 6,
+  response_compression_br_quality: 0,
+  response_compression_threshold: 1024,
+  static_assets_max_age_days: 365,
+  static_precompressed: true,
 }
 
 /** 整数设置的取值范围（保存时校验） */
@@ -122,4 +141,9 @@ export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> =
   portal_rpm: [0, 100_000], portal_concurrency: [0, 100_000], portal_points_per_usd: [1, 1_000_000_000_000],
   checkin_min_points: [0, 1_000_000_000_000], checkin_max_points: [0, 1_000_000_000_000],
   portal_background_opacity: [0, 100], portal_background_blur: [0, 40], portal_background_dim: [0, 90],
+  upstream_compression_gzip_level: [1, 9], upstream_compression_br_quality: [0, 11], upstream_compression_zstd_level: [1, 19],
+  upstream_compression_zstd_window_log: [0, 23], upstream_compression_min_bytes: [0, 16 * 1024 * 1024],
+  upstream_compression_unsupported_minutes: [0, 10_080],
+  response_compression_level: [1, 9], response_compression_br_quality: [0, 11], response_compression_threshold: [0, 1_048_576],
+  static_assets_max_age_days: [0, 3650],
 }

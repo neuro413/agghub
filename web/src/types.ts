@@ -1,15 +1,19 @@
 // 渠道 / 设置 / 规则类型与后端共用（type-only 导入，构建时擦除）
-import type { Channel as ServerChannel, CallerSource, LogBodyField } from '../../server/src/types'
+import type { Channel as ServerChannel, CallerSource, CompressionUnsupported, CompressStatus, LogBodyField } from '../../server/src/types'
 export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, KeyMode, ChannelKeyStatus, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
   UserView, UserListResult, DiscordGuild, DiscordGuildRanking, DiscordRuleGroup, DiscordGuildCondition, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
   Announcement, AnnouncementInput, AnnouncementType,
+  CompressionAlgorithm, RequestCompression, CompressStatus, CompressionUnsupported, CompressionTestResult, CompressionTestItem,
 } from '../../server/src/types'
 
-/** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数 */
-export type Channel = ServerChannel & { today_requests?: number; today_success?: number; key_total?: number; key_available?: number }
+/** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数；附带记忆期内被判定不支持的压缩算法 */
+export type Channel = ServerChannel & {
+  today_requests?: number; today_success?: number; key_total?: number; key_available?: number
+  compression_unsupported?: CompressionUnsupported[]
+}
 
 export interface ParamTestResult {
   wireFormat: string
@@ -107,6 +111,13 @@ export interface LogItem {
   group_name: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值） */
   channel_key: string | null
+  /** 上游请求体压缩（列表接口不返回，只在详情里有） */
+  upstream_encoding?: string | null
+  upstream_raw_bytes?: number | null
+  upstream_sent_bytes?: number | null
+  compress_ms?: number | null
+  compress_status?: CompressStatus | null
+  compress_note?: string | null
 }
 
 export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }

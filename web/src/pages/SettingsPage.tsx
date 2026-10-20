@@ -2,13 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { api, setStoredToken } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
-import { Input, PointsInput, Slider } from '../components/Form'
+import { Input, PointsInput, Select, Slider } from '../components/Form'
 import { copyText } from '../lib/clipboard'
+import { fmtBytes } from '../lib/format'
+import { loadWebpPrefs, saveWebpPrefs, toWebp, type WebpPrefs } from '../lib/imageWebp'
 import { setMoneyConfig } from '../lib/money'
 import { IconBolt, IconCopy, IconDiscord, IconExternal, IconSettings, IconSpark, IconTrash, IconUsers, IconWand, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Settings, SystemInfo } from '../types'
+import type { CompressionAlgorithm, Settings, SystemInfo } from '../types'
 import { DiscordRulesEditor } from './DiscordRulesEditor'
 
 // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
@@ -22,6 +24,11 @@ const KEYS: (keyof Settings)[] = [
   'currency_symbol', 'portal_brand_name', 'portal_brand_icon', 'portal_site_title',
   'portal_background', 'portal_background_opacity', 'portal_background_blur', 'portal_background_dim',
   'portal_password_register_enabled', 'discord_enabled', 'discord_client_id', 'discord_client_secret', 'discord_rules',
+  'upstream_compression_enabled', 'upstream_compression_default', 'upstream_compression_gzip_level', 'upstream_compression_br_quality',
+  'upstream_compression_zstd_level', 'upstream_compression_zstd_window_log', 'upstream_compression_min_bytes', 'upstream_compression_fallback',
+  'upstream_compression_fallback_codes', 'upstream_compression_fallback_pattern', 'upstream_compression_unsupported_minutes',
+  'response_compression_enabled', 'response_compression_level', 'response_compression_br_quality', 'response_compression_threshold',
+  'static_assets_max_age_days', 'static_precompressed',
 ]
 
 type IntegerKey = 'portal_register_ip_daily' | 'portal_max_keys' | 'portal_rpm' | 'portal_concurrency'
@@ -32,6 +39,13 @@ const BRAND_ICON_MAX_BYTES = 512 * 1024
 
 /** 与后端 BACKGROUND_MAX_BYTES 一致 */
 const BACKGROUND_MAX_BYTES = 5 * 1024 * 1024
+
+/** zstd 窗口只允许 0（级别默认）或 10～23 */
+const ZSTD_WINDOWS = [0, ...Array.from({ length: 14 }, (_, i) => i + 10)]
+
+function windowSize(log: number): string {
+  return log >= 20 ? `${2 ** (log - 20)} MB` : `${2 ** (log - 10)} KB`
+}
 
 /** 图标是 http(s) 链接或上传地址时按图片显示，否则当作 emoji / 文字 */
 function isImageIcon(icon: string): boolean {
@@ -53,6 +67,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadingBg, setUploadingBg] = useState(false)
+  const [webp, setWebp] = useState(loadWebpPrefs)
   const iconFile = useRef<HTMLInputElement>(null)
   const bgFile = useRef<HTMLInputElement>(null)
   /** 上次加载 / 保存成功的快照，用于算出本次真正改动过的字段 */
@@ -71,6 +86,13 @@ export function SettingsPage() {
   }, [toast])
 
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setS((p) => (p ? { ...p, [k]: v } : p))
+
+  // WebP 选项只存本地，不进服务端设置
+  const updateWebp = (patch: Partial<WebpPrefs>) => setWebp((p) => {
+    const next = { ...p, ...patch }
+    saveWebpPrefs(next)
+    return next
+  })
 
   const save = async () => {
     if (!s) return
@@ -118,16 +140,30 @@ export function SettingsPage() {
 
   // 上传后服务端立即把背景设置指向上传地址，这里同步快照，不算作未保存的改动
   const uploadBackground = async (file: File) => {
-    if (file.size > BACKGROUND_MAX_BYTES) {
+    let target = file
+    let converted = false
+    // GIF 跳过转换，避免丢失动画；转换失败或体积没变小时用原图
+    if (webp.enabled && file.type !== 'image/gif') {
+      try {
+        const blob = await toWebp(file, webp)
+        if (blob.size < file.size) {
+          target = new File([blob], file.name.replace(/\.[^.]+$/, '') + '.webp', { type: 'image/webp' })
+          converted = true
+        }
+      } catch {
+        // 浏览器不支持 WebP 编码等情况直接回退原图
+      }
+    }
+    if (target.size > BACKGROUND_MAX_BYTES) {
       toast('err', `背景图不能超过 ${BACKGROUND_MAX_BYTES / 1024 / 1024} MB`)
       return
     }
     setUploadingBg(true)
     try {
-      const saved = await api.uploadBackground(await readAsDataUrl(file))
+      const saved = await api.uploadBackground(await readAsDataUrl(target))
       if (loaded.current) loaded.current = { ...loaded.current, portal_background: saved.portal_background }
       set('portal_background', saved.portal_background)
-      toast('ok', '背景图已上传并生效')
+      toast('ok', converted ? `背景图已上传并生效（${fmtBytes(file.size)} → ${fmtBytes(target.size)}）` : '背景图已上传并生效')
     } catch (e: any) {
       toast('err', e.message)
     } finally {
@@ -372,6 +408,26 @@ export function SettingsPage() {
             }}
           />
         </SettingRow>
+        <SettingRow label="上传前转 WebP" desc="在浏览器里转成 WebP 再上传，体积通常只有原图的几分之一；GIF 不转换">
+          <Toggle checked={webp.enabled} onChange={(v) => updateWebp({ enabled: v })} />
+        </SettingRow>
+        {webp.enabled && (
+          <>
+            <SettingRow label="WebP 质量" desc="默认 85">
+              <Slider value={webp.quality} min={50} max={95} onChange={(v) => updateWebp({ quality: v })} />
+            </SettingRow>
+            <SettingRow label="最大宽度（像素）" desc="超过则等比缩小；0 = 不缩放">
+              <Input
+                aria-label="最大宽度（像素）"
+                type="number"
+                min="0"
+                step="1"
+                value={webp.maxWidth}
+                onChange={(e) => updateWebp({ maxWidth: Math.max(0, Math.round(Number(e.target.value) || 0)) })}
+              />
+            </SettingRow>
+          </>
+        )}
         {s.portal_background && (
           <div className="ah-bg-preview">
             <img src={s.portal_background} alt="背景预览" />
@@ -445,6 +501,111 @@ export function SettingsPage() {
             onChange={(e) => set('proxy_url', e.target.value)}
             placeholder="http://127.0.0.1:7890"
           />
+        </SettingRow>
+      </Card>
+
+      {/* 上游请求体压缩 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconBolt size={18} /> 上游请求体压缩
+        </div>
+        <div className="ah-set-desc">只压缩发往上游的请求体；上游不支持会返回 400/415，开启自动回退后会明文重发并在记忆期内对该渠道发明文</div>
+        <SettingRow label="运行环境" desc="zstd 需要 Node ≥ 22.15">
+          <code className="ah-mini ah-muted">
+            {system ? `Node ${system.node_version} · zstd ${system.zstd_available ? '可用' : '不可用（需 Node ≥ 22.15）'}` : '—'}
+          </code>
+        </SettingRow>
+        <SettingRow label="启用压缩" desc="总开关，关闭时所有渠道都发明文；建议先在渠道里点「压缩测试」确认上游支持再开启">
+          <Toggle checked={s.upstream_compression_enabled} onChange={(v) => set('upstream_compression_enabled', v)} />
+        </SettingRow>
+        <SettingRow label="默认算法" desc="渠道设为「跟随全局」时使用">
+          <Select value={s.upstream_compression_default} onChange={(e) => set('upstream_compression_default', e.target.value as CompressionAlgorithm)}>
+            <option value="zstd">zstd{system && !system.zstd_available ? '（当前 Node 不支持）' : ''}</option>
+            <option value="br">br</option>
+            <option value="gzip">gzip</option>
+          </Select>
+        </SettingRow>
+        <SettingRow label="zstd 级别" desc="手机推荐 2；3 级以上的哈希表超出 A53 的 L2 缓存">
+          <Slider value={s.upstream_compression_zstd_level} min={1} max={19} onChange={(v) => set('upstream_compression_zstd_level', v)} />
+        </SettingRow>
+        <SettingRow label="zstd 窗口" desc="放大窗口几乎不增加耗时，长对话收益明显；上限 8 MB（RFC 9659）">
+          <Select value={s.upstream_compression_zstd_window_log} onChange={(e) => set('upstream_compression_zstd_window_log', Number(e.target.value))}>
+            {ZSTD_WINDOWS.map((log) => (
+              <option key={log} value={log}>{log ? `${log} = ${windowSize(log)}` : '0 = 级别默认'}</option>
+            ))}
+          </Select>
+        </SettingRow>
+        <SettingRow label="br 质量" desc="手机推荐 2">
+          <Slider value={s.upstream_compression_br_quality} min={0} max={11} onChange={(v) => set('upstream_compression_br_quality', v)} />
+        </SettingRow>
+        <SettingRow label="gzip 级别" desc="手机推荐 1">
+          <Slider value={s.upstream_compression_gzip_level} min={1} max={9} onChange={(v) => set('upstream_compression_gzip_level', v)} />
+        </SettingRow>
+        <SettingRow label="最小压缩体积（KB）" desc="请求体小于该值不压缩；0 = 全部压缩">
+          <Input
+            aria-label="最小压缩体积（KB）"
+            type="number"
+            min="0"
+            step="1"
+            value={s.upstream_compression_min_bytes / 1024}
+            onChange={(e) => set('upstream_compression_min_bytes', Math.max(0, Math.round(Number(e.target.value) * 1024)))}
+          />
+        </SettingRow>
+        <SettingRow label="自动回退" desc="压缩被拒时在同一次尝试内明文重发，不占用重试次数">
+          <Toggle checked={s.upstream_compression_fallback} onChange={(v) => set('upstream_compression_fallback', v)} />
+        </SettingRow>
+        {s.upstream_compression_fallback && (
+          <>
+            <SettingRow label="回退状态码" desc="逗号分隔；状态码命中且错误体匹配下方正则，才判定为压缩被拒">
+              <Input value={s.upstream_compression_fallback_codes} onChange={(e) => set('upstream_compression_fallback_codes', e.target.value)} placeholder="400,415" />
+            </SettingRow>
+            <SettingRow label="匹配正则" desc="不区分大小写，只匹配错误体前 2000 字符，留空只看状态码；默认值不会让「prompt is too long」这类真实错误触发重发">
+              <Input value={s.upstream_compression_fallback_pattern} onChange={(e) => set('upstream_compression_fallback_pattern', e.target.value)} />
+            </SettingRow>
+            <SettingRow
+              label="记忆时长"
+              desc={`明文重发成功后，这段时间内对该渠道直接发明文；0 = 直到重启${s.upstream_compression_unsupported_minutes ? `（约 ${+(s.upstream_compression_unsupported_minutes / 60).toFixed(1)} 小时）` : '（当前：直到重启）'}`}
+            >
+              <Slider
+                value={s.upstream_compression_unsupported_minutes}
+                min={0}
+                max={10080}
+                step={30}
+                onChange={(v) => set('upstream_compression_unsupported_minutes', v)}
+                suffix=" 分钟"
+              />
+            </SettingRow>
+          </>
+        )}
+      </Card>
+
+      {/* 响应压缩与静态缓存 */}
+      <Card className="ah-set-card">
+        <div className="ah-set-title">
+          <IconBolt size={18} /> 响应压缩与静态缓存
+        </div>
+        <div className="ah-set-desc">压缩管理端 / 门户的接口响应与静态资源；/v1 与 SSE 流式响应永远不压缩</div>
+        <SettingRow label="响应压缩" desc="对接口 JSON 与页面资源启用 gzip（可选 br）">
+          <Toggle checked={s.response_compression_enabled} onChange={(v) => set('response_compression_enabled', v)} />
+        </SettingRow>
+        {s.response_compression_enabled && (
+          <>
+            <SettingRow label="gzip 级别" desc="默认 6">
+              <Slider value={s.response_compression_level} min={1} max={9} onChange={(v) => set('response_compression_level', v)} />
+            </SettingRow>
+            <SettingRow label="br 质量" desc="0 = 不用 br，只用 gzip，CPU 开销可预期">
+              <Slider value={s.response_compression_br_quality} min={0} max={11} onChange={(v) => set('response_compression_br_quality', v)} />
+            </SettingRow>
+            <SettingRow label="压缩阈值（字节）" desc="响应小于该值不压缩">
+              <Input aria-label="压缩阈值（字节）" type="number" min="0" step="1" value={s.response_compression_threshold} onChange={(e) => set('response_compression_threshold', Number(e.target.value))} />
+            </SettingRow>
+          </>
+        )}
+        <SettingRow label="静态资源缓存（天）" desc="/assets 下带哈希的文件按 immutable 长期缓存；0 = 保持默认">
+          <Input aria-label="静态资源缓存（天）" type="number" min="0" step="1" value={s.static_assets_max_age_days} onChange={(e) => set('static_assets_max_age_days', Number(e.target.value))} />
+        </SettingRow>
+        <SettingRow label="预压缩文件" desc="构建时生成的 .br / .gz 存在时直接返回，不占运行时 CPU">
+          <Toggle checked={s.static_precompressed} onChange={(v) => set('static_precompressed', v)} />
         </SettingRow>
       </Card>
 

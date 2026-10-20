@@ -1,6 +1,6 @@
 import { db, getSettings } from '../db'
 import { setImmediate as yieldTurn } from 'node:timers/promises'
-import type { CallerSource, LogBodyField, Settings } from '../types'
+import type { CallerSource, CompressStatus, LogBodyField, Settings } from '../types'
 import { blobEpoch, clearBlobs, createBlobReader, gcBlobs, packBlobs, putBlobAsync, putJsonBodyAsync, releaseBlobs, sanitizeHeaders, type BlobPins } from './blobstore'
 
 export interface LogEntry {
@@ -53,6 +53,13 @@ export interface LogEntry {
   channel_key?: string | null
   /** 客户端请求头里的 User-Agent（渠道覆盖前的原值） */
   user_agent?: string | null
+  /** 上游请求体压缩：编码标签、明文 / 实发字节、耗时、状态与备注 */
+  upstream_encoding?: string | null
+  upstream_raw_bytes?: number | null
+  upstream_sent_bytes?: number | null
+  compress_ms?: number | null
+  compress_status?: CompressStatus | null
+  compress_note?: string | null
 }
 
 const MAX_USER_AGENT_LENGTH = 512
@@ -90,14 +97,16 @@ const insertStmt = db.prepare(
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
-    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent, first_token_ms)
+    source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent, first_token_ms,
+    upstream_encoding, upstream_raw_bytes, upstream_sent_bytes, compress_ms, compress_status, compress_note)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
-    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent, @first_token_ms)`,
+    @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent, @first_token_ms,
+    @upstream_encoding, @upstream_raw_bytes, @upstream_sent_bytes, @compress_ms, @compress_status, @compress_note)`,
 )
 
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
@@ -170,6 +179,12 @@ export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promis
       group_name: e.group_name ?? null,
       channel_key: e.channel_key ?? null,
       user_agent: e.user_agent ? e.user_agent.slice(0, MAX_USER_AGENT_LENGTH) : null,
+      upstream_encoding: e.upstream_encoding ?? null,
+      upstream_raw_bytes: e.upstream_raw_bytes ?? null,
+      upstream_sent_bytes: e.upstream_sent_bytes ?? null,
+      compress_ms: e.compress_ms ?? null,
+      compress_status: e.compress_status ?? null,
+      compress_note: e.compress_note ?? null,
       ...refs,
     })
   } finally {

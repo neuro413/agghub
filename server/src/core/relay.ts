@@ -37,6 +37,8 @@ import { getKeyById } from './keys'
 import { getUserById } from './users'
 import { onAttemptSuccess, onBanSignal } from './channelHealth'
 import { availableKeys, keyLabel, onKeyFailure, onKeySuccess, pickRaceKeys } from './channelKeys'
+import { createRequestCompressor, isCompressionRejection, markUnsupported } from './upstreamCompression'
+import type { CompressionInfo, RequestCompressor } from './upstreamCompression'
 
 respConv.setReasoningStore({
   save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
@@ -93,6 +95,8 @@ interface AttemptState extends UpstreamContext {
   meter: OutputMeter
   /** 请求是否已经发往上游 */
   sent?: boolean
+  /** 上游请求体压缩明细，写进日志 */
+  compression?: CompressionInfo
 }
 
 type Description = Pick<AttemptState, 'adaptor' | 'upstreamModel' | 'upstreamWire' | 'passthrough'>
@@ -171,7 +175,7 @@ function isRaceLost(error: unknown): boolean {
   return error instanceof RequestStopped && error.reason === 'race_lost'
 }
 
-function applyUserAgent(headers: Record<string, string>, channel: Channel, rawHeaders?: Record<string, any>): void {
+export function applyUserAgent(headers: Record<string, string>, channel: Channel, rawHeaders?: Record<string, any>): void {
   if (channel.ua_override && channel.ua_value) headers['user-agent'] = channel.ua_value
   else if (!channel.strip_headers && rawHeaders?.['user-agent']) headers['user-agent'] = String(rawHeaders['user-agent'])
 }
@@ -246,6 +250,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     billedUsage = sumUsage(billedUsage, usage)
   }
   let releaseReserve: (() => void) | undefined
+  // 重试、换渠道与多 key 竞速共用：请求体相同时只压缩一次
+  const compressor = createRequestCompressor()
   const isClientGone = () => lifecycle.signal.reason instanceof RequestStopped && lifecycle.signal.reason.reason === 'client_cancel'
 
   const record = (outcome: Outcome, intermediate: boolean, state = last, points: number | null = null): Promise<boolean> => {
@@ -271,6 +277,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
         user_id: caller.user?.id ?? null, group_name: (state && groupOf.get(state.channel.id)?.name) ?? null, channel_key: state?.keyLabel ?? null,
         user_agent: typeof ctx.rawHeaders?.['user-agent'] === 'string' ? ctx.rawHeaders['user-agent'] : null,
+        upstream_encoding: state?.compression?.encoding, upstream_raw_bytes: state?.compression?.raw_bytes, upstream_sent_bytes: state?.compression?.sent_bytes,
+        compress_ms: state?.compression?.ms, compress_status: state?.compression?.status, compress_note: state?.compression?.note,
       }
     }, settings, requestId)
   }
@@ -343,7 +351,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         let winner: { state: AttemptState; outcome: Outcome } | undefined
         // 按结束先后排列；竞速落选的尝试不算失败
         const failures: { state: AttemptState; error: unknown }[] = []
-        await Promise.all(states.map(state => runAttempt(ctx, state, settings, caller, lifecycle.signal, keepAlive).then(
+        await Promise.all(states.map(state => runAttempt(ctx, state, settings, caller, lifecycle.signal, compressor, keepAlive).then(
           outcome => { winner = { state, outcome } },
           error => { if (!isRaceLost(error)) failures.push({ state, error }) },
         )))
@@ -419,22 +427,60 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
 }
 
 /** 单次上游尝试：准备请求 → 发送 → 按流式 / 非流式转发；失败时抛出，超时与中断换成 signal 的原因 */
-async function runAttempt(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, requestSignal: AbortSignal, keepAlive?: StreamKeepAlive): Promise<Outcome> {
+async function runAttempt(
+  ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, requestSignal: AbortSignal, compressor: RequestCompressor, keepAlive?: StreamKeepAlive,
+): Promise<Outcome> {
   const attempt = state.lifecycle
   let response: globalThis.Response | undefined
   try {
+    // 压缩放在参数规则、单 role、UA 覆盖都执行完之后
     const request = await prepareRequest(ctx, state, settings, caller)
+    const encoded = await compressor.encode(state.channel, request.body, settings)
+    const compression = state.compression = encoded.info
     attempt.touch()
-    const options: any = { method: 'POST', headers: request.headers, body: request.body, signal: attempt.signal }
-    if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
+    const send = (body: string | Buffer, encoding: string | null) => {
+      const headers = encoding ? { ...request.headers, 'content-encoding': encoding } : request.headers
+      const options: any = { method: 'POST', headers, body, signal: attempt.signal }
+      if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
+      return fetch(request.url, options)
+    }
     state.sent = true
-    response = await fetch(request.url, options)
-    if (!response.ok) {
-      const text = await readBodyText(response.body, {
+    response = await send(encoded.body, encoded.encoding)
+    let errorText: string | undefined
+    let errorTruncated = false
+    if (!response.ok && encoded.algorithm) {
+      // 先读错误体但不写入上游原始回复：若触发回退，这段错误只进压缩备注
+      errorText = await readBodyText(response.body, {
         signal: attempt.signal, maxBytes: 64 * 1024, truncate: true,
-        onTruncate: () => { state.upstream.truncated = settings.store_response_body },
-        onBytes: bytes => { attempt.touch(); state.upstream.append(bytes) },
+        onTruncate: () => { errorTruncated = true }, onBytes: () => attempt.touch(),
       })
+      if (isCompressionRejection(response.status, errorText, settings)) {
+        compression.note = errorText.slice(0, 300)
+        if (settings.upstream_compression_fallback) {
+          // 同一次尝试内明文重发，不占用重试次数
+          compression.status = 'fallback_failed'
+          compression.sent_bytes += compression.raw_bytes
+          response = await send(request.body, null)
+          errorText = undefined
+          if (response.ok) {
+            markUnsupported(state.channel.id, encoded.algorithm, settings)
+            compression.status = 'fallback_ok'
+          }
+        } else compression.status = 'rejected'
+      }
+    }
+    if (!response.ok) {
+      let text = errorText
+      if (text === undefined) {
+        text = await readBodyText(response.body, {
+          signal: attempt.signal, maxBytes: 64 * 1024, truncate: true,
+          onTruncate: () => { state.upstream.truncated = settings.store_response_body },
+          onBytes: bytes => { attempt.touch(); state.upstream.append(bytes) },
+        })
+      } else {
+        state.upstream.append(text)
+        if (errorTruncated) state.upstream.truncated = settings.store_response_body
+      }
       throw new UpstreamError(response.status, text, parseRetryAfter(response.headers.get('retry-after')))
     }
     return ctx.stream

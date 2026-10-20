@@ -8,10 +8,10 @@ import { Modal } from '../components/Modal'
 import { useToast } from '../components/Toast'
 import { paramsOf, parseConversation, roleClass } from '../lib/requestBody'
 import { fmtLabel } from './preprocessShared'
-import { prettyJson } from '../lib/format'
+import { fmtBytes, prettyJson } from '../lib/format'
 import { money } from '../lib/money'
 import { Loading, StatusPill } from '../components/Primitives'
-import type { CallerSource, LogBodyField, LogItem, PartialLogDetail } from '../types'
+import type { CallerSource, CompressStatus, LogBodyField, LogItem, PartialLogDetail } from '../types'
 import { copyText } from '../lib/clipboard'
 
 const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|password|proxy-authorization/i
@@ -23,6 +23,24 @@ function sourceLabel(s: CallerSource | null): string {
   if (s === 'user') return '门户用户'
   if (s === 'probe') return '自动测活'
   return '内网匿名'
+}
+
+const COMPRESS_STATUS_TEXT: Record<CompressStatus, string> = {
+  compressed: '已压缩', fallback_ok: '压缩被拒，明文重发成功', fallback_failed: '压缩被拒，明文重发仍失败', rejected: '压缩被拒（未开回退）',
+  off: '渠道关闭压缩', below_min: '低于阈值', channel_unsupported: '记忆中：渠道不支持', runtime_unsupported: '当前 Node 不支持', compress_error: '压缩出错',
+}
+
+/** 上游请求体压缩：zstd-2 w23 · 612.3 KB → 118.4 KB（19.3%）· 3.2ms · 已压缩；只有详情接口返回这些字段 */
+function compressionText(d: LogItem): string | null {
+  const raw = d.upstream_raw_bytes
+  if (raw == null) return null
+  if (!d.compress_status) return `上游请求体 ${fmtBytes(raw)}（未启用压缩）`
+  const sent = d.upstream_sent_bytes ?? raw
+  const parts = d.upstream_encoding ? [d.upstream_encoding] : []
+  parts.push(sent !== raw && raw > 0 ? `${fmtBytes(raw)} → ${fmtBytes(sent)}（${((sent / raw) * 100).toFixed(1)}%）` : fmtBytes(raw))
+  if (d.compress_ms != null) parts.push(`${d.compress_ms}ms`)
+  parts.push(COMPRESS_STATUS_TEXT[d.compress_status] ?? d.compress_status)
+  return `上游压缩：${parts.join(' · ')}`
 }
 
 function maskValue(v: string): string {
@@ -201,6 +219,7 @@ export function LogDetailModal({
 function LogMeta({ detail }: { detail: LogItem }) {
   const d = new Date(detail.created_at)
   const time = d.toLocaleString('zh-CN', { hour12: false })
+  const compression = compressionText(detail)
   return (
     <div className="ah-detail-meta">
       <StatusPill log={detail} />
@@ -226,6 +245,12 @@ function LogMeta({ detail }: { detail: LogItem }) {
       <span className="ah-mini ah-muted ah-num">{detail.latency_ms ?? 0}ms</span>
       {detail.first_token_ms != null && <span className="ah-mini ah-muted ah-num" title="首字延迟：从网关收到请求到开始向客户端输出首个内容（含思考）">首字 {detail.first_token_ms}ms</span>}
       <span className="ah-mini ah-faint ah-num">{time}</span>
+      {compression && <span className="ah-mini ah-muted ah-num" style={{ flexBasis: '100%' }}>{compression}</span>}
+      {detail.compress_note && (
+        <span className="ah-mini ah-faint ah-truncate" style={{ flexBasis: '100%' }} title={detail.compress_note}>
+          压缩备注：{detail.compress_note}
+        </span>
+      )}
     </div>
   )
 }
