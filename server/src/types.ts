@@ -10,6 +10,43 @@ export type SingleRoleMode = 'user' | 'system'
 /** 多 key 模式：轮询（按顺序用第一个可用 key，失效即切下一个）/ 并发（同时用多个 key 请求，先出结果者胜） */
 export type KeyMode = 'poll' | 'race'
 
+export type CompressionAlgorithm = 'gzip' | 'br' | 'zstd'
+/** 渠道请求体压缩：null = 跟随全局 */
+export type RequestCompression = CompressionAlgorithm | 'off'
+/** 日志里的压缩状态 */
+export type CompressStatus =
+  | 'compressed'          // 已压缩发送
+  | 'fallback_ok'         // 压缩被拒，明文重发成功（并写入内存记忆）
+  | 'fallback_failed'     // 压缩被拒，明文重发仍失败（不记忆）
+  | 'rejected'            // 判定为压缩被拒，但回退开关关闭
+  | 'off'                 // 渠道设为关闭
+  | 'below_min'           // 请求体小于阈值
+  | 'channel_unsupported' // 渠道 × 算法在记忆期内被判定不支持
+  | 'runtime_unsupported' // 当前 Node 不支持该算法（zstd 需 ≥ 22.15）
+  | 'compress_error'      // 压缩本身抛错，改发明文
+
+/** 渠道在记忆期内被判定不支持的压缩算法；until 为 null 表示直到重启 */
+export interface CompressionUnsupported {
+  algorithm: CompressionAlgorithm
+  until: number | null
+}
+
+/** 渠道压缩测试的单项结果 */
+export interface CompressionTestItem {
+  algorithm: 'plain' | CompressionAlgorithm
+  /** 'plain' / 'gzip-1' / 'br-2' / 'zstd-2 w23' */
+  label: string
+  /** ok = 2xx；rejected = 命中回退状态码 + 正则；error = 其他错误；skipped = 未执行 */
+  verdict: 'ok' | 'rejected' | 'error' | 'skipped'
+  status: number | null
+  latency_ms: number
+  raw_bytes: number
+  sent_bytes: number
+  /** 错误摘要（≤300 字）或跳过原因 */
+  message: string
+}
+export interface CompressionTestResult { model: string; items: CompressionTestItem[] }
+
 /** 数据库原始行（models / model_mapping 为 JSON 字符串） */
 export interface ChannelRow {
   id: number
@@ -37,6 +74,7 @@ export interface ChannelRow {
   key_concurrency: number
   key_cooldown_seconds: number
   ban_until: number | null
+  request_compression: string | null
   created_at: number
   updated_at: number
 }
@@ -78,6 +116,8 @@ export interface Channel {
   key_cooldown_seconds: number
   /** 自动熔断的恢复时间（毫秒时间戳），null = 需手动恢复 */
   ban_until: number | null
+  /** 发往上游的请求体压缩，null = 跟随全局 */
+  request_compression: RequestCompression | null
   created_at: number
   updated_at: number
 }
@@ -315,6 +355,18 @@ export interface LogRow {
   group_name: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值）；单 key 渠道为 null */
   channel_key: string | null
+  /** 上游请求体的压缩编码，如 zstd-2 w23、gzip-1；未压缩为 null */
+  upstream_encoding: string | null
+  /** 发往上游的明文字节数 */
+  upstream_raw_bytes: number | null
+  /** 实际发出的字节数；回退时为两次发送之和 */
+  upstream_sent_bytes: number | null
+  /** 压缩墙钟耗时（含线程池排队）；命中请求级缓存为 0 */
+  compress_ms: number | null
+  /** 压缩状态；总开关关闭时为 null */
+  compress_status: CompressStatus | null
+  /** 被拒时的上游错误摘要 / 压缩异常信息 */
+  compress_note: string | null
 }
 
 // ── 设置 ───────────────────────────────────────────────
@@ -413,6 +465,39 @@ export interface Settings {
   discord_client_secret: string
   /** 服务器与身份组门槛：满足任一规则组即可登录；空数组不检查 */
   discord_rules: DiscordRuleGroup[]
+  // 上游请求体压缩
+  /** 总开关；关闭时所有渠道都不压缩 */
+  upstream_compression_enabled: boolean
+  /** 渠道「跟随全局」时使用的算法 */
+  upstream_compression_default: CompressionAlgorithm
+  upstream_compression_gzip_level: number
+  upstream_compression_br_quality: number
+  upstream_compression_zstd_level: number
+  /** zstd 窗口：0 = 用级别自带窗口；23 = 8 MB（RFC 9659 上限） */
+  upstream_compression_zstd_window_log: number
+  /** 请求体小于该字节数不压缩；0 = 全部压缩 */
+  upstream_compression_min_bytes: number
+  /** 压缩被拒时自动明文重发 */
+  upstream_compression_fallback: boolean
+  /** 判定为压缩被拒的状态码，逗号分隔 */
+  upstream_compression_fallback_codes: string
+  /** 判定为压缩被拒的错误体正则（不区分大小写，只匹配前 2000 字符）；空 = 只看状态码 */
+  upstream_compression_fallback_pattern: string
+  /** 「不支持」内存记忆时长（分钟）；0 = 直到重启 */
+  upstream_compression_unsupported_minutes: number
+  // 响应压缩与静态缓存
+  /** 管理端 / 门户 API 与静态资源的响应压缩；/v1 与 SSE 永远不压缩 */
+  response_compression_enabled: boolean
+  /** gzip 级别 */
+  response_compression_level: number
+  /** brotli 质量；0 = 不用 br，只用 gzip */
+  response_compression_br_quality: number
+  /** 小于该字节数不压缩 */
+  response_compression_threshold: number
+  /** /assets/* 的长缓存天数；0 = 保持 express 默认 */
+  static_assets_max_age_days: number
+  /** 存在 .br / .gz 预压缩文件时直接返回 */
+  static_precompressed: boolean
 }
 
 /** Discord 登录门槛的规则组：组内每个服务器条件都满足才算通过 */
@@ -636,6 +721,9 @@ export interface SystemInfo {
   public_port: number | null
   /** AGGHUB_TRUST_PROXY 的解析结果转为字符串 */
   trust_proxy: string
+  node_version: string
+  /** 当前 Node 是否支持 zstd（需 ≥ 22.15） */
+  zstd_available: boolean
 }
 
 /** POST /api/billing/preview 的请求体 */

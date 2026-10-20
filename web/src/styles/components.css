@@ -867,3 +867,20 @@
   background: var(--err-bg);
   color: var(--err);
 }
+
+/* 渠道压缩测试结果 */
+.ah-ctest {
+  margin-top: 10px;
+}
+.ah-ctest th {
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--line-soft);
+  color: var(--ink-faint);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+.ah-ctest td.ah-num {
+  white-space: nowrap;
+  word-break: normal;
+}

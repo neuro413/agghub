@@ -23,6 +23,7 @@ import { BACKGROUND_PATH, BRAND_ICON_PATH, serveBackground, serveBrandIcon } fro
 import { sendPortalHtml } from './core/siteHtml'
 import { createAdmission, createCallerResolver } from './core/caller'
 import { sendEntryError } from './core/entryError'
+import { precompressedAssets, responseCompression, staticOptions } from './core/responseCompression'
 import type { Surface } from './types'
 
 /** 只在这三个路径上做额度预检与限流 */
@@ -53,6 +54,7 @@ const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 function createLanApp(): Express {
   const app = express()
   app.use(rejectDuplicatedSlash)
+  app.use(responseCompression())
   app.use(express.json({ limit: '50mb' }))
 
   app.get('/api/health', (_req, res) => {
@@ -86,7 +88,8 @@ function createLanApp(): Express {
   mountEntries(app)
 
   // ── 托管前端 + SPA 回退 ──
-  app.use(express.static(WEB_DIST))
+  app.use('/assets', precompressedAssets(path.join(WEB_DIST, 'assets')))
+  app.use(express.static(WEB_DIST, staticOptions()))
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/v1')) return next()
     res.sendFile(path.join(WEB_DIST, 'index.html'), (err) => {
@@ -112,6 +115,8 @@ function createPublicApp(): Express {
   app.disable('x-powered-by')
   app.set('trust proxy', TRUST_PROXY)
   app.use(rejectDuplicatedSlash)
+  // 内部跳过 /v1
+  app.use(responseCompression())
 
   // 鉴权走请求头、不用 Cookie，开放来源是安全的，方便浏览器端客户端直接调用
   app.use('/v1', (req, res, next) => {
@@ -135,7 +140,8 @@ function createPublicApp(): Express {
   app.use('/api/user', portalHeaders, portalRouter)
   // 首页 HTML 在服务端注入品牌，浏览器首屏直接拿到自定义标题与图标
   app.get(['/', '/index.html'], portalHeaders, sendPortalHtml)
-  app.use(portalHeaders, express.static(PORTAL_DIST))
+  app.use('/assets', portalHeaders, precompressedAssets(path.join(PORTAL_DIST, 'assets')))
+  app.use(portalHeaders, express.static(PORTAL_DIST, staticOptions()))
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api') || req.path.startsWith('/v1')) return next()
     sendPortalHtml(req, res, () => {

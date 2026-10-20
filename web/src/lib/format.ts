@@ -5,6 +5,12 @@ export function fmtNum(n?: number): string {
   return String(n)
 }
 
+export function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + ' MB'
+  if (n >= 1024) return (n / 1024).toFixed(1) + ' KB'
+  return n + ' B'
+}
+
 export function fmtTime(ts: number, seconds = false): string {
   const d = new Date(ts)
   const p = (x: number) => String(x).padStart(2, '0')

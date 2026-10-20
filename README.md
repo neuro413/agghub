@@ -8,6 +8,7 @@
 - **三类调用入口**：OpenAI Chat Completions、Anthropic Messages、OpenAI Responses；同协议优先直通，跨协议通过内部中间表示（IR）转换，支持非流式与 SSE。
 - **选路与故障转移**：同渠道重试、跨渠道降级、空回复检测、按状态码自动停用渠道，以及全局 HTTP 代理。
 - **请求预处理**：提示词正则、工具黑名单、thinking 清理、参数修改；提供可视化规则编辑和预览，以及限定链路的伪思考与历史续接。
+- **流量优化**：上游请求体压缩（zstd / br / gzip，可按渠道指定，被拒时自动明文重发）与管理端 / 门户的响应压缩、静态资源预压缩和长缓存。
 - **统计与请求日志**：请求量、成功率、Token、平均延迟概览；可对照原始与改写后请求，查看网关响应及上游原始 JSON / SSE / 错误体。
 - **小规模分发**：可选的公网端口开放 `/v1`（必须携带 Key）和用户门户；仿 new-api 的分组管理隔离私人渠道（分组勾选渠道与模型、带分组倍率），按模型倍率折算点数，支持总额度、每日额度、RPM 与并发限制，每个 Key 可单独决定是否记录正文。
 - **用户门户**：公网端口上的自助页面，用户名 + 密码注册登录，自建 / 删除 Key、查看余额与调用记录、每日签到领额度；仿 new-api 模型广场的模型列表页可按分组、供应商与计费类型筛选并查看缓存读写价格；可用性页按 10 分钟一格展示各模型最近 6 小时的健康度与错误率，无人调用的模型自动测活；控制台右上角的通知中心常驻展示通知与公告。界面仿 new-api 用户侧，额度按可配置比例显示为美元。
@@ -109,6 +110,92 @@ key 失效的判定与恢复：
 - 多 key 模式下 key 级熔断始终生效，不受「自动熔断」总开关影响，也不计入渠道级的自动停用。key 全部熔断时渠道状态不变，选路时自动跳过；有 key 到期恢复后渠道自动回到候选。
 - 熔断状态按 key 指纹存进数据库，重启后保留，调整 key 顺序或增删其他 key 不受影响。编辑弹窗里能看到每个 key 的状态，可以逐个或全部重置；渠道卡片显示可用 key 数，日志详情显示本次使用的上游 key（序号 + 脱敏值）。
 - 测试连接与拉取模型使用第一个 key。
+
+### 上游请求体压缩
+
+Agent 类客户端的输入远大于输出，发往上游的请求体是流量的绝对大头。开启后，AggHub 只压缩**自己发往上游**的请求体，不改变客户端的请求和上游的响应；压缩使用异步 zlib API，在线程池中执行，不占主线程。总开关默认关闭，关闭时行为与未启用前一致，只是日志会多记录明文字节数，便于对比。
+
+| 设置项 | 默认 | 说明 |
+| --- | --- | --- |
+| 启用压缩 | 关闭 | 总开关；关闭时所有渠道都发明文 |
+| 默认算法 | `zstd` | 渠道设为「跟随全局」时使用的算法 |
+| zstd 级别 | `2` | `1`～`19` |
+| zstd 窗口 | `23` | 下拉选择 `0` 或 `10`～`23`；`0` = 级别默认，`23` = 8 MB，旁边显示换算大小 |
+| br 质量 | `2` | `0`～`11` |
+| gzip 级别 | `1` | `1`～`9` |
+| 最小压缩体积 | `4 KB` | 请求体小于该值不压缩，`0` = 全部压缩 |
+| 自动回退 | 开启 | 判定为压缩被拒时在同一次尝试内明文重发 |
+| 回退状态码 | `400,415` | 逗号分隔 |
+| 匹配正则 | 见下 | 不区分大小写，只匹配错误体前 2000 字符；留空只看状态码 |
+| 记忆时长 | `360` 分钟 | 明文重发成功后在该时段内对该渠道发明文；`0` = 直到重启 |
+
+手机（如红米 Note 4X、Cortex-A53）推荐 zstd 2 + 窗口 23、gzip 1、br 2。zstd 需要 Node ≥ 22.15，设置页会显示当前 Node 版本与 zstd 是否可用；运行时不支持时，选择 zstd 的渠道直接按不压缩处理。
+
+默认的匹配正则为：
+
+```text
+json|pars|decod|encod|compress|gzip|zstd|brotli|invalid character|unexpected token|unsupported (media|content|encoding)
+```
+
+设计意图是只在错误体看起来与编码、解析或压缩有关时才重发，「prompt is too long」「Unsupported parameter」这类真实的 `400` 不会触发把大请求体再明文传一遍。
+
+上游兼容性如下，实际以渠道里的「压缩测试」结果为准：
+
+| 上游 | 支持 |
+| --- | --- |
+| OpenAI 官方 `/v1/responses` | zstd（官方文档明确） |
+| Anthropic 官方 | gzip（社区实测，非官方文档） |
+| new-api 系 | gzip、br；zstd 自 rc.23（PR #6545）起 |
+| one-api | gzip |
+
+**回退与记忆。** 状态码命中回退列表、且错误体匹配正则时（两者同时命中），才判定为压缩被拒。开启自动回退后，网关在**同一次上游尝试内**改用明文重发，不占用同渠道 / 跨渠道重试次数，超时仍受该次尝试约束；只有明文重发成功才把「该渠道 × 该算法不支持」写进内存记忆。记忆期内该组合直接发明文，不再先压缩一次；记忆不落库，重启后清空，保存或删除渠道、或在渠道弹窗里点「清除」也会重置。渠道卡片上有「压缩回退」徽标，编辑弹窗里会显示已判定不支持的算法和剩余时间。
+
+**渠道里的压缩测试。** 编辑渠道时可选择测试模型并点「压缩测试」，它会依次发送明文基线 + gzip + br + zstd 四个最小请求，级别和窗口取当前全局设置，不受最小体积和「不支持」记忆影响，也不会修改记忆。测试会实际调用上游，约消耗几十 token。结论含义：`✅ 支持`（上游 2xx）、`❌ 拒绝`（命中回退状态码与正则）、`⚠️ 其他错误`（其他失败）、`跳过`（基线失败或当前 Node 不支持 zstd）。
+
+**日志字段。** 请求详情会记录这次发往上游的压缩明细：
+
+| 字段 | 含义 |
+| --- | --- |
+| `upstream_encoding` | 压缩算法与参数，如 `zstd-2 w23`、`gzip-1`；未压缩为空 |
+| `upstream_raw_bytes` | 发往上游的明文字节数；总开关关闭时也会记录 |
+| `upstream_sent_bytes` | 实际发出的字节数；发生回退时是压缩与明文两次发送之和 |
+| `compress_ms` | 压缩耗时（含线程池排队），毫秒 |
+| `compress_status` | 压缩结果，取值见下表 |
+| `compress_note` | 被拒时的上游错误摘要，或压缩异常信息（≤300 字） |
+
+| `compress_status` | 含义 |
+| --- | --- |
+| `compressed` | 已压缩发送 |
+| `fallback_ok` | 压缩被拒，明文重发成功 |
+| `fallback_failed` | 压缩被拒，明文重发仍失败（不写入记忆） |
+| `rejected` | 压缩被拒，但回退开关关闭 |
+| `off` | 渠道关闭压缩 |
+| `below_min` | 请求体小于阈值 |
+| `channel_unsupported` | 记忆期内该渠道 × 算法被判定不支持 |
+| `runtime_unsupported` | 当前 Node 不支持该算法（zstd 需 Node ≥ 22.15） |
+| `compress_error` | 压缩本身出错，改发明文 |
+
+日志详情里显示为 `上游压缩：zstd-2 w23 · 612.3 KB → 118.4 KB（19.3%）· 3.2ms · 已压缩`，括号内是实际发送字节占明文的比例；总开关关闭时显示为 `上游请求体 612.3 KB（未启用压缩）`。
+
+建议的上线步骤：
+
+1. `node -v` 确认 ≥ 22.15，然后 `npm install`、`npm run build`。
+2. 可选：在分发机上跑基准脚本，确认 zstd-2 / gzip-1 的实际耗时。
+3. 在设置页确认级别为手机推荐值：zstd 2 + 窗口 23、gzip 1、br 2。
+4. **先不开总开关**，逐个渠道点「压缩测试」：zstd 通过的保持「跟随全局」；只支持 gzip 或 br 的单独指定算法；都不支持的设为「关闭」。
+5. 打开总开关，观察日志详情；可用下面的 SQL 汇总：
+
+```sql
+SELECT compress_status, upstream_encoding, COUNT(*) AS n,
+       SUM(upstream_raw_bytes) AS raw, SUM(upstream_sent_bytes) AS sent,
+       ROUND(100.0 * SUM(upstream_sent_bytes) / SUM(upstream_raw_bytes), 1) AS pct,
+       ROUND(AVG(compress_ms), 2) AS avg_ms
+FROM request_logs
+WHERE created_at >= (strftime('%s','now') - 86400) * 1000
+GROUP BY 1, 2 ORDER BY n DESC;
+```
+
+6. 出现 `fallback_ok` 说明渠道不支持当前算法，改算法或设为「关闭」，再点「清除」重置记忆。
 
 ## 选路、重试与超时
 
@@ -241,6 +328,31 @@ location / {
 }
 ```
 
+### 响应压缩与静态缓存
+
+设置页「响应压缩与静态缓存」卡片：
+
+| 设置项 | 默认 | 说明 |
+| --- | --- | --- |
+| 响应压缩 | 开启 | 管理端 / 门户的接口 JSON 与页面资源 |
+| gzip 级别 | `6` | `1`～`9` |
+| br 质量 | `0` | `0` = 不用 br，只用 gzip；`1`～`11` |
+| 压缩阈值 | `1024` 字节 | 响应小于该值不压缩，`0` = 全部压缩 |
+| 静态资源缓存（天） | `365` | `/assets` 下的文件按 immutable 缓存；`0` = 保持默认 |
+| 预压缩文件 | 开启 | 存在 `.br` / `.gz` 时直接返回 |
+
+`/v1` 与 SSE 流式响应永远不压缩；显示 Key 明文的接口 `/api/user/keys/:id/key` 也不压缩，避免 BREACH 侧信道。br 质量为 `0` 时只协商 gzip，CPU 开销更可预期。
+
+构建时 Vite 插件 `scripts/vite-precompress.mjs` 会遍历 `web/dist/assets` 与 `portal/dist/assets`，为 ≥1 KB 的 `.js` / `.css` / `.svg` / `.json` / `.txt` / `.wasm` 生成 `.br` 和 `.gz` 副本。开启「预压缩文件」后，命中的请求直接返回预压缩文件，不占运行时 CPU；如果分发机是拷贝 `dist` 而不是自行构建，要连同 `.br` / `.gz` 一起拷贝。
+
+`/assets` 下带哈希的文件会带 `Cache-Control: public, max-age=…, immutable`（天数可设，`0` = 不设置、保持 express 默认）；门户首页 HTML 仍是 `no-cache`，换版本后能及时拿到新的资源引用。
+
+Cloudflare 缓存规则（只涉及后台配置）：
+
+- Cache Rules：URI 路径**精确等于** `/api/user/background` 或 `/api/user/brand-icon` → Eligible for cache，Edge TTL 使用源站的 `Cache-Control`。这两个地址由源站设置 immutable，并带 `?v=时间戳`，换图后自然失效。
+- **严禁**写成 `/api/user/*` 这类通配，否则 `/api/user/self`、`/api/user/keys` 等个人数据可能被缓存后发给其他用户。
+- `/assets/*` 的 `.js` / `.css` 按扩展名本就在 Cloudflare 默认缓存范围内；有了 immutable 之后，命中边缘缓存时不再回源。
+
 ### 分发时的注意事项
 
 - 预处理的三类规则可以按「调用来源」（内网匿名 / 内网 Key / 公网 Key / 门户用户 / 自动测活）和「指定 Key」限定作用范围。例如只对公网 Key 强制 `max_tokens` 上限，或删除 Responses 的 `tools`、强制 `store: false`。这类规则只改发往上游的请求，不影响额度预扣的口径（预扣按客户端请求体里声明的输出上限计算）。
@@ -299,6 +411,7 @@ location / {
 - `portal_background` 留空不启用；可填 http(s) 图片链接，或上传后自动生成的 `/api/user/background?v=时间戳`。链接不允许包含引号、括号、反斜杠、尖括号与空白；门户走 HTTPS 时图片也应使用 https 链接。
 - `portal_background_opacity`（`0`～`100`，默认 `80`）控制内容面板不透明度，`portal_background_blur`（`0`～`40`，默认 `12`）为毛玻璃模糊像素，`portal_background_dim`（`0`～`90`，默认 `10`）为背景图上叠加的白色遮罩浓度，保证直接压在图上的顶栏 / 侧栏文字可读。
 - 上传接口为 `PUT /api/settings/background`，JSON `{ data: "data:image/...;base64,..." }`；支持 PNG / JPEG / GIF / WebP，解码后不超过 5 MB，与品牌图标一样存入 `site_assets` 表，上传后立即生效。`GET /api/user/background` 在内网端口与公网端口都免鉴权提供（管理端可预览），带版本号长期缓存。
+- 上传前可在浏览器里转成 WebP：默认开启，质量默认 `85`，最大宽度默认 `1920`（`0` = 不缩放）；GIF 不转换，转换后不比原图小或浏览器不支持编码时上传原图。这三个选项只保存在当前浏览器（`localStorage`），不进服务端设置。
 - 门户状态接口 `GET /api/user/status` 新增 `background`、`background_opacity`、`background_blur`、`background_dim` 字段。
 - 启用后登录 / 注册页与控制台都铺满背景图，顶栏、侧栏透明（顶栏带模糊，内容滚到下面时不串字），内容面板与登录卡片为半透明毛玻璃，面板内卡片再叠一层更淡的白；下拉菜单、通知弹层、对话框、Toast 保持不透明，移动端侧栏抽屉同样不透明。未设置背景图时门户外观与原来完全一致。
 - 服务端在门户首屏 HTML 中注入背景 CSS 变量（与标题、图标注入相同机制），首屏不会先闪白底。
@@ -519,6 +632,21 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 | `pseudo_thinking_store_max` | `5000` | 伪思考暂存条数上限 |
 | `reasoning_store_max` | `2000` | Responses 推理密文暂存条数上限 |
 | `reasoning_auto_adjust` | 开启 | 允许跨格式时自动调整 Claude 推理相关参数 |
+| `upstream_compression_enabled` | 关闭 | 上游请求体压缩总开关 |
+| `upstream_compression_default` | `zstd` | 渠道「跟随全局」时使用的算法 |
+| `upstream_compression_gzip_level` / `upstream_compression_br_quality` / `upstream_compression_zstd_level` | `1` / `2` / `2` | 上游压缩级别 / 质量 |
+| `upstream_compression_zstd_window_log` | `23` | zstd 窗口；`0` = 级别默认，`10`～`23`，`23` = 8 MB |
+| `upstream_compression_min_bytes` | `4096` | 请求体小于该字节数不压缩，`0` = 全部压缩 |
+| `upstream_compression_fallback` | 开启 | 判定压缩被拒时在同一次尝试内明文重发 |
+| `upstream_compression_fallback_codes` | `400,415` | 判定压缩被拒的状态码 |
+| `upstream_compression_fallback_pattern` | 见[上游请求体压缩](#上游请求体压缩) | 判定压缩被拒的错误体正则，空 = 只看状态码 |
+| `upstream_compression_unsupported_minutes` | `360` | 「不支持」内存记忆时长，`0` = 直到重启 |
+| `response_compression_enabled` | 开启 | 管理端 / 门户响应压缩；`/v1` 与 SSE 不压缩 |
+| `response_compression_level` | `6` | 响应 gzip 级别 |
+| `response_compression_br_quality` | `0` | 响应 br 质量，`0` = 只用 gzip |
+| `response_compression_threshold` | `1024` | 小于该字节数的响应不压缩 |
+| `static_assets_max_age_days` | `365` | `/assets` 长缓存天数，`0` = 保持默认 |
+| `static_precompressed` | 开启 | 存在 `.br` / `.gz` 预压缩文件时直接返回 |
 
 ## 数据存储、备份与安全
 

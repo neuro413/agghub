@@ -6,7 +6,8 @@ import { IconCheck, IconPlus, IconRefresh, IconTest, IconTrash } from '../compon
 import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
-import type { Channel, ChannelKeyStatus, ChannelType, KeyMode, SingleRoleMode } from '../types'
+import { fmtBytes } from '../lib/format'
+import type { Channel, ChannelKeyStatus, ChannelType, CompressionTestItem, CompressionTestResult, CompressionUnsupported, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
 const PLACEHOLDER: Record<ChannelType, string> = {
   openai: 'https://api.openai.com（留空用官方）',
@@ -46,6 +47,8 @@ interface FormState {
   key_mode: KeyMode
   key_concurrency: string
   key_cooldown: string
+  /** '' = 跟随全局 */
+  request_compression: '' | RequestCompression
 }
 
 /** 多 key 模式下按行拆分并去重的 key 列表（与后端规则一致） */
@@ -87,7 +90,7 @@ function initForm(c: Channel | null): FormState {
     return {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
-      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300',
+      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '',
     }
   return {
     name: c.name,
@@ -114,6 +117,7 @@ function initForm(c: Channel | null): FormState {
     key_mode: c.key_mode || 'poll',
     key_concurrency: String(c.key_concurrency ?? 2),
     key_cooldown: String(c.key_cooldown_seconds ?? 300),
+    request_compression: c.request_compression ?? '',
   }
 }
 
@@ -157,6 +161,7 @@ function buildPayload(f: FormState): Partial<Channel> {
     key_mode: multiKey ? f.key_mode : null,
     key_concurrency: Number(f.key_concurrency) || 2,
     key_cooldown_seconds: Number(f.key_cooldown) || 300,
+    request_compression: f.request_compression || null,
   }
 }
 
@@ -229,14 +234,138 @@ function KeyStatusList({ channelId }: { channelId: number }) {
   )
 }
 
+const VERDICT_TEXT: Record<CompressionTestItem['verdict'], string> = { ok: '✅ 支持', rejected: '❌ 拒绝', error: '⚠️ 其他错误', skipped: '跳过' }
+
+function unsupportedText(u: CompressionUnsupported): string {
+  if (u.until === null) return `已判定不支持 ${u.algorithm}，直到重启`
+  return `已判定不支持 ${u.algorithm}，剩余 ${Math.max(0.1, (u.until - Date.now()) / 3_600_000).toFixed(1)} 小时`
+}
+
+/** 请求体压缩：渠道算法、压缩测试（未保存的配置也能测）与已保存渠道的「不支持」记忆 */
+function CompressionField({
+  value,
+  onChange,
+  models,
+  payload,
+  channel,
+  onCleared,
+}: {
+  value: FormState['request_compression']
+  onChange: (v: FormState['request_compression']) => void
+  models: string[]
+  payload: () => Partial<Channel>
+  channel: Channel | null
+  onCleared?: () => void
+}) {
+  const toast = useToast()
+  const [model, setModel] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [result, setResult] = useState<CompressionTestResult | null>(null)
+  const [unsupported, setUnsupported] = useState<CompressionUnsupported[]>(channel?.compression_unsupported ?? [])
+  const [clearing, setClearing] = useState(false)
+  const testModel = models.includes(model) ? model : models[0] ?? ''
+
+  const runTest = async (): Promise<void> => {
+    setTesting(true)
+    try {
+      setResult(await api.testChannelCompression({ ...payload(), test_model: testModel }))
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  const clear = async (): Promise<void> => {
+    if (!channel) return
+    setClearing(true)
+    try {
+      setUnsupported((await api.resetChannelCompression(channel.id)).unsupported)
+      toast('ok', '已清除压缩回退记忆')
+      onCleared?.()
+    } catch (e: any) {
+      toast('err', e.message)
+    } finally {
+      setClearing(false)
+    }
+  }
+
+  return (
+    <Field label="请求体压缩" hint="压缩发往上游的请求体，需在设置页打开总开关才生效；压缩测试使用设置页的级别与窗口，结果为 ✅ 的算法才能放心使用">
+      <Select value={value} onChange={(e) => onChange(e.target.value as FormState['request_compression'])}>
+        <option value="">跟随全局</option>
+        <option value="off">关闭</option>
+        <option value="gzip">gzip</option>
+        <option value="br">br</option>
+        <option value="zstd">zstd</option>
+      </Select>
+      {unsupported.length > 0 && (
+        <div className="ah-row" style={{ marginTop: 8 }}>
+          <span className="ah-mini" style={{ color: 'var(--warn)' }}>{unsupported.map(unsupportedText).join('；')}</span>
+          <span style={{ flex: 1 }} />
+          <Button size="sm" variant="soft" icon={<IconRefresh size={15} />} loading={clearing} onClick={clear}>
+            清除
+          </Button>
+        </div>
+      )}
+      <div className="ah-model-fetch">
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <Select aria-label="测试模型" value={testModel} disabled={!models.length} onChange={(e) => setModel(e.target.value)}>
+            {models.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <Button size="sm" variant="soft" icon={<IconTest size={15} />} loading={testing} disabled={!testModel} onClick={runTest}>
+          压缩测试
+        </Button>
+      </div>
+      <div className="ah-mini ah-faint" style={{ marginTop: 6 }}>会发送 4 个最小请求，约消耗几十 token</div>
+      {result && (
+        <table className="ah-htable ah-ctest">
+          <thead>
+            <tr>
+              <th>算法</th>
+              <th>HTTP</th>
+              <th>耗时</th>
+              <th>原始 → 发送</th>
+              <th>结论</th>
+              <th>错误摘要</th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.items.map((item) => (
+              <tr key={item.algorithm}>
+                <td className="ah-num">{item.label}</td>
+                <td className="ah-num">{item.status ?? '—'}</td>
+                <td className="ah-num">{item.verdict === 'skipped' ? '—' : `${item.latency_ms}ms`}</td>
+                <td className="ah-num">
+                  {item.verdict === 'skipped' ? '—' : item.algorithm === 'plain' ? fmtBytes(item.raw_bytes) : `${fmtBytes(item.raw_bytes)} → ${fmtBytes(item.sent_bytes)}`}
+                </td>
+                <td>{VERDICT_TEXT[item.verdict]}</td>
+                <td className="ah-mini ah-faint">{item.message}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </Field>
+  )
+}
+
 export function ChannelModal({
   channel,
   onClose,
   onSaved,
+  onChanged,
 }: {
   channel: Channel | null
   onClose: () => void
   onSaved: () => void
+  /** 不关闭弹窗、但渠道列表需要刷新时调用（如清除压缩回退记忆） */
+  onChanged?: () => void
 }) {
   const toast = useToast()
   const [f, setF] = useState<FormState>(() => initForm(channel))
@@ -565,6 +694,15 @@ export function ChannelModal({
           <span className="ah-mini ah-muted">{f.strip_headers ? '仅保留必要请求头' : '透传/转发非必要头'}</span>
         </div>
       </Field>
+
+      <CompressionField
+        value={f.request_compression}
+        onChange={(v) => set('request_compression', v)}
+        models={listedModels}
+        payload={() => buildPayload(f)}
+        channel={channel}
+        onCleared={onChanged}
+      />
 
       <Field label="单 role 渠道兼容" hint={singleRoleHint(f)}>
         <div className="ah-row">

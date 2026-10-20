@@ -4,14 +4,20 @@ import { getProxyAgent } from '../core/proxy'
 import { resetChannelHealth } from '../core/channelHealth'
 import { channelKeys, keyCounts, keyStatuses, pruneKeyStates, resetKeyStates } from '../core/channelKeys'
 import { removeChannelFromGroups } from '../core/groups'
+import { resolveUpstreamModel } from '../core/selector'
+import { applyUserAgent } from '../core/relay'
+import { readBodyText } from '../core/bodyReader'
+import { ZSTD_AVAILABLE, algorithmPlan, clearUnsupported, compressBody, isCompressionRejection, unsupportedList } from '../core/upstreamCompression'
+import { getAdaptor } from '../adapters'
 import { trimSlash, withV1 } from '../adapters/base'
-import type { ChannelRow, ChannelType, KeyMode, SingleRoleMode } from '../types'
+import type { Channel, ChannelRow, ChannelType, CompressionAlgorithm, CompressionTestItem, CompressionTestResult, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
 export const channelsRouter = Router()
 
 const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses']
 const SINGLE_ROLE_MODES: SingleRoleMode[] = ['user', 'system']
 const KEY_MODES: KeyMode[] = ['poll', 'race']
+const REQUEST_COMPRESSIONS: RequestCompression[] = ['off', 'gzip', 'br', 'zstd']
 
 function startOfToday(): number {
   const d = new Date()
@@ -43,6 +49,8 @@ interface ChannelInput {
   key_mode?: KeyMode | null
   key_concurrency?: number
   key_cooldown_seconds?: number
+  /** null = 跟随全局 */
+  request_compression?: RequestCompression | null
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -112,6 +120,7 @@ function validate(input: ChannelInput): string | null {
   if (input.base_url_full && input.type !== 'vertex' && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
   if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
   if (input.key_mode != null && !KEY_MODES.includes(input.key_mode)) return '多 key 模式必须是 poll / race'
+  if (input.request_compression != null && !REQUEST_COMPRESSIONS.includes(input.request_compression)) return '请求体压缩必须是 off / gzip / br / zstd'
   const keyMode = keyColumns(input).key_mode
   if (keyMode && !channelKeys({ api_key: input.api_key || '', key_mode: keyMode }).length) return '多 key 模式下至少填写一个 key'
   return null
@@ -129,7 +138,10 @@ channelsRouter.get('/', (_req, res) => {
     const ch = rowToChannel(r)
     const s = statStmt.get(r.id, since) as { total: number; ok: number }
     const keys = keyCounts(ch)
-    return { ...ch, today_requests: s.total || 0, today_success: s.ok || 0, key_total: keys?.total, key_available: keys?.available }
+    return {
+      ...ch, today_requests: s.total || 0, today_success: s.ok || 0, key_total: keys?.total, key_available: keys?.available,
+      compression_unsupported: unsupportedList(ch.id),
+    }
   })
   res.json(list)
 })
@@ -142,8 +154,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -166,6 +178,7 @@ channelsRouter.post('/', (req, res) => {
       single_role_merge_system: input.single_role_merge_system ? 1 : 0,
       single_role_exclude_last_user: input.single_role_exclude_last_user ? 1 : 0,
       ...keyColumns(input),
+      request_compression: input.request_compression || null,
       created_at: now,
       updated_at: now,
     })
@@ -191,7 +204,7 @@ channelsRouter.put('/:id', (req, res) => {
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
        key_mode=@key_mode, key_concurrency=@key_concurrency, key_cooldown_seconds=@key_cooldown_seconds,
-       ban_until=@ban_until,
+       request_compression=@request_compression, ban_until=@ban_until,
        updated_at=@updated_at
      WHERE id=@id`,
   ).run({
@@ -227,11 +240,14 @@ channelsRouter.put('/:id', (req, res) => {
         ? (input.single_role_exclude_last_user ? 1 : 0)
         : existing.single_role_exclude_last_user ? 1 : 0,
     ...keyColumns({ ...existing, ...input }),
+    request_compression: input.request_compression !== undefined ? input.request_compression || null : existing.request_compression,
     ban_until: statusChanged ? null : existing.ban_until,
     updated_at: Date.now(),
   })
   // 手动改状态视为恢复：清掉熔断恢复时间与内存计数；状态没变（如编辑名称时回传原状态）不影响自动恢复
   if (statusChanged) resetChannelHealth(id)
+  // 保存渠道即清空该渠道的「压缩不支持」记忆
+  clearUnsupported(id)
   const updated = getChannelById(id)!
   pruneKeyStates(updated)
   res.json(updated)
@@ -259,7 +275,16 @@ channelsRouter.delete('/:id', (req, res) => {
   removeChannelFromGroups(id)
   resetChannelHealth(id)
   resetKeyStates(id)
+  clearUnsupported(id)
   res.json({ ok: true })
+})
+
+// 清除渠道的「压缩不支持」记忆
+channelsRouter.post('/:id/compression/reset', (req, res) => {
+  const channel = getChannelById(Number(req.params.id))
+  if (!channel) return res.status(404).json({ error: 'not found' })
+  clearUnsupported(channel.id)
+  res.json({ unsupported: [] })
 })
 
 // 连通性测试（用请求体里的配置，未保存也能测）
@@ -280,6 +305,98 @@ channelsRouter.post('/test', async (req, res) => {
     if (!res.destroyed) res.json({ ok: false, message: e?.name === 'AbortError' ? '请求超时' : String(e?.message || e), latency_ms: Date.now() - started })
   } finally {
     clearTimeout(timer)
+    res.off('close', close)
+    ac.abort()
+  }
+})
+
+/** 用请求体里的配置组装渠道对象（未保存的渠道也能测），多 key 取第一个 */
+function channelFromInput(input: ChannelInput): Channel {
+  const now = Date.now()
+  const full = fullUrlColumns(input)
+  return {
+    id: 0, name: input.name?.trim() || '', type: input.type!,
+    base_url: input.base_url?.trim() || null, base_url_full: !!full.base_url_full, models_url: full.models_url,
+    api_key: probeKey(input), models: normalizeModels(input.models),
+    model_mapping: input.model_mapping || null, model_alias: normalizeAlias(input),
+    priority: 0, weight: 1, status: 1, region: input.region?.trim() || null, timeout_ms: null,
+    ua_override: !!input.ua_override, ua_value: input.ua_value?.trim() || null, strip_headers: !!input.strip_headers,
+    single_role: null, single_role_merge_system: false, single_role_exclude_last_user: false,
+    key_mode: null, key_concurrency: 2, key_cooldown_seconds: 300, ban_until: null,
+    request_compression: null, created_at: now, updated_at: now,
+  }
+}
+
+const COMPRESSION_TEST_TIMEOUT_MS = 20_000
+
+// 压缩测试：依次发送明文基线与 gzip / br / zstd 的最小请求，级别用当前全局设置；不受阈值影响，也不修改内存记忆
+channelsRouter.post('/test-compression', async (req, res) => {
+  const input = req.body as ChannelInput & { test_model?: string }
+  if (!input.type || !TYPES.includes(input.type)) return res.status(400).json({ error: '渠道类型无效' })
+  const model = (typeof input.test_model === 'string' && input.test_model.trim()) || normalizeModels(input.models)[0]
+  if (!model) return res.status(400).json({ error: '至少配置一个模型' })
+
+  const ac = new AbortController()
+  const close = () => { if (!res.writableEnded) ac.abort() }
+  res.on('close', close)
+  try {
+    const settings = getSettings()
+    const proxyUrl = settings.proxy_url || undefined
+    const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
+    const channel = channelFromInput(input)
+    const adaptor = getAdaptor(channel.type)
+    const upstreamModel = resolveUpstreamModel(channel, model)
+    if (adaptor.prepareChannel) {
+      await adaptor.prepareChannel(channel, proxyUrl, AbortSignal.any([ac.signal, AbortSignal.timeout(COMPRESSION_TEST_TIMEOUT_MS)]))
+    }
+    // Responses API 要求 max_output_tokens 至少 16
+    const request = adaptor.buildRequest(channel, { model, messages: [{ role: 'user', content: 'hi' }], max_tokens: 16 }, upstreamModel, false)
+    applyUserAgent(request.headers, channel)
+    const rawBytes = Buffer.byteLength(request.body)
+
+    const send = async (algorithm: CompressionTestItem['algorithm'], label: string, body: string | Buffer): Promise<CompressionTestItem> => {
+      const item: CompressionTestItem = {
+        algorithm, label, verdict: 'error', status: null, latency_ms: 0, raw_bytes: rawBytes, sent_bytes: Buffer.byteLength(body), message: '',
+      }
+      const started = Date.now()
+      const timeout = AbortSignal.timeout(COMPRESSION_TEST_TIMEOUT_MS)
+      const signal = AbortSignal.any([ac.signal, timeout])
+      try {
+        const headers = algorithm === 'plain' ? request.headers : { ...request.headers, 'content-encoding': algorithm }
+        const r = await fetch(request.url, { method: 'POST', headers, body, signal, dispatcher } as any)
+        item.status = r.status
+        if (r.ok) {
+          item.verdict = 'ok'
+          await r.body?.cancel()
+        } else {
+          const text = await readBodyText(r.body, { signal, maxBytes: 64 * 1024, truncate: true })
+          if (algorithm !== 'plain' && isCompressionRejection(r.status, text, settings)) item.verdict = 'rejected'
+          item.message = text.slice(0, 300)
+        }
+      } catch (e: any) {
+        ac.signal.throwIfAborted()
+        item.message = timeout.aborted ? '请求超时' : String(e?.message || e).slice(0, 300)
+      }
+      item.latency_ms = Date.now() - started
+      return item
+    }
+    const skip = (algorithm: CompressionAlgorithm, label: string, message: string): CompressionTestItem => ({
+      algorithm, label, verdict: 'skipped', status: null, latency_ms: 0, raw_bytes: rawBytes, sent_bytes: 0, message,
+    })
+
+    const baseline = await send('plain', 'plain', request.body)
+    const items = [baseline]
+    for (const algorithm of ['gzip', 'br', 'zstd'] as const) {
+      const plan = algorithmPlan(algorithm, settings)
+      if (algorithm === 'zstd' && !ZSTD_AVAILABLE) items.push(skip(algorithm, plan.label, '当前 Node 不支持 zstd'))
+      else if (baseline.verdict !== 'ok') items.push(skip(algorithm, plan.label, '基线请求失败，无法判断'))
+      else items.push(await send(algorithm, plan.label, await compressBody(request.body, plan)))
+    }
+    const result: CompressionTestResult = { model, items }
+    if (!res.destroyed) res.json(result)
+  } catch (e: any) {
+    if (!res.destroyed && !ac.signal.aborted) res.status(400).json({ error: String(e?.message || e).slice(0, 300) })
+  } finally {
     res.off('close', close)
     ac.abort()
   }

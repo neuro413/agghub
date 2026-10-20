@@ -10,6 +10,8 @@ import type {
   ChannelKeyStatus,
   ChannelGroupInput,
   ChannelGroupView,
+  CompressionTestResult,
+  CompressionUnsupported,
   DiscordGuild,
   DiscordGuildRanking,
   KeyQuotaOp,
@@ -89,6 +91,10 @@ export const api = {
   channelKeys: (id: number) => req<ChannelKeyStatus[]>(`/channels/${id}/keys`),
   resetChannelKeys: (id: number, fingerprint?: string) =>
     req<ChannelKeyStatus[]>(`/channels/${id}/keys/reset`, { method: 'POST', body: JSON.stringify({ fingerprint }) }),
+  testChannelCompression: (data: Partial<Channel> & { test_model?: string }) =>
+    req<CompressionTestResult>('/channels/test-compression', { method: 'POST', body: JSON.stringify(data) }),
+  resetChannelCompression: (id: number) =>
+    req<{ unsupported: CompressionUnsupported[] }>(`/channels/${id}/compression/reset`, { method: 'POST' }),
 
   // ── 分发与令牌 ──
   listKeys: (signal?: AbortSignal) => req<ApiKeyView[]>('/keys', { signal }),

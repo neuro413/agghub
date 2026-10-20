@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { HOST, PORT, PUBLIC_HOST, PUBLIC_PORT, TRUST_PROXY } from '../config'
 import { listGroups } from '../core/groups'
+import { ZSTD_AVAILABLE } from '../core/upstreamCompression'
 import { applyQuotaOp, createKey, deleteKey, keyUsage, keyView, listKeys, regenerateKey, updateKey, validateKeyInput } from '../core/keys'
 import type { ApiKeyInput, KeyQuotaOp, SystemInfo } from '../types'
 
@@ -85,6 +86,8 @@ metaRouter.get('/system', (_req, res) => {
     public_host: PUBLIC_PORT ? PUBLIC_HOST : null,
     public_port: PUBLIC_PORT || null,
     trust_proxy: String(TRUST_PROXY),
+    node_version: process.version,
+    zstd_available: ZSTD_AVAILABLE,
   }
   res.json(info)
 })
