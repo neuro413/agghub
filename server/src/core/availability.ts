@@ -190,7 +190,14 @@ function pump(): void {
 
 /** 10 分钟内没有结果的目标测活一次；当前格子快结束仍没有结果的也补测一次 */
 export function probeIdleModels(now = Date.now()): void {
-  const targets = probeTargets(getSettings().model_ratios)
+  const settings = getSettings()
+  if (!settings.probe_enabled) {
+    // 设置页关闭自动测活：丢弃排队中的目标，正在进行的请求自然结束
+    for (const { id } of queue) pending.delete(id)
+    queue.length = 0
+    return
+  }
+  const targets = probeTargets(settings.model_ratios)
   for (const id of lastProbe.keys()) if (!targets.has(id)) lastProbe.delete(id)
   if (!targets.size) return
   const cellStart = Math.floor(now / CELL_MS) * CELL_MS

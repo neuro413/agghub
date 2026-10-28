@@ -81,6 +81,8 @@ export const DEFAULT_SETTINGS: Settings = {
   /** 默认值保持旧行为：命中一次即停用、只能手动恢复 */
   auto_ban_threshold: 1,
   auto_ban_cooldown_minutes: 0,
+  /** 门户可用性页自动测活，默认保持旧行为 */
+  probe_enabled: true,
   public_base_url: '',
   portal_register_enabled: true,
   portal_password_register_enabled: true,

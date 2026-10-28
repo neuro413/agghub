@@ -415,6 +415,8 @@ export interface Settings {
   auto_ban_threshold: number
   /** 自动停用后多少分钟自动恢复，0 = 只能手动恢复 */
   auto_ban_cooldown_minutes: number
+  /** 门户可用性页自动测活：关闭后不再主动探活，只统计真实请求 */
+  probe_enabled: boolean
   /** 仅用于显示：给分发用户的公网 Base URL */
   public_base_url: string
   // 用户门户

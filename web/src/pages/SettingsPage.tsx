@@ -17,7 +17,7 @@ import { DiscordRulesEditor } from './DiscordRulesEditor'
 const KEYS: (keyof Settings)[] = [
   'single_retry_times', 'channel_retry_times', 'retry_interval_ms', 'request_timeout_ms', 'request_max_duration_ms',
   'stream_keepalive_ms', 'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
-  'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'public_base_url',
+  'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'probe_enabled', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
   'portal_rpm', 'portal_concurrency', 'checkin_enabled', 'checkin_min_points', 'checkin_max_points',
@@ -300,6 +300,9 @@ export function SettingsPage() {
             </SettingRow>
           </>
         )}
+        <SettingRow label="可用性自动测活" desc="可用性页为 10 分钟内无人调用的模型自动发起一次探活；关闭后只统计真实请求，错过的时段会缺少数据">
+          <Toggle checked={s.probe_enabled} onChange={(v) => set('probe_enabled', v)} />
+        </SettingRow>
       </Card>
 
       {/* Discord 登录 */}
