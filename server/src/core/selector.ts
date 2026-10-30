@@ -3,7 +3,7 @@ import type { Caller, Channel, ChannelGroup, ModelRatio } from '../types'
 import { findRatio } from './billing'
 import { OWNER_CALLER } from './caller'
 import { channelModelNames, channelSupportsModel, listedModel } from './channelModels'
-import { listGroups } from './groups'
+import { listGroups, blockedByUaBlacklist } from './groups'
 import { matchesPattern } from './modelPattern'
 
 /** 把请求模型解析为上游真实模型名：专属名先换回原名，再按 model_mapping 映射 */
@@ -68,7 +68,25 @@ export function candidateGroups(caller: Caller, channels: Channel[], model: stri
 }
 
 /**
- * 选一个满足条件的渠道（参考 new-api 的优先级分层 + 加权随机）。
+ * 调用方可用分组里是否有分组对客户端 UA 启用了黑名单且命中：
+ * 遍历调用方分组里能服务该模型的「渠道 × 分组」组合，任一分组的黑名单命中即拒绝；
+ * Key 的分组都不服务这个模型时返回 null（沿用「没有渠道支持该模型」的口径）；
+ * owner（内网匿名）与测活不受 UA 黑名单限制。
+ */export function uaBlacklistBlock(caller: Caller, model: string, userAgent: string | null | undefined): string | null {
+  const groups = callerGroups(caller)
+  if (!groups) return null
+  const candidates = enabledChannels().filter(c => channelSupportsModel(c, model))
+  for (const group of groups) {
+    for (const channel of candidates) {
+      if (!groupAllows(group, channel, model)) continue
+      const message = blockedByUaBlacklist(group, userAgent)
+      if (message !== null) return message
+    }
+  }
+  return null
+}
+
+/** 选择一个满足条件的渠道（参考 new-api 的优先级分层 + 加权随机）。
  * 采用「现存候选里最高优先级层」策略：excludeIds 排除已试渠道，
  * 当高优先级层被试光后，下一层自然成为最高 → 实现按优先级降级的故障转移。
  */

@@ -8,6 +8,8 @@ interface GroupRow {
   is_public: number
   channel_ids: string
   models: string
+  ua_blacklist: string
+  ua_block_message: string
   sort: number
   created_at: number
   updated_at: number
@@ -31,6 +33,8 @@ function rowToGroup(row: GroupRow): ChannelGroup {
     is_public: !!row.is_public,
     channel_ids: parseArray(row.channel_ids).filter((id): id is number => Number.isSafeInteger(id)),
     models: parseArray(row.models).map(String),
+    ua_blacklist: parseArray(row.ua_blacklist).map(String),
+    ua_block_message: row.ua_block_message ?? '',
     sort: row.sort,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -112,6 +116,25 @@ export function validateGroupInput(input: unknown, partial: boolean): { ok: true
     value.models = models
   }
 
+  if (input.ua_blacklist !== undefined) {
+    if (!Array.isArray(input.ua_blacklist)) return { ok: false, error: 'ua_blacklist 须为字符串数组' }
+    const blacklist: string[] = []
+    for (const item of input.ua_blacklist) {
+      if (typeof item !== 'string') return { ok: false, error: 'ua_blacklist 须为字符串数组' }
+      const keyword = item.trim()
+      if (!keyword) continue
+      if (keyword.length > 128) return { ok: false, error: 'ua_blacklist 每项须不超过 128 字符' }
+      if (!blacklist.includes(keyword)) blacklist.push(keyword)
+    }
+    if (blacklist.length > 100) return { ok: false, error: 'ua_blacklist 最多 100 个关键词' }
+    value.ua_blacklist = blacklist
+  }
+
+  if (input.ua_block_message !== undefined) {
+    if (typeof input.ua_block_message !== 'string' || input.ua_block_message.length > 500) return { ok: false, error: '自定义提示须为不超过 500 字符的字符串' }
+    value.ua_block_message = input.ua_block_message.trim()
+  }
+
   if (input.sort !== undefined) {
     if (!Number.isSafeInteger(input.sort) || Math.abs(input.sort as number) > 1_000_000) return { ok: false, error: '排序须为 -1000000～1000000 的整数' }
     value.sort = input.sort as number
@@ -125,12 +148,13 @@ export function createGroup(input: ChannelGroupInput): ChannelGroup | null {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT OR IGNORE INTO channel_groups (name, description, ratio, is_public, channel_ids, models, sort, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR IGNORE INTO channel_groups (name, description, ratio, is_public, channel_ids, models, ua_blacklist, ua_block_message, sort, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.name!, input.description ?? '', input.ratio ?? 1, input.is_public ? 1 : 0,
-      JSON.stringify(input.channel_ids ?? []), JSON.stringify(input.models ?? []), input.sort ?? 0, now, now,
+      JSON.stringify(input.channel_ids ?? []), JSON.stringify(input.models ?? []),
+      JSON.stringify(input.ua_blacklist ?? []), input.ua_block_message ?? '', input.sort ?? 0, now, now,
     )
   return info.changes ? getGroup(input.name!) : null
 }
@@ -153,7 +177,7 @@ export function updateGroup(name: string, input: ChannelGroupInput): ChannelGrou
     const nextName = input.name ?? name
     if (nextName !== name && getGroup(nextName)) return 'conflict'
     db.prepare(
-      `UPDATE channel_groups SET name = ?, description = ?, ratio = ?, is_public = ?, channel_ids = ?, models = ?, sort = ?, updated_at = ?
+      `UPDATE channel_groups SET name = ?, description = ?, ratio = ?, is_public = ?, channel_ids = ?, models = ?, ua_blacklist = ?, ua_block_message = ?, sort = ?, updated_at = ?
        WHERE name = ?`,
     ).run(
       nextName,
@@ -162,6 +186,8 @@ export function updateGroup(name: string, input: ChannelGroupInput): ChannelGrou
       (input.is_public ?? existing.is_public) ? 1 : 0,
       JSON.stringify(input.channel_ids ?? existing.channel_ids),
       JSON.stringify(input.models ?? existing.models),
+      JSON.stringify(input.ua_blacklist ?? existing.ua_blacklist),
+      input.ua_block_message ?? existing.ua_block_message,
       input.sort ?? existing.sort,
       Date.now(),
       name,
@@ -194,6 +220,22 @@ export function removeChannelFromGroups(channelId: number): void {
   for (const group of listGroups()) {
     if (group.channel_ids.includes(channelId)) update.run(JSON.stringify(group.channel_ids.filter(id => id !== channelId)), group.name)
   }
+}
+
+/** UA 黑名单的默认提示 */
+export const DEFAULT_UA_BLOCK_MESSAGE = '不支持的客户端'
+
+/**
+ * 分组 UA 黑名单检查：对客户端 User-Agent 做不区分大小写的包含匹配。
+ * 返回 null 表示放行；命中时返回该分组的自定义提示（未配置时为默认提示）。
+ */
+export function blockedByUaBlacklist(group: ChannelGroup, userAgent: string | null | undefined): string | null {
+  if (!group.ua_blacklist.length || !userAgent) return null
+  const ua = userAgent.toLowerCase()
+  if (group.ua_blacklist.some(keyword => ua.includes(keyword.toLowerCase()))) {
+    return group.ua_block_message || DEFAULT_UA_BLOCK_MESSAGE
+  }
+  return null
 }
 
 function countRefs(table: 'users' | 'api_keys'): Map<string, number> {

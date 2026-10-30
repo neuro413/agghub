@@ -143,7 +143,6 @@ CREATE TABLE IF NOT EXISTS channel_groups (
   created_at  INTEGER NOT NULL,
   updated_at  INTEGER NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -253,6 +252,11 @@ addMissingColumns('request_logs', [
   ['compress_note', 'TEXT'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT'], ['discord_guilds_at', 'INTEGER']])
+// 分组的 UA 黑名单与自定义提示（后加的列，已有库按缺失补齐）
+addMissingColumns('channel_groups', [
+  ['ua_blacklist', `TEXT NOT NULL DEFAULT '[]'`],
+  ['ua_block_message', `TEXT NOT NULL DEFAULT ''`],
+])
 // 一个 Discord 账号只对应一个用户；Discord 建号依赖此约束兜底并发
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_discord ON users(discord_id) WHERE discord_id IS NOT NULL')
 // 管理员停用的 Key 标记：与 enabled 分开，门户用户不能自行解锁

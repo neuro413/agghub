@@ -17,10 +17,12 @@ interface FormState {
   isPublic: boolean
   channelIds: number[]
   models: string[]
+  uaBlacklist: string[]
+  uaBlockMessage: string
 }
 
 function initForm(g: ChannelGroup | null): FormState {
-  if (!g) return { name: '', description: '', ratio: '1', sort: '0', isPublic: false, channelIds: [], models: [] }
+  if (!g) return { name: '', description: '', ratio: '1', sort: '0', isPublic: false, channelIds: [], models: [], uaBlacklist: [], uaBlockMessage: '' }
   return {
     name: g.name,
     description: g.description,
@@ -29,6 +31,8 @@ function initForm(g: ChannelGroup | null): FormState {
     isPublic: g.is_public,
     channelIds: g.channel_ids,
     models: g.models,
+    uaBlacklist: g.ua_blacklist ?? [],
+    uaBlockMessage: g.ua_block_message ?? '',
   }
 }
 
@@ -81,6 +85,8 @@ export function GroupModal({
       is_public: f.isPublic,
       channel_ids: f.channelIds,
       models: f.models,
+      ua_blacklist: f.uaBlacklist,
+      ua_block_message: f.uaBlockMessage.trim(),
     }
     setSaving(true)
     try {
@@ -125,6 +131,24 @@ export function GroupModal({
       <Field label="描述" hint="门户用户选择分组时显示">
         <Textarea value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="例如：稳定线路，价格略高" rows={2} />
       </Field>
+
+      <Field
+        label={`UA 黑名单${f.uaBlacklist.length ? `（已设 ${f.uaBlacklist.length} 个）` : ''}`}
+        hint="对客户端 User-Agent 做不区分大小写的关键词包含匹配，命中即拒绝本分组的调用；每行一个，留空不启用。内网 owner 调用与可用性测活不受限制"
+      >
+        <Textarea
+          value={f.uaBlacklist.join('\n')}
+          onChange={(e) => set('uaBlacklist', e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))}
+          placeholder={'每行一个关键词，例如：\nSillyTavern\ncurl'}
+          rows={3}
+        />
+      </Field>
+
+      {f.uaBlacklist.length > 0 && (
+        <Field label="拦截提示" hint="命中黑名单时返回给客户端的错误信息；留空使用默认的「不支持的客户端」">
+          <Input value={f.uaBlockMessage} onChange={(e) => set('uaBlockMessage', e.target.value)} placeholder="不支持的客户端" maxLength={500} />
+        </Field>
+      )}
 
       <div className="ah-grid2">
         <Field label="公开分组" hint="公开分组所有门户用户都能选；非公开分组需要在用户页分配">

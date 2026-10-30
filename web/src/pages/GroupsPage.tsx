@@ -155,6 +155,7 @@ function GroupCard({
           </span>
         ))}
         {!members.length && <span className="ah-mini ah-faint">未勾选渠道</span>}
+        {g.ua_blacklist?.length ? <span className="ah-tag" title={`UA 黑名单：${g.ua_blacklist.join('、')}`}>UA 黑名单 {g.ua_blacklist.length}</span> : null}
       </div>
 
       <div className="ah-chan-actions">

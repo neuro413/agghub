@@ -252,6 +252,10 @@ export interface ChannelGroup {
   channel_ids: number[]
   /** 允许的模型（渠道对外的模型名），逐个列出 */
   models: string[]
+  /** UA 黑名单关键词：对客户端 User-Agent 做不区分大小写的包含匹配，命中即拒绝；空 = 不启用 */
+  ua_blacklist: string[]
+  /** 命中 UA 黑名单时返回的提示；空 = 「不支持的客户端」 */
+  ua_block_message: string
   /** 越小越靠前 */
   sort: number
   created_at: number
@@ -274,6 +278,8 @@ export interface ChannelGroupInput {
   is_public?: boolean
   channel_ids?: number[]
   models?: string[]
+  ua_blacklist?: string[]
+  ua_block_message?: string
   sort?: number
 }
 

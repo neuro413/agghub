@@ -6,7 +6,7 @@ import type { Adaptor, UpstreamRequest } from '../adapters'
 import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
-import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel } from './selector'
+import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel, uaBlacklistBlock } from './selector'
 import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
@@ -304,6 +304,9 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     if (caller.key && !findRatio(settings.model_ratios, model)) throw new LocalRequestError('该模型未配置倍率', 403)
     const modelCandidates = candidatesForModel(model, caller)
     if (!modelCandidates.length) throw new LocalRequestError(`没有可用渠道支持模型 ${model}`, 503)
+    // 分组 UA 黑名单：按客户端原始 User-Agent 做关键词包含匹配，命中直接拒绝，不进入选路
+    const uaBlocked = uaBlacklistBlock(caller, model, ctx.rawHeaders?.['user-agent'] ? String(ctx.rawHeaders['user-agent']) : null)
+    if (uaBlocked !== null) throw new LocalRequestError(uaBlocked, 403)
     groupOf = candidateGroups(caller, modelCandidates, model)
     const account = accountOf(caller)
     if (account) {
