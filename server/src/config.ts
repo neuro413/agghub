@@ -52,6 +52,10 @@ export const DEFAULT_SETTINGS: Settings = {
   image_max_bytes: 20971520,
   auto_ban: true,
   auto_ban_codes: '401,403',
+  /** 公网端口的上游 / 网络错误只返回状态码，日志仍记录原文 */
+  mask_upstream_errors: false,
+  /** 400 多为参数问题，原文有助于客户端排查，默认不脱敏 */
+  mask_upstream_errors_exclude_codes: '400',
   log_retention_days: 30,
   store_request_body: true,
   store_response_body: true,

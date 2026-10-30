@@ -79,6 +79,25 @@ test('公网集成：网络错误统一为连接失败', async () => {
   assert.equal(res.jsonBody.error.message, '上游连接失败')
 })
 
+test('公网集成：脱敏上游报错只返回状态码，排除的状态码照常返回原文', async () => {
+  setSettings({ mask_upstream_errors: true, mask_upstream_errors_exclude_codes: '400' })
+  const channelId = channel('openai')
+  createGroup({ name: 'default', channel_ids: [channelId], models: ['alias'] })
+  let status = 503
+  globalThis.fetch = (async () => new Response(JSON.stringify({ error: { message: 'upstream detail' } }), { status })) as typeof fetch
+  const masked = runRelay()
+  await masked.run()
+  assert.equal(masked.res.statusCode, 503)
+  assert.equal(masked.res.jsonBody.error.message, '503 Service Unavailable')
+  assert.equal(logs().at(-1).error_message, 'upstream detail')
+  assert.equal(logs().at(-1).client_error, '503 Service Unavailable')
+  status = 400
+  const excluded = runRelay()
+  await excluded.run()
+  assert.equal(excluded.res.jsonBody.error.message, 'upstream detail')
+  assert.equal(logs().at(-1).client_error, null)
+})
+
 // ── 公网安全修复回归 ──
 
 test('S1：POST /v1//chat/completions 直接 404，不进中继', async () => {

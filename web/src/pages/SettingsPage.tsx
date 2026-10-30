@@ -17,6 +17,7 @@ import { DiscordRulesEditor } from './DiscordRulesEditor'
 const KEYS: (keyof Settings)[] = [
   'single_retry_times', 'channel_retry_times', 'retry_interval_ms', 'request_timeout_ms', 'request_max_duration_ms',
   'stream_keepalive_ms', 'log_response_max_bytes', 'stream_buffer_max_bytes', 'image_max_bytes', 'auto_ban', 'auto_ban_codes',
+  'mask_upstream_errors', 'mask_upstream_errors_exclude_codes',
   'auto_ban_threshold', 'auto_ban_cooldown_minutes', 'probe_enabled', 'public_base_url',
   'log_retention_days', 'store_request_body', 'store_response_body', 'access_token', 'proxy_url',
   'portal_register_enabled', 'portal_initial_quota', 'portal_register_ip_daily', 'portal_max_keys',
@@ -254,6 +255,14 @@ export function SettingsPage() {
         <SettingRow label="公网 Base URL" desc="用于令牌页复制接入信息和门户里显示的接入地址；留空时门户按用户访问的地址显示">
           <Input value={s.public_base_url} onChange={(e) => set('public_base_url', e.target.value)} placeholder="https://api.example.com" />
         </SettingRow>
+        <SettingRow label="脱敏上游报错信息" desc="公网端口的上游与网络错误只向客户端返回 HTTP 状态码（如 503 Service Unavailable）；请求日志仍保存原文">
+          <Toggle checked={s.mask_upstream_errors} onChange={(v) => set('mask_upstream_errors', v)} />
+        </SettingRow>
+        {s.mask_upstream_errors && (
+          <SettingRow label="排除的状态码" desc="逗号分隔，命中的状态码照常返回上游报错原文；留空 = 全部脱敏">
+            <Input value={s.mask_upstream_errors_exclude_codes} onChange={(e) => set('mask_upstream_errors_exclude_codes', e.target.value)} placeholder="400" />
+          </SettingRow>
+        )}
       </Card>
 
       {/* 用户门户 */}

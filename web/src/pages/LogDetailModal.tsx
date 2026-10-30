@@ -178,13 +178,17 @@ export function LogDetailModal({
           {detail.request_id && <div className="ah-mini ah-muted">请求 ID：{detail.request_id} · 总耗时 {detail.latency_ms ?? 0}ms{detail.first_token_ms != null && ` · 首字 ${detail.first_token_ms}ms`} · 最后尝试 {detail.attempt_latency_ms ?? '—'}ms</div>}
           {!!(detail.response_body_truncated || detail.upstream_response_body_truncated) && <div role="note" className="ah-detail-empty">日志正文已截断，仅保存前缀；复制得到的也只有已保存内容。实际业务输出不受日志上限影响。</div>}
           {detail.preprocessed_body?.includes('"contents"') && !showOriginal && <div className="ah-mini ah-muted">当前为 Gemini 上游请求体，请在「原始」标签查看 contents；切换原始请求可查看客户端对话。</div>}
-          {hasField('preprocessed_body') && (
+          {(hasField('preprocessed_body') || !!detail.client_error) && (
             <div className="ah-pp-viewbar">
               <span className={`ah-pp-viewflag${showOriginal ? '' : ' is-pp'}`}>
                 {showOriginal ? '当前：原始请求' : '当前：后处理改写后'}
               </span>
               <span style={{ flex: 1 }} />
-              <Button variant="soft" size="sm" onClick={() => setShowOriginal((v) => !v)}>
+              <Button variant="soft" size="sm" onClick={() => {
+                setShowOriginal((v) => !v)
+                // 只有报错被脱敏改写时，差异只体现在响应页的错误信息上
+                if (!hasField('preprocessed_body')) setTab('response')
+              }}>
                 {showOriginal ? '显示改写后请求' : '显示原始请求'}
               </Button>
             </div>
@@ -201,7 +205,8 @@ export function LogDetailModal({
               </button>
             )}
           </div>
-          {tab === 'response' ? <ResponseView detail={detail} showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy}
+          {tab === 'response' ? <ResponseView detail={detail} error={!showOriginal && detail.client_error ? detail.client_error : detail.error_message}
+            showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy}
             bodyStatus={bodyError ? <div role="alert">{bodyError} {retry}</div> : bodyPending ? <Loading /> : undefined} />
             : bodyError ? <div role="alert">{bodyError} {retry}</div> : bodyPending ? <Loading /> : <>
               {tab === 'conv' && <ConvView body={activeBody} />}
@@ -440,12 +445,15 @@ function HeadersView({ detail, onCopy }: { detail: PartialLogDetail; onCopy: (t:
 // ── 响应（返回客户端的响应 ⇄ 上游原始回复） ──────────────
 function ResponseView({
   detail,
+  error,
   showUpstream,
   onToggle,
   onCopy,
   bodyStatus,
 }: {
   detail: PartialLogDetail
+  /** 网关响应上方显示的错误信息：改写后或上游原文 */
+  error: string | null
   showUpstream: boolean
   onToggle: () => void
   onCopy: (t: string, l?: string) => void
@@ -471,7 +479,7 @@ function ResponseView({
           {upstream ? '显示网关响应' : '显示上游原始回复'}
         </Button>
       </div>
-      {bodyStatus ?? <JsonView text={text} onCopy={onCopy} empty={empty} error={upstream ? null : detail.error_message} />}
+      {bodyStatus ?? <JsonView text={text} onCopy={onCopy} empty={empty} error={upstream ? null : error} />}
     </>
   )
 }

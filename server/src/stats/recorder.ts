@@ -29,6 +29,8 @@ export interface LogEntry {
   /** 1=本次为重试中的中间尝试（不计入请求统计）；0/缺省=最终结果 */
   is_retry?: boolean
   error_message?: string | null
+  /** 实际返回客户端的错误信息，仅与 error_message 不同（被脱敏改写）时记录 */
+  client_error?: string | null
   request_headers?: string | null
   request_body?: string | null
   response_body?: string | null
@@ -98,7 +100,7 @@ const insertStmt = db.prepare(
     request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
     source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent, first_token_ms,
-    upstream_encoding, upstream_raw_bytes, upstream_sent_bytes, compress_ms, compress_status, compress_note)
+    upstream_encoding, upstream_raw_bytes, upstream_sent_bytes, compress_ms, compress_status, compress_note, client_error)
    VALUES
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
@@ -106,7 +108,7 @@ const insertStmt = db.prepare(
     @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
     @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent, @first_token_ms,
-    @upstream_encoding, @upstream_raw_bytes, @upstream_sent_bytes, @compress_ms, @compress_status, @compress_note)`,
+    @upstream_encoding, @upstream_raw_bytes, @upstream_sent_bytes, @compress_ms, @compress_status, @compress_note, @client_error)`,
 )
 
 type StorageSettings = Pick<Settings, 'store_request_body' | 'store_response_body'>
@@ -185,6 +187,7 @@ export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promis
       compress_ms: e.compress_ms ?? null,
       compress_status: e.compress_status ?? null,
       compress_note: e.compress_note ?? null,
+      client_error: e.client_error ?? null,
       ...refs,
     })
   } finally {

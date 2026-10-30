@@ -7,7 +7,7 @@ import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel, uaBlacklistBlock } from './selector'
-import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry } from './failover'
+import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry, statusOnlyMessage } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
@@ -118,9 +118,14 @@ function errorOutcome(error: unknown): Outcome {
   return { status: 'error', code, error: message, kind: errorKind(error), usage: emptyUsage() }
 }
 
-/** 返回给客户端的错误信息：公网端口脱敏，日志仍记录原文 */
-function clientError(caller: Caller, outcome: Outcome): string {
-  return caller.surface === 'public' ? sanitizePublicError(outcome.kind ?? 'local', outcome.error!) : outcome.error!
+/** 返回给客户端的错误信息：公网端口脱敏，开启「脱敏上游报错」后上游与网络错误只留状态码；日志仍记录原文 */
+function clientError(caller: Caller, outcome: Outcome, settings: Settings): string {
+  if (caller.surface !== 'public') return outcome.error!
+  const kind = outcome.kind ?? 'local'
+  if (settings.mask_upstream_errors && kind !== 'local' && !parseAutoBanCodes(settings.mask_upstream_errors_exclude_codes).includes(outcome.code)) {
+    return statusOnlyMessage(outcome.code)
+  }
+  return sanitizePublicError(kind, outcome.error!)
 }
 
 /** 计量 IR 增量 / 消息里的全部输出文本（正文、拒绝、推理、工具参数） */
@@ -262,10 +267,13 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         rawJson ??= JSON.stringify(ctx.rawBody)
         headersJson ??= JSON.stringify(ctx.rawHeaders)
       }
+      // 最终结果的错误被脱敏改写时记下客户端实际收到的文本，日志页据此标「已改写」
+      const shown = !intermediate && outcome.status === 'error' ? clientError(caller, outcome, settings) : undefined
       return {
         request_id: requestId, channel_id: state?.channel.id ?? null, channel_name: state?.channel.name ?? null,
         entry_format: ctx.entryFormat, model: loggedModel, upstream_model: state?.upstreamModel ?? null,
         status: outcome.status, status_code: outcome.code, error_message: outcome.error,
+        client_error: shown !== undefined && shown !== outcome.error ? shown : null,
         latency_ms: intermediate ? attemptMs : lifecycle.elapsed, attempt_latency_ms: attemptMs,
         first_token_ms: state?.firstTokenAt === undefined ? null : Math.round(state.firstTokenAt - lifecycle.started),
         ...outcome.usage, ...cacheParts(outcome.usage), retry_count: Math.max(0, attempts - 1), is_stream: ctx.stream, is_retry: intermediate,
@@ -395,7 +403,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
         if (!switchKey && !retrySame && !nextChannel) {
           await recordFailures(failures.slice(0, -1))
-          if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final))
+          if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final, settings))
           return
         }
         await recordFailures(failures)
@@ -407,10 +415,10 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       tried.add(channel.id)
     }
     lifecycle.signal.throwIfAborted()
-    sendErrorMessage(ctx, final.code, clientError(caller, final))
+    sendErrorMessage(ctx, final.code, clientError(caller, final, settings))
   } catch (error) {
     final = errorOutcome(lifecycle.signal.aborted ? lifecycle.signal.reason : error)
-    if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final))
+    if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final, settings))
   } finally {
     keepAlive?.dispose()
     bill(last, final.usage)
@@ -628,7 +636,7 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
   } catch (caught) {
     const error = state.lifecycle.signal.aborted ? state.lifecycle.signal.reason : caught
     if (opened && !errorForwarded && !requestSignal.aborted) {
-      try { await write(encoder.fail(clientError(caller, errorOutcome(error)))) } catch {}
+      try { await write(encoder.fail(clientError(caller, errorOutcome(error), settings))) } catch {}
     }
     throw error
   } finally {

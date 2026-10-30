@@ -112,6 +112,8 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
   check(validBackground(merged.portal_background), 'portal_background', '须留空，或为不含引号、括号、空白的 http(s) 图片链接')
   check(typeof merged.portal_notice === 'string' && merged.portal_notice.length <= 20_000, 'portal_notice', '须为不超过 20000 字符的字符串')
   check(typeof merged.auto_ban_codes === 'string' && STATUS_CODES.test(merged.auto_ban_codes), 'auto_ban_codes', '须为逗号分隔的 HTTP 状态码或空串')
+  check(typeof merged.mask_upstream_errors_exclude_codes === 'string' && STATUS_CODES.test(merged.mask_upstream_errors_exclude_codes),
+    'mask_upstream_errors_exclude_codes', '须为逗号分隔的 HTTP 状态码或空串')
   // 上游请求体压缩；运行时是否支持 zstd 不在这里检查，由 runtime_unsupported 兜底
   check(COMPRESSION_ALGORITHMS.has(merged.upstream_compression_default), 'upstream_compression_default', '须为 gzip / br / zstd')
   check(!(merged.upstream_compression_zstd_window_log > 0 && merged.upstream_compression_zstd_window_log < 10), 'upstream_compression_zstd_window_log', '须为 0 或 10～23 的整数')

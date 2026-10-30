@@ -1,3 +1,4 @@
+import { STATUS_CODES } from 'node:http'
 import net from 'node:net'
 import { RequestStopped } from './requestLifecycle'
 
@@ -91,6 +92,11 @@ export function errorKind(error: unknown): ErrorKind {
   if (error instanceof UpstreamError || error instanceof UpstreamResponseError) return 'upstream'
   if (error instanceof LocalRequestError || error instanceof CandidateError || error instanceof RequestStopped) return 'local'
   return 'network'
+}
+
+/** 只保留状态码与标准短语，如「503 Service Unavailable」；非标准状态码只留数字 */
+export function statusOnlyMessage(code: number): string {
+  return STATUS_CODES[code] ? `${code} ${STATUS_CODES[code]}` : String(code)
 }
 
 /** 公网端口返回给客户端前的错误信息脱敏；日志仍记录原文 */

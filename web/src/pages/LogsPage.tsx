@@ -282,7 +282,7 @@ export function LogsPage() {
                   <span className={`ah-fmt-badge ${l.entry_format}`}>{fmtShort(l.entry_format)}</span>
                   {l.model || '-'}
                   {l.is_stream ? <span className="ah-tag" style={{ marginLeft: 6 }}>stream</span> : null}
-                  {l.preprocessed ? <span className="ah-tag ah-tag-pp" style={{ marginLeft: 6 }}>已改写</span> : null}
+                  {l.preprocessed || l.client_error ? <span className="ah-tag ah-tag-pp" style={{ marginLeft: 6 }}>已改写</span> : null}
                   {l.pseudo_thinking ? <span className="ah-tag ah-tag-think" style={{ marginLeft: 6 }}>伪思考</span> : null}
                   {l.retry_count ? <span className="ah-tag ah-tag-warn" style={{ marginLeft: 6 }}>×{l.retry_count}</span> : null}
                 </span>

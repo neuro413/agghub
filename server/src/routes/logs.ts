@@ -71,7 +71,7 @@ logsRouter.get('/', (req, res) => {
               response_body_truncated, upstream_response_body_truncated,
               prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
-              retry_count, is_stream, error_message, preprocessed, pseudo_thinking,
+              retry_count, is_stream, error_message, client_error, preprocessed, pseudo_thinking,
               source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, ${USER_NAME}, ${USER_DISCORD_NAME}
        FROM request_logs ${whereSql}
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,

@@ -93,6 +93,8 @@ export interface LogItem {
   retry_count: number
   is_stream: number
   error_message: string | null
+  /** 实际返回客户端的错误信息，仅被脱敏改写时有值 */
+  client_error: string | null
   preprocessed: number
   pseudo_thinking: number
   /** 调用来源；旧日志为 null，按 owner 显示 */

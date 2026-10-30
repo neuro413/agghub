@@ -336,6 +336,8 @@ export interface LogRow {
   is_stream: number
   is_retry: number
   error_message: string | null
+  /** 实际返回客户端的错误信息，仅与 error_message 不同（被脱敏改写）时记录 */
+  client_error: string | null
   request_headers: string | null
   request_body: string | null
   response_body: string | null
@@ -388,6 +390,10 @@ export interface Settings {
   image_max_bytes: number
   auto_ban: boolean
   auto_ban_codes: string
+  /** 公网端口的上游 / 网络错误只向客户端返回状态码 */
+  mask_upstream_errors: boolean
+  /** 不脱敏的状态码，逗号分隔 */
+  mask_upstream_errors_exclude_codes: string
   log_retention_days: number
   store_request_body: boolean
   store_response_body: boolean
