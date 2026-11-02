@@ -3,11 +3,12 @@ import { db } from '../db'
 import { compressText, decompressText } from '../stats/blobCodec'
 import type { ReasoningStoreItem } from '../convert/responses'
 
-// 两类记录共用一张表：
+// 三类记录共用一张表：
 //   kind='text'       伪思考：签名 ↔ 思维链正文（thinking 列）
 //   kind='responses'  Responses 上游推理组：签名 ↔ payload JSON { items: [{ id, encrypted, followers }] }
 //                     供 Anthropic 客户端把 thinking 块签名回传后还原成 reasoning 项
 //                     payload 以 compressText 压缩存为 BLOB
+//   kind='gemini'     Gemini 上游工具调用：工具调用 id ↔ thoughtSignature 原文（thinking 列）
 // 签名除 digest 外的字节都能由 digest 推出，表里只存 32 字节 digest，对外仍收发完整签名。
 // 旧版以整段签名文本为主键，不再自动迁移，需停服后用独立脚本转换。
 const storeColumns = db.prepare("SELECT name FROM pragma_table_info('thinking_store')").pluck().all() as string[]
@@ -112,6 +113,24 @@ export function lookupReasoning(signature: string): ReasoningStoreItem[] | null 
   const row = lookupStmt.get(digest) as { kind: string; payload: Buffer | string | null } | undefined
   if (row?.kind !== 'responses' || !row.payload) return null
   return JSON.parse(decompressText(row.payload)).items ?? null
+}
+
+// ── Gemini thoughtSignature 暂存 ─────────────────────────
+// 键为 Gemini 工具调用 id + 函数名，签名原文存在 thinking 列。OpenAI 客户端没有回传签名的字段，
+// 只会原样带回 tool_call id 与函数名；Anthropic 客户端丢弃 thinking 块时同样靠它兜底。
+
+const geminiDigest = (callId: string, name: string): Buffer => digestOf(`gemini:${callId}\n${name}`)
+
+export function saveGeminiSignature(callId: string, name: string, signature: string, maxEntries: number): void {
+  if (!callId || !signature) return
+  upsertStmt.run(geminiDigest(callId, name), signature, Date.now(), 'gemini', null)
+  evict('gemini', maxEntries)
+}
+
+export function lookupGeminiSignature(callId: string, name: string): string | null {
+  if (!callId) return null
+  const row = lookupStmt.get(geminiDigest(callId, name)) as { thinking: string; kind: string } | undefined
+  return row?.kind === 'gemini' && row.thinking ? row.thinking : null
 }
 
 export function count(): number {

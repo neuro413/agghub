@@ -15,6 +15,7 @@ import { estimatePromptTokens, parseSSEEvents } from '../convert/ir'
 import * as oaiConv from '../convert/openai'
 import * as anthConv from '../convert/anthropic'
 import * as respConv from '../convert/responses'
+import * as gemConv from '../convert/gemini'
 import { cacheParts, emptyUsage, maxUsage, rawWireUsage, sumUsage } from '../convert/usage'
 import type { Caller, Channel, ChannelGroup, EntryFormat, IRUsage, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
@@ -43,6 +44,10 @@ import type { CompressionInfo, RequestCompressor } from './upstreamCompression'
 respConv.setReasoningStore({
   save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
   lookup: sig => thinkingStore.lookupReasoning(sig),
+})
+gemConv.setSignatureStore({
+  save: (callId, name, signature) => thinkingStore.saveGeminiSignature(callId, name, signature, getSettings().reasoning_store_max),
+  lookup: (callId, name) => thinkingStore.lookupGeminiSignature(callId, name),
 })
 
 export interface RelayContext {

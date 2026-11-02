@@ -1,7 +1,7 @@
 import { contentToText, genId, hashIdentifier, nowSec, parseDataUrl, parseToolArgs, splitContent } from './ir'
 import type { StreamDecoder, StreamEncoder } from './ir'
 import { claudeStopToFinish, finishToClaudeStop } from './reasonmap'
-import { claudeThinkingMode, effortForClaude, effortToBudget, reasoningFromClaude, reasoningItemsText } from './reasoning'
+import { claudeThinkingMode, effortForClaude, effortToBudget, isGeminiSignature, reasoningFromClaude, reasoningItemsText } from './reasoning'
 import { mergeClaudeUsage, usageFromClaude, usageToClaude } from './usage'
 import type { IRReasoningItem } from '../types'
 
@@ -61,6 +61,8 @@ function reasoningItemsToBlocks(items: IRReasoningItem[] | undefined): any[] {
   const blocks: any[] = []
   for (const it of items || []) {
     if (!it) continue
+    // Gemini 上游签发的签名 Claude 无法校验，整块丢弃
+    if (isGeminiSignature(it.signature)) continue
     if (it.redacted) {
       blocks.push({ type: 'redacted_thinking', data: it.redacted })
     } else if (it.signature) {
@@ -430,6 +432,15 @@ export function createStreamDecoder(model: string): StreamDecoder {
   }
 }
 
+/** 直通 Claude 时剔除 Gemini 上游签发的 thinking 块（客户端中途换模型时会带上，Claude 校验签名必然 400）*/
+export function stripGeminiThinking(body: any): void {
+  for (const msg of Array.isArray(body?.messages) ? body.messages : []) {
+    if (msg?.role !== 'assistant' || !Array.isArray(msg.content)) continue
+    const kept = msg.content.filter((b: any) => !(b?.type === 'thinking' && isGeminiSignature(b.signature)))
+    if (kept.length < msg.content.length) msg.content = kept.length ? kept : [{ type: 'text', text: '...' }]
+  }
+}
+
 /** 从 metadata.user_id 派生缓存分桶种子：Claude Code 的 JSON 形态取稳定的 device_id，其余原样 */
 function cacheKeySeed(userId: unknown): string {
   const s = String(userId)
@@ -548,6 +559,11 @@ export function parseRequest(body: any): { ir: any; stream: boolean } {
   }
   const reasoning = reasoningFromClaude(body)
   if (reasoning) ir.reasoning = reasoning
+  // 结构化输出 output_config.format（早期 beta 为顶层 output_format）→ IR response_format
+  const format = body.output_config?.format ?? body.output_format
+  if (format?.type === 'json_schema' && format.schema && typeof format.schema === 'object') {
+    ir.response_format = { type: 'json_schema', json_schema: { name: 'output', schema: format.schema } }
+  }
 
   if (Array.isArray(body.tools) && body.tools.length) {
     const tools: any[] = []

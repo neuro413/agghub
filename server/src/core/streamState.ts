@@ -1,6 +1,7 @@
 import type { WireFormat } from '../types'
 import { extractUpstreamMessage, UpstreamError } from './failover'
 import { streamEventError, streamEventHasContent } from '../convert/responses'
+import { isBlockFinish } from '../convert/gemini'
 
 export interface SSEEvent { event: string | null; data: string }
 
@@ -61,9 +62,14 @@ export class StreamState {
       }
       this.content ||= streamEventHasContent(data)
     } else {
+      // 请求整体被拦截时没有候选，只有 promptFeedback.blockReason；解码器会补发拒绝说明
+      if (!data?.candidates?.length && data?.promptFeedback?.blockReason) {
+        this.finished = true
+        this.content = true
+      }
       for (const candidate of data?.candidates || []) {
         this.finished ||= !!candidate.finishReason
-        this.content ||= !!candidate.content?.parts?.some((part: any) => part.text || part.functionCall || part.inlineData)
+        this.content ||= isBlockFinish(candidate.finishReason) || !!candidate.content?.parts?.some((part: any) => part.text || part.functionCall || part.inlineData)
       }
     }
     return data

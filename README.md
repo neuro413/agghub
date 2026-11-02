@@ -530,7 +530,7 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 ### 通用能力
 
 - 支持常用文本对话、函数工具定义 / 调用 / 结果、图片输入及可映射的流式增量。
-- Anthropic 与 Responses 之间可转换部分文件内容字段；上游文件 ID 无法跨厂商自动解析或上传。Gemini 转换侧主要支持文本和图片输入。
+- Anthropic 与 Responses 之间可转换部分文件内容字段；上游文件 ID 无法跨厂商自动解析或上传。Gemini 转换侧支持文本、图片和文件（base64 转 `inlineData`，URL 转 `fileData`），仅有文件 ID 的部件无法发给 Gemini；工具结果里的图片在 Gemini 3+ 放进 `functionResponse.parts`，更早的模型随工具结果单独追加。
 - 多候选输出、复杂工具 Schema、音视频和厂商扩展字段不保证等价转换。`cache_control` 等缓存控制字段可能丢失；缓存 Token 计数的转换单独处理。
 - 当前没有 Gemini 原生入口，也没有实现完整的 Responses 查询、取消、删除、Conversations 或 Files API。
 
@@ -539,7 +539,7 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 - Responses → Responses 保留原生字段，由上游执行有状态会话及内置工具；模型映射和已启用的预处理仍会生效。
 - Responses 转其他协议时，`previous_response_id`、`conversation`、`prompt`、`context_management`，以及 `item_reference` / `compaction` / `compaction_trigger` 输入项无法转换，会返回 `400`。
 - 网关没有按 response ID 或 conversation 绑定渠道。选到不兼容渠道后也不会自动寻找另一个 Responses 渠道；有状态请求应固定到持有相应状态的 Responses 上游。
-- Responses `web_search` 与 Claude `web_search_*` 的部分工具定义可以双向映射；搜索调用历史、结果块、引用及其他托管工具不保证转换。Chat / Gemini 路径不消费这套托管工具定义。
+- Responses `web_search` 与 Claude `web_search_*` 的部分工具定义可以双向映射；搜索调用历史、结果块、引用及其他托管工具不保证转换。Chat 路径不消费这套托管工具定义；Gemini 路径在没有函数工具时把 `web_search` 映射为 `googleSearch`，与函数工具同时出现时丢弃。
 - Responses `custom` 工具可在部分路径映射为函数参数包装，grammar 等约束不会完整保留。
 
 ### thinking / reasoning 往返
@@ -548,7 +548,8 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 - **跨格式构造 Responses 上游请求时**默认使用 `store: false`，并自动追加 `include: ["reasoning.encrypted_content"]`。显式 `store: true` 时不自动追加；Responses 同格式直通不会补这两个默认值。
 - Responses 相邻的一组 reasoning 项会合并为一个 Anthropic thinking 块，遇消息或工具调用时分组；回传时利用本地记录尝试恢复原有项及顺序。
 - 推理项含密文但没有可读摘要时，thinking 文本使用字符串 `"null"` 占位。暂存淘汰或无法匹配后继内容时，部分推理项无法恢复。
-- Gemini 当前提取返回的 thought 文本，尚未实现 `thinkingConfig` / `thoughtSignature` 的完整往返。
+- Gemini 上游：推理意图映射为 `thinkingConfig`（Gemini 3+ 用 `thinkingLevel`，只发 LOW / MEDIUM / HIGH，3 Pro 的 MEDIUM 改发 HIGH；2.5 用 `thinkingBudget` 并按型号钳制范围），请求了推理时附带 `includeThoughts` 返回思考摘要；无法从模型名识别版本时不发 `thinkingConfig`。
+- Gemini `functionCall` 上的 `thoughtSignature` 会封装进推理项签名（Anthropic / Responses 客户端随 thinking 块带回），同时按工具调用 ID 暂存在本地（OpenAI Chat 客户端只需带回 `tool_call_id`）；重建请求时挂回原 `functionCall`。签名缺失时 Gemini 3+ 使用官方占位签名跳过校验。带 Gemini 签名的 thinking 块发往 Claude 时会被剔除。
 - 上游 `store: false` 不会关闭 AggHub 自身的日志和推理暂存；本地封装、哈希及压缩也不提供数据加密保护。
 
 ## WebUI、统计与请求日志
@@ -632,7 +633,7 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 | `drop_thinking` / `drop_redacted_thinking` | 关闭 | 历史思考清理 |
 | `pseudo_thinking_enabled` | 关闭 | 伪思考处理 |
 | `pseudo_thinking_store_max` | `5000` | 伪思考暂存条数上限 |
-| `reasoning_store_max` | `2000` | Responses 推理密文暂存条数上限 |
+| `reasoning_store_max` | `2000` | Responses 推理密文暂存条数上限；Gemini 签名暂存另按同一上限独立计数 |
 | `reasoning_auto_adjust` | 开启 | 允许跨格式时自动调整 Claude 推理相关参数 |
 | `upstream_compression_enabled` | 关闭 | 上游请求体压缩总开关 |
 | `upstream_compression_default` | `zstd` | 渠道「跟随全局」时使用的算法 |
