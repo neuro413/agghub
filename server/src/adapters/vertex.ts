@@ -52,6 +52,7 @@ export const vertexAdaptor: Adaptor = {
 
   // 只有 Claude 会走直通（Gemini 不是入口格式）
   buildPassthroughRequest(channel, rawBody, upstreamModel, stream, rawHeaders) {
+    anth.stripGeminiThinking(rawBody)
     const { model: _model, ...body } = rawBody
     const request = vertexRequest(channel, upstreamModel, stream, { ...body, anthropic_version: 'vertex-2023-10-16', stream })
     const beta = rawHeaders?.['anthropic-beta']

@@ -15,6 +15,7 @@ export const anthropicAdaptor: Adaptor = {
   wireFormat: 'anthropic',
   buildRequest: (channel, ir, upstreamModel, stream) => request(channel, { ...anth.buildRequest(ir, upstreamModel), stream }),
   buildPassthroughRequest(channel, rawBody, upstreamModel, stream, rawHeaders) {
+    anth.stripGeminiThinking(rawBody)
     const req = request(channel, { ...rawBody, model: upstreamModel, stream })
     // 转发客户端的版本/beta 头（如 prompt caching、扩展思考等能力开关）；strip_headers 开启时只保留必要头
     if (!channel.strip_headers) {

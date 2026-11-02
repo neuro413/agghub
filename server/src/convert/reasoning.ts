@@ -152,6 +152,30 @@ export function decodeReasoningItem(encrypted: any): IRReasoningItem | null {
   }
 }
 
+// ─────────────────────────── Gemini thoughtSignature 封装 ───────────────────────────
+// Gemini 上游的思考签名借推理项的 signature 字段在客户端往返：加前缀并记下所属工具调用 id，
+// 回到 Gemini 时按 id 挂回 functionCall part；发往 Claude 时据前缀剔除，避免签名校验 400。
+// 格式：agghub-gem1:<callId>:<signature>（callId 只含 [A-Za-z0-9_-]，签名是 base64，均不含冒号）
+
+const GEMINI_SIG_MAGIC = 'agghub-gem1:'
+
+export function encodeGeminiSignature(signature: string, callId: string): string {
+  return `${GEMINI_SIG_MAGIC}${callId}:${signature}`
+}
+
+/** 解出 agghub 封装的 Gemini 签名；不是本网关产物时返回 null */
+export function decodeGeminiSignature(value: unknown): { callId: string; signature: string } | null {
+  if (typeof value !== 'string' || !value.startsWith(GEMINI_SIG_MAGIC)) return null
+  const rest = value.slice(GEMINI_SIG_MAGIC.length)
+  const sep = rest.indexOf(':')
+  if (sep <= 0 || sep === rest.length - 1) return null
+  return { callId: rest.slice(0, sep), signature: rest.slice(sep + 1) }
+}
+
+export function isGeminiSignature(value: unknown): boolean {
+  return typeof value === 'string' && value.startsWith(GEMINI_SIG_MAGIC)
+}
+
 /** 由签名 / 密文派生稳定的 rs_ 项 id：同一块每次生成相同 id */
 export function stableReasoningId(seed: string): string {
   return 'rs_' + crypto.createHash('sha256').update(seed, 'utf8').digest('hex').slice(0, 24)
