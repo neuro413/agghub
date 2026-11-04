@@ -5,6 +5,7 @@ import { cleanupOldLogs } from './stats/recorder'
 import { recoverChannels } from './core/channelHealth'
 import { cleanupSessions } from './core/sessions'
 import { startProbes } from './core/availability'
+import { initPool } from './pool'
 
 if (PUBLIC_PORT && PUBLIC_PORT === PORT) throw new Error('AGGHUB_PUBLIC_PORT 不能与 PORT 相同')
 
@@ -13,6 +14,9 @@ const initialSettings = getSettings()
 if (initialSettings.portal_register_enabled && initialSettings.portal_concurrency === 0) {
   console.warn('[agghub] 门户已开放注册但并发上限为 0（不限），用户可透支额度；建议在设置页设为非零值')
 }
+
+// 代理池：加载节点，总开关开着时拉起 mihomo
+initPool()
 
 const lan = createApp('lan')
 const onLanListening = () => {

@@ -1894,3 +1894,148 @@
   border: 0;
   background: var(--line);
 }
+
+/* ── 代理池 ─────────────────────────────────────── */
+.ah-pool-tabs {
+  margin-bottom: var(--sp-4);
+}
+.ah-pool-alert {
+  font-size: var(--fs-sm);
+  color: var(--err);
+  background: var(--err-bg);
+  border-radius: var(--r-md);
+  padding: 8px 12px;
+  margin-bottom: var(--sp-3);
+  word-break: break-word;
+}
+.ah-pool-warn {
+  color: var(--warn);
+}
+.ah-pool-logs {
+  margin-top: var(--sp-3);
+  max-height: 320px;
+  font-size: 12px;
+}
+.ah-pool-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-4);
+}
+.ah-pool-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line);
+  margin: 0 4px;
+}
+.ah-pool-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+.ah-pool-check input,
+.c-pool-check input {
+  accent-color: var(--orange-500);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.ah-pool-progress {
+  padding: var(--sp-3) var(--sp-4);
+}
+.ah-pool-row {
+  cursor: default;
+}
+.ah-pool-type {
+  background: var(--orange-50);
+  color: var(--orange-700);
+  text-transform: lowercase;
+}
+.ah-pool-delay.is-ok {
+  color: var(--ok);
+}
+.ah-pool-delay.is-warn {
+  color: var(--warn);
+}
+.ah-pool-delay.is-err {
+  color: var(--err);
+}
+.c-pool-check {
+  width: 22px;
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.c-pool-name,
+.c-sub-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.c-pool-src {
+  width: 120px;
+  flex: none;
+}
+.c-pool-delay {
+  width: 64px;
+  flex: none;
+  text-align: right;
+}
+.c-pool-state {
+  width: 118px;
+  flex: none;
+}
+.c-pool-count {
+  width: 78px;
+  flex: none;
+  text-align: right;
+}
+.c-pool-flight {
+  width: 36px;
+  flex: none;
+  text-align: right;
+}
+.c-pool-act {
+  width: 160px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.c-pool-act .ah-iconbtn {
+  width: 32px;
+  height: 32px;
+}
+.c-pool-act .ah-toggle {
+  margin: 0 4px;
+}
+.c-sub-count {
+  width: 56px;
+  flex: none;
+  text-align: right;
+}
+.c-sub-auto {
+  width: 100px;
+  flex: none;
+}
+.c-sub-last {
+  width: 200px;
+  flex: none;
+  min-width: 0;
+}
+@media (max-width: 900px) {
+  .c-pool-src,
+  .c-pool-count,
+  .c-pool-flight,
+  .c-sub-auto {
+    display: none;
+  }
+}

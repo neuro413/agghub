@@ -7,6 +7,8 @@ import type { UpstreamContext } from '../adapters/base'
 import { resolveImageUrls } from './imageResolver'
 import { getProxyAgent } from './proxy'
 import { candidateGroups, candidatesForModel, resolveUpstreamModel, selectChannel, uaBlacklistBlock } from './selector'
+import { acquireNode, noNodeMessage, type Lease } from '../pool/select'
+import { getPoolSettings } from '../pool/settings'
 import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry, statusOnlyMessage } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
@@ -102,6 +104,8 @@ interface AttemptState extends UpstreamContext {
   sent?: boolean
   /** 上游请求体压缩明细，写进日志 */
   compression?: CompressionInfo
+  /** 代理池节点名；本次尝试换过节点时按顺序用「 → 」连接 */
+  proxyNode?: string
 }
 
 type Description = Pick<AttemptState, 'adaptor' | 'upstreamModel' | 'upstreamWire' | 'passthrough'>
@@ -190,10 +194,11 @@ export function applyUserAgent(headers: Record<string, string>, channel: Channel
   else if (!channel.strip_headers && rawHeaders?.['user-agent']) headers['user-agent'] = String(rawHeaders['user-agent'])
 }
 
-async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller): Promise<UpstreamRequest> {
+async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: Settings, caller: Caller, proxyUrl: string | undefined): Promise<UpstreamRequest> {
   const { channel, adaptor, upstreamModel, upstreamWire, lifecycle } = state
   if (adaptor.prepareChannel) {
-    await adaptor.prepareChannel(channel, settings.proxy_url || undefined, lifecycle.signal)
+    // Vertex 换 token 与正式请求走同一出口（代理池节点或全局代理）
+    await adaptor.prepareChannel(channel, proxyUrl, lifecycle.signal)
     lifecycle.touch()
   }
   const meta = {
@@ -289,6 +294,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         response_body_truncated: state?.response.truncated, upstream_response_body_truncated: state?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
         user_id: caller.user?.id ?? null, group_name: (state && groupOf.get(state.channel.id)?.name) ?? null, channel_key: state?.keyLabel ?? null,
+        proxy_node: state?.proxyNode ?? null,
         user_agent: typeof ctx.rawHeaders?.['user-agent'] === 'string' ? ctx.rawHeaders['user-agent'] : null,
         upstream_encoding: state?.compression?.encoding, upstream_raw_bytes: state?.compression?.raw_bytes, upstream_sent_bytes: state?.compression?.sent_bytes,
         compress_ms: state?.compression?.ms, compress_status: state?.compression?.status, compress_note: state?.compression?.note,
@@ -450,20 +456,60 @@ async function runAttempt(
 ): Promise<Outcome> {
   const attempt = state.lifecycle
   let response: globalThis.Response | undefined
+  // 代理池租约；换节点时整体替换，放在对象里便于闭包读取当前值
+  const pool: { lease: Lease | null } = { lease: null }
   try {
+    const { channel } = state
+    const triedNodes = new Set<number>()
+    const nodeNames: string[] = []
+    const takeNode = (): boolean => {
+      pool.lease?.release()
+      pool.lease = acquireNode({ include: channel.proxy_pool_include, exclude: channel.proxy_pool_exclude }, triedNodes)
+      if (!pool.lease) return false
+      triedNodes.add(pool.lease.node.id)
+      nodeNames.push(pool.lease.node.name)
+      state.proxyNode = nodeNames.join(' → ').slice(0, 500)
+      return true
+    }
+    // 池里没有可用节点：本次尝试失败，按原逻辑换渠道（不回退直连）
+    if (channel.proxy_pool && !takeNode()) throw new CandidateError(noNodeMessage())
+    const nodeRetries = channel.proxy_pool ? getPoolSettings().node_retry_times : 0
     // 压缩放在参数规则、单 role、UA 覆盖都执行完之后
-    const request = await prepareRequest(ctx, state, settings, caller)
+    const request = await prepareRequest(ctx, state, settings, caller, pool.lease ? pool.lease.url : settings.proxy_url || undefined)
     const encoded = await compressor.encode(state.channel, request.body, settings)
     const compression = state.compression = encoded.info
     attempt.touch()
     const send = (body: string | Buffer, encoding: string | null) => {
       const headers = encoding ? { ...request.headers, 'content-encoding': encoding } : request.headers
       const options: any = { method: 'POST', headers, body, signal: attempt.signal }
-      if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
+      if (pool.lease) options.dispatcher = pool.lease.dispatcher
+      else if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
       return fetch(request.url, options)
     }
     state.sent = true
-    response = await send(encoded.body, encoded.encoding)
+    // 节点网络错误 / 上游 429、403：节点冷却并换下一个节点重发，不消耗同渠道重试次数
+    for (let n = 0; ; n++) {
+      try {
+        response = await send(encoded.body, encoded.encoding)
+      } catch (error) {
+        const current = pool.lease
+        if (!current || attempt.signal.aborted) throw error
+        current.fail('network', { message: error instanceof Error ? error.message : String(error) })
+        if (n >= nodeRetries || !takeNode()) throw error
+        attempt.touch()
+        continue
+      }
+      const current = pool.lease
+      if (current && (response.status === 429 || response.status === 403)) {
+        current.fail('limit', { status: response.status, retryAfterMs: parseRetryAfter(response.headers.get('retry-after')) })
+        if (n < nodeRetries && takeNode()) {
+          await response.body?.cancel().catch(() => {})
+          attempt.touch()
+          continue
+        }
+      } else current?.success()
+      break
+    }
     let errorText: string | undefined
     let errorTruncated = false
     if (!response.ok && encoded.algorithm) {
@@ -505,8 +551,13 @@ async function runAttempt(
       ? await pipeResponse(ctx, state, response, settings, requestSignal, caller, keepAlive)
       : await sendResponse(ctx, state, response, settings)
   } catch (caught) {
+    // 流式中途断开等网络错误也记到节点上（同一租约只记一次）
+    if (pool.lease && !attempt.signal.aborted && errorKind(caught) === 'network') {
+      pool.lease.fail('network', { message: caught instanceof Error ? caught.message : String(caught) })
+    }
     throw attempt.signal.aborted ? attempt.signal.reason : caught
   } finally {
+    pool.lease?.release()
     state.elapsedMs = attempt.elapsed
     attempt.dispose()
     if (response?.body && !response.body.locked) await response.body.cancel().catch(() => {})

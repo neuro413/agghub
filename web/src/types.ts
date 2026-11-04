@@ -8,6 +8,10 @@ export type {
   Announcement, AnnouncementInput, AnnouncementType,
   CompressionAlgorithm, RequestCompression, CompressStatus, CompressionUnsupported, CompressionTestResult, CompressionTestItem,
 } from '../../server/src/types'
+import type { CoreStatus as PoolCoreStatusT, PoolSettings as PoolSettingsT, TestProgress as PoolTestProgressT } from '../../server/src/pool/types'
+export type {
+  PoolSettings, NodeView as PoolNodeView, PoolSubscription, CoreStatus as PoolCoreStatus, TestProgress as PoolTestProgress, DelayResult,
+} from '../../server/src/pool/types'
 
 /** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数；附带记忆期内被判定不支持的压缩算法 */
 export type Channel = ServerChannel & {
@@ -113,6 +117,8 @@ export interface LogItem {
   group_name: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值） */
   channel_key: string | null
+  /** 代理池节点名；本次尝试换过节点时用「 → 」连接 */
+  proxy_node: string | null
   /** 上游请求体压缩（列表接口不返回，只在详情里有） */
   upstream_encoding?: string | null
   upstream_raw_bytes?: number | null
@@ -159,4 +165,44 @@ export interface ThinkingDetail {
   signature: string
   thinking: string
   length: number
+}
+
+// ── 代理池 ──
+export interface PoolCounts {
+  total: number
+  enabled: number
+  available: number
+  cooling: number
+  invalid: number
+}
+
+export interface PoolStatus {
+  /** 不含 secret */
+  settings: Omit<PoolSettingsT, 'secret'>
+  core: PoolCoreStatusT
+  counts: PoolCounts
+  test: PoolTestProgressT
+}
+
+export interface PoolImportResult {
+  added: number
+  updated: number
+  total: number
+  errors: string[]
+}
+
+export interface PoolMatch {
+  matched: number
+  available: number
+  running: boolean
+  node_retry_times: number
+}
+
+export type PoolBatchAction = 'enable' | 'disable' | 'delete' | 'reset'
+
+export interface PoolSubscriptionInput {
+  name: string
+  url: string
+  user_agent: string
+  update_interval: number
 }

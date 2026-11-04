@@ -181,6 +181,19 @@ function ChannelCard({
             <div className="v" style={{ color: 'var(--warn)' }}>{c.compression_unsupported.map((u) => u.algorithm).join(' / ')}</div>
           </div>
         )}
+        {c.proxy_pool && (
+          <div
+            className="ah-meta-box"
+            title={
+              c.proxy_pool_include || c.proxy_pool_exclude
+                ? [c.proxy_pool_include && `包含：${c.proxy_pool_include}`, c.proxy_pool_exclude && `排除：${c.proxy_pool_exclude}`].filter(Boolean).join('\n')
+                : '使用代理池全部节点'
+            }
+          >
+            <div className="k">代理池</div>
+            <div className="v">{c.proxy_pool_include || c.proxy_pool_exclude ? '按关键词' : '全部'}</div>
+          </div>
+        )}
       </div>
 
       {groups.length > 0 && (

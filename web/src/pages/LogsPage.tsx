@@ -178,7 +178,7 @@ export function LogsPage() {
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             placeholder="搜索模型 / 渠道 / 用户 / IP…"
-            title="可搜索：模型、渠道、上游模型、错误信息、Key 名、门户用户名、Discord 用户名 / ID、客户端 IP、请求 ID"
+            title="可搜索：模型、渠道、上游模型、错误信息、Key 名、门户用户名、Discord 用户名 / ID、客户端 IP、代理节点、请求 ID"
           />
         </div>
         <Dropdown
@@ -297,6 +297,11 @@ export function LogsPage() {
                   {l.group_name && (
                     <span className="ah-tag" style={{ marginLeft: 6 }} title="计费分组">
                       {l.group_name}
+                    </span>
+                  )}
+                  {l.proxy_node && (
+                    <span className="ah-mini ah-faint" style={{ marginLeft: 6 }} title="代理池节点">
+                      🌐 {l.proxy_node}
                     </span>
                   )}
                   {l.quota_points != null && (

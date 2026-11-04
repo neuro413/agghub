@@ -76,6 +76,9 @@ export interface ChannelRow {
   ban_until: number | null
   request_compression: string | null
   always_retry: number
+  proxy_pool: number
+  proxy_pool_include: string | null
+  proxy_pool_exclude: string | null
   created_at: number
   updated_at: number
 }
@@ -121,6 +124,12 @@ export interface Channel {
   request_compression: RequestCompression | null
   /** 一律重试：上游任何 HTTP 错误（含 401/403）都按瞬时错误在本渠道重试，且不因熔断状态码停用渠道或熔断 key */
   always_retry: boolean
+  /** 上游请求经内置 mihomo 代理池的节点发出（全局代理对该渠道不再生效） */
+  proxy_pool: boolean
+  /** 节点名包含关键词（逗号分隔，命中任一），null = 不限 */
+  proxy_pool_include: string | null
+  /** 节点名排除关键词（逗号分隔，命中任一即排除） */
+  proxy_pool_exclude: string | null
   created_at: number
   updated_at: number
 }
@@ -366,6 +375,8 @@ export interface LogRow {
   group_name: string | null
   /** 多 key 渠道本次使用的上游 key（序号 + 脱敏值）；单 key 渠道为 null */
   channel_key: string | null
+  /** 代理池节点名；未走代理池为 null */
+  proxy_node: string | null
   /** 上游请求体的压缩编码，如 zstd-2 w23、gzip-1；未压缩为 null */
   upstream_encoding: string | null
   /** 发往上游的明文字节数 */

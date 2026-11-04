@@ -32,6 +32,17 @@ import type {
   TestResult,
   ThinkingDetail,
   ThinkingEntry,
+  DelayResult,
+  PoolBatchAction,
+  PoolCoreStatus,
+  PoolImportResult,
+  PoolMatch,
+  PoolNodeView,
+  PoolSettings,
+  PoolStatus,
+  PoolSubscription,
+  PoolSubscriptionInput,
+  PoolTestProgress,
 } from '../types'
 
 const BASE = '/api'
@@ -203,4 +214,34 @@ export const api = {
   // ── 参数修改规则试运行 ──
   testParamRule: (data: { rule: ParamRule; body: string }) =>
     req<ParamTestResult>('/preprocess/param-test', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ── 代理池 ──
+  poolStatus: (signal?: AbortSignal) => req<PoolStatus>('/pool/status', { signal }),
+  poolSaveSettings: (patch: Partial<Omit<PoolSettings, 'secret'>>) =>
+    req<PoolStatus>('/pool/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  poolDownloadCore: () => req<{ version: string; core: PoolCoreStatus }>('/pool/core/download', { method: 'POST' }),
+  poolRestartCore: () => req<PoolCoreStatus>('/pool/core/restart', { method: 'POST' }),
+  poolCoreLogs: () => req<{ lines: string[] }>('/pool/core/logs'),
+  poolNodes: (signal?: AbortSignal) => req<{ nodes: PoolNodeView[] }>('/pool/nodes', { signal }),
+  poolNodeRaw: (id: number) => req<{ raw: string | null; config: Record<string, unknown> }>(`/pool/nodes/${id}/raw`),
+  poolImport: (text: string) => req<PoolImportResult>('/pool/nodes/import', { method: 'POST', body: JSON.stringify({ text }) }),
+  poolBatch: (ids: number[], action: PoolBatchAction) =>
+    req<{ ok: boolean; count: number }>('/pool/nodes/batch', { method: 'POST', body: JSON.stringify({ ids, action }) }),
+  poolDeleteDisabled: () => req<{ deleted: number }>('/pool/nodes/delete-disabled', { method: 'POST' }),
+  poolTestNode: (id: number) => req<DelayResult>(`/pool/nodes/${id}/test`, { method: 'POST' }),
+  poolStartTest: (ids: number[] | undefined, disableFailed: boolean) =>
+    req<PoolTestProgress>('/pool/test', { method: 'POST', body: JSON.stringify({ ids, disable_failed: disableFailed }) }),
+  poolTestControl: (action: 'pause' | 'resume' | 'stop') => req<PoolTestProgress>(`/pool/test/${action}`, { method: 'POST' }),
+  poolTestEntry: () => req<DelayResult>('/pool/entry/test', { method: 'POST' }),
+  poolMatch: (include: string, exclude: string, signal?: AbortSignal) =>
+    req<PoolMatch>(`/pool/match?${new URLSearchParams({ include, exclude })}`, { signal }),
+  poolSubscriptions: (signal?: AbortSignal) => req<{ list: PoolSubscription[]; updating: number[] }>('/pool/subscriptions', { signal }),
+  poolCreateSubscription: (data: PoolSubscriptionInput) =>
+    req<PoolSubscription>('/pool/subscriptions', { method: 'POST', body: JSON.stringify(data) }),
+  poolUpdateSubscription: (id: number, data: PoolSubscriptionInput) =>
+    req<PoolSubscription>(`/pool/subscriptions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  poolDeleteSubscription: (id: number, deleteNodes: boolean) =>
+    req<{ ok: boolean }>(`/pool/subscriptions/${id}${deleteNodes ? '?delete_nodes=1' : ''}`, { method: 'DELETE' }),
+  poolRefreshSubscription: (id: number) => req<{ triggered: boolean }>(`/pool/subscriptions/${id}/update`, { method: 'POST' }),
+  poolRefreshAll: () => req<{ triggered: number }>('/pool/subscriptions/update-all', { method: 'POST' }),
 }

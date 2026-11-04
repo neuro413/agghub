@@ -237,6 +237,7 @@ function LogMeta({ detail }: { detail: LogItem }) {
       <span className="sp" style={{ flex: 1 }} />
       <span className="ah-mini ah-muted">{detail.channel_name || '—'}</span>
       {detail.channel_key && <span className="ah-mini ah-muted ah-num" title="多 key 渠道本次使用的上游 key">上游 key：{detail.channel_key}</span>}
+      {detail.proxy_node && <span className="ah-mini ah-muted" title="代理池节点；本次尝试换过节点时按顺序排列">代理节点：{detail.proxy_node}</span>}
       <span className="ah-mini ah-muted">来源：{sourceLabel(detail.source)}</span>
       {detail.user_id != null && <span className="ah-mini ah-muted ah-truncate">用户：{detail.user_name ?? `#${detail.user_id}（已删除）`}</span>}
       {detail.user_discord_name && <span className="ah-mini ah-muted ah-truncate">Discord：{detail.user_discord_name}</span>}

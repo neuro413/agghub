@@ -15,6 +15,7 @@ import { usersRouter } from './routes/users'
 import { groupsRouter } from './routes/groups'
 import { announcementsRouter } from './routes/announcements'
 import { portalRouter } from './routes/portal'
+import { poolRouter } from './routes/pool'
 import { openaiEntry } from './entry/openai'
 import { anthropicEntry } from './entry/anthropic'
 import { responsesEntry } from './entry/responses'
@@ -80,6 +81,7 @@ function createLanApp(): Express {
   app.use('/api/groups', groupsRouter)
   app.use('/api/announcements', announcementsRouter)
   app.use('/api/billing', billingRouter)
+  app.use('/api/pool', poolRouter)
   app.use('/api', metaRouter)
 
   // ── 对外入口：先解析调用方，再在生成接口上做额度预检与限流 ──

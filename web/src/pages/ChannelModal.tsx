@@ -7,7 +7,7 @@ import { Modal } from '../components/Modal'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { fmtBytes } from '../lib/format'
-import type { Channel, ChannelKeyStatus, ChannelType, CompressionTestItem, CompressionTestResult, CompressionUnsupported, KeyMode, RequestCompression, SingleRoleMode } from '../types'
+import type { Channel, ChannelKeyStatus, PoolMatch, ChannelType, CompressionTestItem, CompressionTestResult, CompressionUnsupported, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
 const PLACEHOLDER: Record<ChannelType, string> = {
   openai: 'https://api.openai.com（留空用官方）',
@@ -50,6 +50,9 @@ interface FormState {
   /** '' = 跟随全局 */
   request_compression: '' | RequestCompression
   always_retry: boolean
+  proxy_pool: boolean
+  proxy_pool_include: string
+  proxy_pool_exclude: string
 }
 
 /** 多 key 模式下按行拆分并去重的 key 列表（与后端规则一致） */
@@ -92,6 +95,7 @@ function initForm(c: Channel | null): FormState {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
       exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '', always_retry: false,
+      proxy_pool: false, proxy_pool_include: '', proxy_pool_exclude: '',
     }
   return {
     name: c.name,
@@ -120,6 +124,9 @@ function initForm(c: Channel | null): FormState {
     key_cooldown: String(c.key_cooldown_seconds ?? 300),
     request_compression: c.request_compression ?? '',
     always_retry: !!c.always_retry,
+    proxy_pool: !!c.proxy_pool,
+    proxy_pool_include: c.proxy_pool_include || '',
+    proxy_pool_exclude: c.proxy_pool_exclude || '',
   }
 }
 
@@ -165,6 +172,9 @@ function buildPayload(f: FormState): Partial<Channel> {
     key_cooldown_seconds: Number(f.key_cooldown) || 300,
     request_compression: f.request_compression || null,
     always_retry: f.always_retry,
+    proxy_pool: f.proxy_pool,
+    proxy_pool_include: f.proxy_pool_include.trim() || null,
+    proxy_pool_exclude: f.proxy_pool_exclude.trim() || null,
   }
 }
 
@@ -173,6 +183,63 @@ function keyStateTag(k: ChannelKeyStatus): { cls: string; text: string } {
   if (k.state === 'banned') return { cls: 'ah-tag-err', text: '已熔断' }
   const until = new Date(k.until!).toLocaleString('zh-CN', { hour12: false, month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
   return { cls: 'ah-tag-warn', text: `冷却至 ${until}` }
+}
+
+/** 渠道的代理池开关与节点关键词；关键词变化后防抖查询匹配节点数 */
+function PoolField({
+  enabled,
+  include,
+  exclude,
+  onChange,
+}: {
+  enabled: boolean
+  include: string
+  exclude: string
+  onChange: (patch: Partial<Pick<FormState, 'proxy_pool' | 'proxy_pool_include' | 'proxy_pool_exclude'>>) => void
+}) {
+  const [match, setMatch] = useState<PoolMatch | null>(null)
+  useEffect(() => {
+    if (!enabled) return
+    const ac = new AbortController()
+    const timer = setTimeout(() => {
+      api.poolMatch(include, exclude, ac.signal).then(setMatch).catch(() => {})
+    }, 400)
+    return () => {
+      clearTimeout(timer)
+      ac.abort()
+    }
+  }, [enabled, include, exclude])
+
+  return (
+    <Field
+      label="启用代理池"
+      hint={
+        enabled
+          ? `关键词逗号分隔，命中任一即可，不区分大小写。节点网络错误或上游返回 429/403 时冷却该节点并换下一个，单次尝试最多换 ${match?.node_retry_times ?? 3} 个（在代理池设置里修改）；池中没有可用节点时本次尝试失败并换渠道`
+          : '开启后该渠道的上游请求经内置 mihomo 代理池的节点发出，全局代理对该渠道不再生效'
+      }
+    >
+      <div className="ah-row">
+        <Toggle checked={enabled} onChange={(v) => onChange({ proxy_pool: v })} />
+        <span className="ah-mini ah-muted">{enabled ? '经代理池节点请求上游' : '使用全局代理设置'}</span>
+      </div>
+      {enabled && (
+        <>
+          <div className="ah-grid2" style={{ marginTop: 8 }}>
+            <Input value={include} onChange={(e) => onChange({ proxy_pool_include: e.target.value })} placeholder="包含关键词，如 美国, US, 日本" />
+            <Input value={exclude} onChange={(e) => onChange({ proxy_pool_exclude: e.target.value })} placeholder="排除关键词，如 香港, 0.1x" />
+          </div>
+          {match && (
+            <div className={`ah-mini ${match.running ? 'ah-muted' : 'ah-pool-warn'}`} style={{ marginTop: 6 }}>
+              {match.running
+                ? `匹配 ${match.matched} 个启用节点，当前可用 ${match.available} 个`
+                : `代理池内核未运行（匹配 ${match.matched} 个启用节点），请到「代理池」页启动`}
+            </div>
+          )}
+        </>
+      )}
+    </Field>
+  )
 }
 
 /** 已保存渠道的 key 熔断状态，可逐个或全部手动重置 */
@@ -601,6 +668,13 @@ export function ChannelModal({
           <span className="ah-mini ah-muted">{f.always_retry ? '任何上游错误都在本渠道重试' : '仅瞬时错误在本渠道重试'}</span>
         </div>
       </Field>
+
+      <PoolField
+        enabled={f.proxy_pool}
+        include={f.proxy_pool_include}
+        exclude={f.proxy_pool_exclude}
+        onChange={(patch) => setF((prev) => ({ ...prev, ...patch }))}
+      />
 
       <Field label="支持的模型" required hint="逗号或换行分隔，例如 gpt-4o, gpt-4o-mini">
         <Textarea value={f.models} onChange={(e) => set('models', e.target.value)} placeholder={'gpt-4o\ngpt-4o-mini'} rows={3} />

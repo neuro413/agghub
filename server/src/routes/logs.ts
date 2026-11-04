@@ -56,9 +56,9 @@ logsRouter.get('/', (req, res) => {
     // 关键词按字面匹配；门户用户名 / Discord 用户名经 users 表反查，Discord ID 与请求 ID 精确匹配
     const kw = `%${q.replace(/[\\%_]/g, m => '\\' + m)}%`
     where.push(`(model LIKE ? ESCAPE '\\' OR channel_name LIKE ? ESCAPE '\\' OR upstream_model LIKE ? ESCAPE '\\'
-      OR error_message LIKE ? ESCAPE '\\' OR key_name LIKE ? ESCAPE '\\' OR client_ip LIKE ? ESCAPE '\\' OR request_id = ?
+      OR error_message LIKE ? ESCAPE '\\' OR key_name LIKE ? ESCAPE '\\' OR client_ip LIKE ? ESCAPE '\\' OR proxy_node LIKE ? ESCAPE '\\' OR request_id = ?
       OR user_id IN (SELECT id FROM users WHERE username LIKE ? ESCAPE '\\' OR discord_username LIKE ? ESCAPE '\\' OR discord_id = ?))`)
-    args.push(kw, kw, kw, kw, kw, kw, q, kw, kw, q)
+    args.push(kw, kw, kw, kw, kw, kw, kw, q, kw, kw, q)
   }
   const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : ''
 
@@ -72,7 +72,7 @@ logsRouter.get('/', (req, res) => {
               prompt_tokens, completion_tokens, total_tokens,
               cache_read_tokens, cache_write_tokens,
               retry_count, is_stream, error_message, client_error, preprocessed, pseudo_thinking,
-              source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, ${USER_NAME}, ${USER_DISCORD_NAME}
+              source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, proxy_node, ${USER_NAME}, ${USER_DISCORD_NAME}
        FROM request_logs ${whereSql}
        ORDER BY created_at DESC LIMIT ? OFFSET ?`,
     )

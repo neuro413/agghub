@@ -1,6 +1,6 @@
-import { IconBell, IconChannels, IconKey, IconLayers, IconLogs, IconSettings, IconStats, IconUsers, IconWand } from './Icons'
+import { IconBell, IconChannels, IconGlobe, IconKey, IconLayers, IconLogs, IconSettings, IconStats, IconUsers, IconWand } from './Icons'
 
-export type TabKey = 'channels' | 'groups' | 'keys' | 'users' | 'notices' | 'stats' | 'logs' | 'preprocess' | 'settings'
+export type TabKey = 'channels' | 'groups' | 'keys' | 'users' | 'notices' | 'stats' | 'logs' | 'preprocess' | 'pool' | 'settings'
 
 const TABS: { key: TabKey; label: string; Icon: typeof IconChannels }[] = [
   { key: 'channels', label: '渠道', Icon: IconChannels },
@@ -11,6 +11,7 @@ const TABS: { key: TabKey; label: string; Icon: typeof IconChannels }[] = [
   { key: 'stats', label: '统计', Icon: IconStats },
   { key: 'logs', label: '请求日志', Icon: IconLogs },
   { key: 'preprocess', label: '预处理', Icon: IconWand },
+  { key: 'pool', label: '代理池', Icon: IconGlobe },
   { key: 'settings', label: '设置', Icon: IconSettings },
 ]
 

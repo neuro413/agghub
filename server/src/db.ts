@@ -234,6 +234,9 @@ addMissingColumns('channels', [
   ['key_cooldown_seconds', 'INTEGER NOT NULL DEFAULT 300'],
   ['request_compression', 'TEXT'],
   ['always_retry', 'INTEGER NOT NULL DEFAULT 0'],
+  ['proxy_pool', 'INTEGER NOT NULL DEFAULT 0'],
+  ['proxy_pool_include', 'TEXT'],
+  ['proxy_pool_exclude', 'TEXT'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -252,6 +255,7 @@ addMissingColumns('request_logs', [
   ['compress_status', 'TEXT'],
   ['compress_note', 'TEXT'],
   ['client_error', 'TEXT'],
+  ['proxy_node', 'TEXT'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT'], ['discord_guilds_at', 'INTEGER']])
 // 分组的 UA 黑名单与自定义提示（后加的列，已有库按缺失补齐）
@@ -399,6 +403,9 @@ export function rowToChannel(r: ChannelRow): Channel {
     ban_until: r.ban_until ?? null,
     request_compression: REQUEST_COMPRESSIONS.includes(r.request_compression as RequestCompression) ? r.request_compression as RequestCompression : null,
     always_retry: !!r.always_retry,
+    proxy_pool: !!r.proxy_pool,
+    proxy_pool_include: r.proxy_pool_include ?? null,
+    proxy_pool_exclude: r.proxy_pool_exclude ?? null,
     created_at: r.created_at,
     updated_at: r.updated_at,
   }

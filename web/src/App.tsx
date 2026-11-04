@@ -15,6 +15,7 @@ import { StatsPage } from './pages/StatsPage'
 import { LogsPage } from './pages/LogsPage'
 import { PreprocessPage } from './pages/PreprocessPage'
 import { SettingsPage } from './pages/SettingsPage'
+import { PoolPage } from './pages/PoolPage'
 
 function TokenGate() {
   const [token, setToken] = useState('')
@@ -78,6 +79,7 @@ export default function App() {
             {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} onSearchUsers={(q) => { setUsersQuery(q); setTab('users') }} />}
             {tab === 'logs' && <LogsPage />}
             {tab === 'preprocess' && <PreprocessPage />}
+            {tab === 'pool' && <PoolPage />}
             {tab === 'settings' && <SettingsPage />}
           </main>
         )}

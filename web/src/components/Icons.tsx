@@ -260,3 +260,11 @@ export const IconDiscord = (p: IconProps) => (
     <path d="M7 16.5c3.5 1 6.5 1 10 0" />
   </S>
 )
+
+export const IconGlobe = (p: IconProps) => (
+  <S {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12H21" />
+    <path d="M12 3C14.5 5.5 15.6 8.6 15.6 12C15.6 15.4 14.5 18.5 12 21C9.5 18.5 8.4 15.4 8.4 12C8.4 8.6 9.5 5.5 12 3Z" />
+  </S>
+)

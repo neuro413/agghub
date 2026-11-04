@@ -9,6 +9,7 @@ import { applyUserAgent } from '../core/relay'
 import { readBodyText } from '../core/bodyReader'
 import { ZSTD_AVAILABLE, algorithmPlan, clearUnsupported, compressBody, isCompressionRejection, unsupportedList } from '../core/upstreamCompression'
 import { getAdaptor } from '../adapters'
+import { acquireNode, noNodeMessage, type Lease } from '../pool/select'
 import { trimSlash, withV1 } from '../adapters/base'
 import type { Channel, ChannelRow, ChannelType, CompressionAlgorithm, CompressionTestItem, CompressionTestResult, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
@@ -52,6 +53,25 @@ interface ChannelInput {
   /** null = 跟随全局 */
   request_compression?: RequestCompression | null
   always_retry?: boolean
+  proxy_pool?: boolean
+  proxy_pool_include?: string | null
+  proxy_pool_exclude?: string | null
+}
+
+/** 代理池字段：关键词 trim 后为空存 null */
+function poolColumns(input: ChannelInput): { proxy_pool: number; proxy_pool_include: string | null; proxy_pool_exclude: string | null } {
+  return {
+    proxy_pool: input.proxy_pool ? 1 : 0,
+    proxy_pool_include: input.proxy_pool_include?.trim() || null,
+    proxy_pool_exclude: input.proxy_pool_exclude?.trim() || null,
+  }
+}
+
+/** 测试类接口的出口：渠道开启代理池时租一个节点（测试结果不计入节点健康），否则用全局代理 */
+function testEgress(input: ChannelInput): { proxyUrl?: string; lease: Lease | null; error?: string } {
+  if (!input.proxy_pool) return { proxyUrl: getSettings().proxy_url || undefined, lease: null }
+  const lease = acquireNode({ include: input.proxy_pool_include, exclude: input.proxy_pool_exclude })
+  return lease ? { proxyUrl: lease.url, lease } : { lease: null, error: noNodeMessage() }
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -155,8 +175,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, always_retry, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @always_retry, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, always_retry, proxy_pool, proxy_pool_include, proxy_pool_exclude, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @always_retry, @proxy_pool, @proxy_pool_include, @proxy_pool_exclude, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -181,6 +201,7 @@ channelsRouter.post('/', (req, res) => {
       ...keyColumns(input),
       request_compression: input.request_compression || null,
       always_retry: input.always_retry ? 1 : 0,
+      ...poolColumns(input),
       created_at: now,
       updated_at: now,
     })
@@ -207,6 +228,7 @@ channelsRouter.put('/:id', (req, res) => {
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
        key_mode=@key_mode, key_concurrency=@key_concurrency, key_cooldown_seconds=@key_cooldown_seconds,
        request_compression=@request_compression, always_retry=@always_retry, ban_until=@ban_until,
+       proxy_pool=@proxy_pool, proxy_pool_include=@proxy_pool_include, proxy_pool_exclude=@proxy_pool_exclude,
        updated_at=@updated_at
      WHERE id=@id`,
   ).run({
@@ -245,6 +267,7 @@ channelsRouter.put('/:id', (req, res) => {
     request_compression: input.request_compression !== undefined ? input.request_compression || null : existing.request_compression,
     always_retry: input.always_retry !== undefined ? (input.always_retry ? 1 : 0) : existing.always_retry ? 1 : 0,
     ban_until: statusChanged ? null : existing.ban_until,
+    ...poolColumns({ ...existing, ...input }),
     updated_at: Date.now(),
   })
   // 手动改状态视为恢复：清掉熔断恢复时间与内存计数；状态没变（如编辑名称时回传原状态）不影响自动恢复
@@ -300,13 +323,20 @@ channelsRouter.post('/test', async (req, res) => {
   const timer = setTimeout(() => ac.abort(), 10_000)
   const close = () => { if (!res.writableEnded) ac.abort() }
   res.on('close', close)
+  const egress = testEgress(input)
   try {
-    const proxyUrl = getSettings().proxy_url || undefined
-    const result = await probe(input, ac.signal, proxyUrl)
+    if (egress.error) {
+      res.json({ ok: false, message: egress.error, latency_ms: 0 })
+      return
+    }
+    const result = await probe(input, ac.signal, egress.proxyUrl)
+    if (egress.lease) result.message += ` · 节点 ${egress.lease.node.name}`
     if (!res.destroyed) res.json({ ...result, latency_ms: Date.now() - started })
   } catch (e: any) {
-    if (!res.destroyed) res.json({ ok: false, message: e?.name === 'AbortError' ? '请求超时' : String(e?.message || e), latency_ms: Date.now() - started })
+    const node = egress.lease ? `（节点 ${egress.lease.node.name}）` : ''
+    if (!res.destroyed) res.json({ ok: false, message: (e?.name === 'AbortError' ? '请求超时' : String(e?.message || e)) + node, latency_ms: Date.now() - started })
   } finally {
+    egress.lease?.release()
     clearTimeout(timer)
     res.off('close', close)
     ac.abort()
@@ -326,8 +356,13 @@ function channelFromInput(input: ChannelInput): Channel {
     ua_override: !!input.ua_override, ua_value: input.ua_value?.trim() || null, strip_headers: !!input.strip_headers,
     single_role: null, single_role_merge_system: false, single_role_exclude_last_user: false,
     key_mode: null, key_concurrency: 2, key_cooldown_seconds: 300, ban_until: null,
-    request_compression: null, always_retry: false, created_at: now, updated_at: now,
+    request_compression: null, always_retry: false, ...poolFields(input), created_at: now, updated_at: now,
   }
+}
+
+function poolFields(input: ChannelInput): Pick<Channel, 'proxy_pool' | 'proxy_pool_include' | 'proxy_pool_exclude'> {
+  const columns = poolColumns(input)
+  return { ...columns, proxy_pool: !!columns.proxy_pool }
 }
 
 const COMPRESSION_TEST_TIMEOUT_MS = 20_000
@@ -339,13 +374,15 @@ channelsRouter.post('/test-compression', async (req, res) => {
   const model = (typeof input.test_model === 'string' && input.test_model.trim()) || normalizeModels(input.models)[0]
   if (!model) return res.status(400).json({ error: '至少配置一个模型' })
 
+  const egress = testEgress(input)
+  if (egress.error) return res.status(400).json({ error: egress.error })
   const ac = new AbortController()
   const close = () => { if (!res.writableEnded) ac.abort() }
   res.on('close', close)
   try {
     const settings = getSettings()
-    const proxyUrl = settings.proxy_url || undefined
-    const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
+    const proxyUrl = egress.proxyUrl
+    const dispatcher = egress.lease ? egress.lease.dispatcher : proxyUrl ? getProxyAgent(proxyUrl) : undefined
     const channel = channelFromInput(input)
     const adaptor = getAdaptor(channel.type)
     const upstreamModel = resolveUpstreamModel(channel, model)
@@ -400,6 +437,7 @@ channelsRouter.post('/test-compression', async (req, res) => {
   } catch (e: any) {
     if (!res.destroyed && !ac.signal.aborted) res.status(400).json({ error: String(e?.message || e).slice(0, 300) })
   } finally {
+    egress.lease?.release()
     res.off('close', close)
     ac.abort()
   }
