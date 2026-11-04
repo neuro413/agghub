@@ -49,6 +49,7 @@ interface FormState {
   key_cooldown: string
   /** '' = 跟随全局 */
   request_compression: '' | RequestCompression
+  always_retry: boolean
 }
 
 /** 多 key 模式下按行拆分并去重的 key 列表（与后端规则一致） */
@@ -90,7 +91,7 @@ function initForm(c: Channel | null): FormState {
     return {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
-      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '',
+      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '', always_retry: false,
     }
   return {
     name: c.name,
@@ -118,6 +119,7 @@ function initForm(c: Channel | null): FormState {
     key_concurrency: String(c.key_concurrency ?? 2),
     key_cooldown: String(c.key_cooldown_seconds ?? 300),
     request_compression: c.request_compression ?? '',
+    always_retry: !!c.always_retry,
   }
 }
 
@@ -162,6 +164,7 @@ function buildPayload(f: FormState): Partial<Channel> {
     key_concurrency: Number(f.key_concurrency) || 2,
     key_cooldown_seconds: Number(f.key_cooldown) || 300,
     request_compression: f.request_compression || null,
+    always_retry: f.always_retry,
   }
 }
 
@@ -583,6 +586,20 @@ export function ChannelModal({
           onChange={(e) => set('timeout', e.target.value)}
           placeholder="留空跟随全局"
         />
+      </Field>
+
+      <Field
+        label="一律重试"
+        hint={
+          f.always_retry
+            ? '上游返回任何 HTTP 错误（含 401、403）都在本渠道重试，次数跟随设置页「单渠道重试次数」，用完才换渠道；本渠道命中熔断状态码时不再自动停用，多 key 模式下也不熔断 key（429/402 冷却照常）。适合把限流返回成 403 的上游'
+            : '关闭时 401、403 等错误不在本渠道重试，直接换渠道；命中熔断状态码时按全局设置自动停用渠道'
+        }
+      >
+        <div className="ah-row">
+          <Toggle checked={f.always_retry} onChange={(v) => set('always_retry', v)} />
+          <span className="ah-mini ah-muted">{f.always_retry ? '任何上游错误都在本渠道重试' : '仅瞬时错误在本渠道重试'}</span>
+        </div>
       </Field>
 
       <Field label="支持的模型" required hint="逗号或换行分隔，例如 gpt-4o, gpt-4o-mini">

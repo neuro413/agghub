@@ -233,6 +233,7 @@ addMissingColumns('channels', [
   ['key_concurrency', 'INTEGER NOT NULL DEFAULT 2'],
   ['key_cooldown_seconds', 'INTEGER NOT NULL DEFAULT 300'],
   ['request_compression', 'TEXT'],
+  ['always_retry', 'INTEGER NOT NULL DEFAULT 0'],
 ])
 addMissingColumns('request_logs', [
   ['source', 'TEXT'],
@@ -397,6 +398,7 @@ export function rowToChannel(r: ChannelRow): Channel {
     key_cooldown_seconds: r.key_cooldown_seconds ?? 300,
     ban_until: r.ban_until ?? null,
     request_compression: REQUEST_COMPRESSIONS.includes(r.request_compression as RequestCompression) ? r.request_compression as RequestCompression : null,
+    always_retry: !!r.always_retry,
     created_at: r.created_at,
     updated_at: r.updated_at,
   }

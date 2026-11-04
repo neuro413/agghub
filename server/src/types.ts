@@ -75,6 +75,7 @@ export interface ChannelRow {
   key_cooldown_seconds: number
   ban_until: number | null
   request_compression: string | null
+  always_retry: number
   created_at: number
   updated_at: number
 }
@@ -118,6 +119,8 @@ export interface Channel {
   ban_until: number | null
   /** 发往上游的请求体压缩，null = 跟随全局 */
   request_compression: RequestCompression | null
+  /** 一律重试：上游任何 HTTP 错误（含 401/403）都按瞬时错误在本渠道重试，且不因熔断状态码停用渠道或熔断 key */
+  always_retry: boolean
   created_at: number
   updated_at: number
 }

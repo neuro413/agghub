@@ -51,6 +51,7 @@ interface ChannelInput {
   key_cooldown_seconds?: number
   /** null = 跟随全局 */
   request_compression?: RequestCompression | null
+  always_retry?: boolean
 }
 
 function normalizeModels(m: string[] | string | undefined): string[] {
@@ -154,8 +155,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, always_retry, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @always_retry, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -179,6 +180,7 @@ channelsRouter.post('/', (req, res) => {
       single_role_exclude_last_user: input.single_role_exclude_last_user ? 1 : 0,
       ...keyColumns(input),
       request_compression: input.request_compression || null,
+      always_retry: input.always_retry ? 1 : 0,
       created_at: now,
       updated_at: now,
     })
@@ -204,7 +206,7 @@ channelsRouter.put('/:id', (req, res) => {
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
        key_mode=@key_mode, key_concurrency=@key_concurrency, key_cooldown_seconds=@key_cooldown_seconds,
-       request_compression=@request_compression, ban_until=@ban_until,
+       request_compression=@request_compression, always_retry=@always_retry, ban_until=@ban_until,
        updated_at=@updated_at
      WHERE id=@id`,
   ).run({
@@ -241,6 +243,7 @@ channelsRouter.put('/:id', (req, res) => {
         : existing.single_role_exclude_last_user ? 1 : 0,
     ...keyColumns({ ...existing, ...input }),
     request_compression: input.request_compression !== undefined ? input.request_compression || null : existing.request_compression,
+    always_retry: input.always_retry !== undefined ? (input.always_retry ? 1 : 0) : existing.always_retry ? 1 : 0,
     ban_until: statusChanged ? null : existing.ban_until,
     updated_at: Date.now(),
   })
@@ -323,7 +326,7 @@ function channelFromInput(input: ChannelInput): Channel {
     ua_override: !!input.ua_override, ua_value: input.ua_value?.trim() || null, strip_headers: !!input.strip_headers,
     single_role: null, single_role_merge_system: false, single_role_exclude_last_user: false,
     key_mode: null, key_concurrency: 2, key_cooldown_seconds: 300, ban_until: null,
-    request_compression: null, created_at: now, updated_at: now,
+    request_compression: null, always_retry: false, created_at: now, updated_at: now,
   }
 }
 

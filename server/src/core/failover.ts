@@ -58,11 +58,15 @@ export function isBudgetPoolExhausted(err: any): boolean {
   return /budget\s+pool\s+quota\s+has\s+been\s+exhausted/i.test(err.body || '')
 }
 
-/** 是否为瞬时错误、值得在「本渠道」再试一次：网络/超时/5xx/429/402 额度池耗尽 → true；其余 4xx → false */
-export function shouldRetry(err: any): boolean {
+/**
+ * 是否为瞬时错误、值得在「本渠道」再试一次：网络/超时/5xx/429/402 额度池耗尽 → true；其余 4xx → false。
+ * alwaysRetry（渠道开启「一律重试」）时上游任何 HTTP 错误都返回 true；本地错误、2xx 后的处理失败与取消仍不重试。
+ */
+export function shouldRetry(err: any, alwaysRetry = false): boolean {
   if (err instanceof LocalRequestError || err instanceof CandidateError || err instanceof UpstreamResponseError) return false
   if (err instanceof RequestStopped) return err.reason === 'upstream_idle'
   if (!(err instanceof UpstreamError)) return true // 网络错误 / 上游超时
+  if (alwaysRetry) return true
   if (err.status === 429) return true
   if (err.status >= 500) return true
   if (isBudgetPoolExhausted(err)) return true
