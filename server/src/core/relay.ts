@@ -355,6 +355,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       const description = descriptions.get(channel.id)!
       const failed = failedKeys.get(channel.id) ?? new Set<string>()
       failedKeys.set(channel.id, failed)
+      // 一律重试：熔断状态码（如把限流返回成 403 的上游）不停用渠道也不熔断 key，交给同渠道重试；429/402 的 key 冷却照常
+      const banCodes = channel.always_retry ? [] : autoBanCodes
       // 轮询模式换 key 不消耗同渠道重试次数；并发模式整组失败后再来一组要消耗
       for (let index = 0; index <= settings.single_retry_times;) {
         lifecycle.signal.throwIfAborted()
@@ -375,11 +377,11 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         for (const { state, error } of failures) {
           if (lifecycle.signal.aborted) break
           if (channel.key_mode) {
-            if (onKeyFailure(channel, state.key, error, autoBanCodes, settings)) {
+            if (onKeyFailure(channel, state.key, error, banCodes, settings)) {
               failed.add(state.key)
               keyFailed = true
             }
-          } else if (settings.auto_ban && shouldDisable(error, autoBanCodes) && onBanSignal(channel.id, settings)) {
+          } else if (settings.auto_ban && shouldDisable(error, banCodes) && onBanSignal(channel.id, settings)) {
             banned.add(channel.id)
           }
         }
@@ -404,7 +406,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         const hasKey = canContinue && keysLeft(channel).length > 0
         const switchKey = channel.key_mode === 'poll' && hasKey && keyFailed
         const retrySame = !switchKey && hasKey && !banned.has(channel.id) && index < settings.single_retry_times
-          && (failures.some(f => shouldRetry(f.error)) || (channel.key_mode === 'race' && keyFailed))
+          && (failures.some(f => shouldRetry(f.error, channel.always_retry)) || (channel.key_mode === 'race' && keyFailed))
         const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
         if (!switchKey && !retrySame && !nextChannel) {
           await recordFailures(failures.slice(0, -1))
