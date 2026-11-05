@@ -14,6 +14,13 @@ const PLACEHOLDER: Record<ChannelType, string> = {
   anthropic: 'https://api.anthropic.com（留空用官方）',
   vertex: '留空自动用 aiplatform.googleapis.com',
   responses: 'https://api.openai.com（留空用官方）',
+  gemini: 'https://generativelanguage.googleapis.com（留空用官方）',
+}
+
+/** Vertex / Gemini 的请求地址随模型与流式动作变化，不支持完整地址模式 */
+type FullUrlType = Exclude<ChannelType, 'vertex' | 'gemini'>
+function supportsFullUrl(type: ChannelType): type is FullUrlType {
+  return type !== 'vertex' && type !== 'gemini'
 }
 
 /** 模型专属名的一行：模型列表原名 → 专属名 */
@@ -67,14 +74,15 @@ function keyModeHint(f: FormState): string {
   return '每次请求轮流取 N 个可用 key 同时请求上游，最先产出内容（流式）或最先完整返回（非流式）的结果转发给客户端，其余请求立即中断；上游实际被调用 N 次，落选请求也可能计费'
 }
 
-const FULL_PLACEHOLDER: Record<Exclude<ChannelType, 'vertex'>, string> = {
+const FULL_PLACEHOLDER: Record<FullUrlType, string> = {
   openai: 'https://example.com/api/paas/v4/chat/completions',
   anthropic: 'https://example.com/api/anthropic/messages',
   responses: 'https://example.com/openai/responses',
 }
 
 function baseUrlHint(f: FormState): string {
-  if (f.type === 'vertex' || !f.base_url_full) return '自定义反代地址，会自动补 /v1 和接口路径；留空用官方默认'
+  if (f.type === 'gemini') return '自定义反代地址，未以 /v1、/v1beta 结尾时自动补 /v1beta 和接口路径；留空用官方默认'
+  if (!supportsFullUrl(f.type) || !f.base_url_full) return '自定义反代地址，会自动补 /v1 和接口路径；留空用官方默认'
   return '填写完整的请求地址，原样请求不做任何拼接；拉取模型与测试连接使用下方的模型列表地址'
 }
 
@@ -151,8 +159,8 @@ function buildPayload(f: FormState): Partial<Channel> {
     name: f.name.trim(),
     type: f.type,
     base_url: f.base_url.trim() || null,
-    base_url_full: f.type !== 'vertex' && f.base_url_full,
-    models_url: f.type !== 'vertex' && f.base_url_full ? f.models_url.trim() || null : null,
+    base_url_full: supportsFullUrl(f.type) && f.base_url_full,
+    models_url: supportsFullUrl(f.type) && f.base_url_full ? f.models_url.trim() || null : null,
     api_key: f.api_key.trim(),
     models,
     model_mapping: Object.keys(mapping).length ? mapping : null,
@@ -552,6 +560,7 @@ export function ChannelModal({
               { value: 'openai', label: 'OpenAI 格式' },
               { value: 'anthropic', label: 'Anthropic 格式' },
               { value: 'vertex', label: 'Vertex AI' },
+              { value: 'gemini', label: 'Gemini（AI Studio）' },
               { value: 'responses', label: 'OpenAI Responses' },
             ]}
             onChange={(v) => set('type', v as ChannelType)}
@@ -627,15 +636,15 @@ export function ChannelModal({
         <Input
           value={f.base_url}
           onChange={(e) => set('base_url', e.target.value)}
-          placeholder={f.type !== 'vertex' && f.base_url_full ? FULL_PLACEHOLDER[f.type] : PLACEHOLDER[f.type]}
+          placeholder={supportsFullUrl(f.type) && f.base_url_full ? FULL_PLACEHOLDER[f.type] : PLACEHOLDER[f.type]}
         />
-        {f.type !== 'vertex' && (
+        {supportsFullUrl(f.type) && (
           <div className="ah-row" style={{ marginTop: 8 }}>
             <Toggle checked={f.base_url_full} onChange={(v) => set('base_url_full', v)} />
             <span className="ah-mini ah-muted">完整地址（不附加 /v1 与接口路径）</span>
           </div>
         )}
-        {f.type !== 'vertex' && f.base_url_full && (
+        {supportsFullUrl(f.type) && f.base_url_full && (
           <Input
             value={f.models_url}
             onChange={(e) => set('models_url', e.target.value)}

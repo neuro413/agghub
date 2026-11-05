@@ -5,7 +5,7 @@ import { decodeGeminiSignature, effortToBudget, encodeGeminiSignature } from './
 import { emptyUsage, usageFromGemini } from './usage'
 import type { IRReasoningItem } from '../types'
 
-// Gemini 仅作上游渠道（vertex API key 模式走 Gemini generateContent 协议）。
+// Gemini 仅作上游渠道（Vertex Gemini 与 AI Studio 渠道共用 generateContent 协议）。
 // 入口只有 openai/anthropic，故此模块不实现入口方向。
 
 function warn(msg: string): void {

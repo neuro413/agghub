@@ -77,6 +77,13 @@ npm start
 | OpenAI Responses（`responses`） | Responses | Bearer API Key，可配置兼容服务的 Base URL |
 | Anthropic（`anthropic`） | Messages | `x-api-key`，可配置兼容服务的 Base URL |
 | Vertex（`vertex`） | Gemini 或 Vertex Claude | API Key / 服务账号 JSON，支持区域与 Base URL 配置 |
+| Gemini（`gemini`） | Gemini API（Google AI Studio） | `x-goog-api-key`，可配置兼容服务的 Base URL |
+
+Gemini（AI Studio）渠道与 Vertex Gemini 共用同一套 `generateContent` 转换（参数映射、`thinkingConfig`、`thoughtSignature` 往返、Schema 清洗完全一致），只是请求地址与鉴权不同：
+
+- 请求 `{Base URL}/v1beta/models/{模型}:generateContent`，流式为 `:streamGenerateContent?alt=sse`；Base URL 默认 `https://generativelanguage.googleapis.com`，已以 `/v1`、`/v1beta`、`/v1alpha` 结尾时不再补版本段。模型名带 `models/` 前缀时自动去掉。
+- 支持多 key 模式；不支持完整地址模式。
+- “测试连接”和“拉取模型”分页读取 `GET /v1beta/models`，只保留 `supportedGenerationMethods` 含 `generateContent` 的模型，并去掉 `models/` 前缀。
 
 Vertex 的区域默认 `global`：
 
@@ -91,7 +98,7 @@ Vertex 的区域默认 `global`：
 - 模型专属名：给模型列表中的某个模型换一个本渠道专用的名字，之后只有专属名会路由到该渠道，原名的请求不再分配过来（其他渠道不受影响）。适合把不稳定的渠道单独隔离，需要时再用专属名调用。
 - 渠道级超时覆盖、User-Agent 覆写、去除非必要请求头。
 - 一律重试：开启后，该渠道上游返回的任何 HTTP 错误（包括 `401`、`403`）都按瞬时错误在本渠道重试，次数跟随全局「单渠道重试次数」，用完才换渠道；同时本渠道命中熔断状态码时不再自动停用，多 key 模式下也不熔断 key（`429` / `402` 冷却照常）。用于兼容把限流返回成 `403` 的上游。代价是凭证真正失效时也不会被自动停用，每次请求都会先耗尽本渠道的重试次数。
-- 默认每个渠道保存一份凭证；OpenAI / Responses / Anthropic 渠道可以开启「多 key 模式」，在同一渠道内轮询或并发使用多个 key（见下节）。当前没有并发配额或任意自定义请求头编辑器。
+- 默认每个渠道保存一份凭证；OpenAI / Responses / Anthropic / Gemini 渠道可以开启「多 key 模式」，在同一渠道内轮询或并发使用多个 key（见下节）。当前没有并发配额或任意自定义请求头编辑器。
 - Base URL 默认会自动补 `/v1` 和接口路径（`/chat/completions`、`/messages`、`/responses`）。OpenAI / Responses / Anthropic 渠道可以开启「完整地址」，Base URL 原样作为请求地址，兼容路径不标准的上游（如 `…/api/paas/v4/chat/completions`）；此时可另填「模型列表地址」，留空则把结尾的接口路径换成 `/models`。
 - OpenAI / Responses / Anthropic 的“测试连接”和“拉取模型”使用上游 `GET /v1/models`（完整地址模式用模型列表地址），返回的模型列表原样读取，不截断。因此测试结果不能完全代表实际生成接口的可用性。
 - Vertex 的测试会发送一次输出上限为 1 Token 的生成请求，可能产生实际调用费用，不返回可拉取的模型列表。

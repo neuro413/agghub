@@ -1,5 +1,5 @@
 // ── 渠道 ───────────────────────────────────────────────
-export type ChannelType = 'openai' | 'anthropic' | 'vertex' | 'responses'
+export type ChannelType = 'openai' | 'anthropic' | 'vertex' | 'responses' | 'gemini'
 
 /** 0=手动禁用 1=启用 2=自动禁用（命中熔断） */
 export type ChannelStatus = 0 | 1 | 2
@@ -89,7 +89,7 @@ export interface Channel {
   name: string
   type: ChannelType
   base_url: string | null
-  /** 完整地址模式：base_url 原样作为请求地址，不补 /v1 和接口路径（Vertex 不支持） */
+  /** 完整地址模式：base_url 原样作为请求地址，不补 /v1 和接口路径（Vertex / Gemini 不支持） */
   base_url_full: boolean
   /** 完整地址模式下的模型列表地址，留空按 base_url 推导 */
   models_url: string | null

@@ -307,6 +307,10 @@
   background: #ece9fb;
   color: #6a4fc9;
 }
+.ah-badge.t-gemini {
+  background: #e3f3fb;
+  color: #1a7fb0;
+}
 
 /* ── 状态点（呼吸光环）── */
 .ah-dot {

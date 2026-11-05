@@ -4,6 +4,7 @@ import { openaiAdaptor } from './openai'
 import { anthropicAdaptor } from './anthropic'
 import { vertexAdaptor } from './vertex'
 import { responsesAdaptor } from './responses'
+import { geminiAdaptor } from './gemini'
 
 export function getAdaptor(type: ChannelType): Adaptor {
   switch (type) {
@@ -15,6 +16,8 @@ export function getAdaptor(type: ChannelType): Adaptor {
       return vertexAdaptor
     case 'responses':
       return responsesAdaptor
+    case 'gemini':
+      return geminiAdaptor
   }
 }
 

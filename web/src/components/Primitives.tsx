@@ -6,6 +6,7 @@ const TYPE_LABEL: Record<ChannelType, string> = {
   anthropic: 'Anthropic',
   vertex: 'Vertex',
   responses: 'Responses',
+  gemini: 'Gemini',
 }
 
 export function Badge({ type }: { type: ChannelType }) {

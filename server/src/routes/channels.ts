@@ -11,11 +11,14 @@ import { ZSTD_AVAILABLE, algorithmPlan, clearUnsupported, compressBody, isCompre
 import { getAdaptor } from '../adapters'
 import { acquireNode, noNodeMessage, type Lease } from '../pool/select'
 import { trimSlash, withV1 } from '../adapters/base'
+import { geminiApiRoot } from '../adapters/gemini'
 import type { Channel, ChannelRow, ChannelType, CompressionAlgorithm, CompressionTestItem, CompressionTestResult, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
 export const channelsRouter = Router()
 
-const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses']
+const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses', 'gemini']
+/** 不支持完整地址模式的渠道：请求地址随模型与流式动作变化 */
+const NO_FULL_URL: ChannelType[] = ['vertex', 'gemini']
 const SINGLE_ROLE_MODES: SingleRoleMode[] = ['user', 'system']
 const KEY_MODES: KeyMode[] = ['poll', 'race']
 const REQUEST_COMPRESSIONS: RequestCompression[] = ['off', 'gzip', 'br', 'zstd']
@@ -98,9 +101,9 @@ function aliasColumn(input: ChannelInput): string | null {
   return alias && JSON.stringify(alias)
 }
 
-/** 完整地址模式只对非 Vertex 渠道生效；关闭时不保留模型列表地址 */
+/** 完整地址模式只对非 Vertex / Gemini 渠道生效；关闭时不保留模型列表地址 */
 function fullUrlColumns(input: ChannelInput): { base_url_full: number; models_url: string | null } {
-  const full = !!input.base_url_full && input.type !== 'vertex'
+  const full = !!input.base_url_full && !NO_FULL_URL.includes(input.type!)
   return { base_url_full: full ? 1 : 0, models_url: full ? input.models_url?.trim() || null : null }
 }
 
@@ -131,14 +134,14 @@ function modelsUrlOf(input: ChannelInput): string | null {
 
 function validate(input: ChannelInput): string | null {
   if (!input.name || !input.name.trim()) return '渠道名称不能为空'
-  if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses'
+  if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses / gemini'
   const models = normalizeModels(input.models)
   if (models.length === 0) return '至少配置一个模型'
   const aliases = Object.values(normalizeAlias(input) ?? {})
   if (new Set(aliases).size !== aliases.length || aliases.some((name) => models.includes(name))) {
     return '模型专属名不能重复，也不能与模型列表中的模型同名'
   }
-  if (input.base_url_full && input.type !== 'vertex' && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
+  if (input.base_url_full && !NO_FULL_URL.includes(input.type) && !input.base_url?.trim()) return '完整地址模式下 Base URL 不能为空'
   if (input.single_role != null && !SINGLE_ROLE_MODES.includes(input.single_role)) return '单 role 兼容模式必须是 user / system'
   if (input.key_mode != null && !KEY_MODES.includes(input.key_mode)) return '多 key 模式必须是 poll / race'
   if (input.request_compression != null && !REQUEST_COMPRESSIONS.includes(input.request_compression)) return '请求体压缩必须是 off / gzip / br / zstd'
@@ -451,6 +454,27 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
   const key = probeKey(input)
   const base = input.base_url?.trim() ? trimSlash(input.base_url.trim()) : ''
   const dispatcher = proxyUrl ? getProxyAgent(proxyUrl) : undefined
+
+  // gemini（AI Studio）：分页拉取 GET /v1beta/models，只保留支持 generateContent 的模型
+  if (input.type === 'gemini') {
+    const root = geminiApiRoot(input.base_url)
+    const headers: Record<string, string> = key ? { 'x-goog-api-key': key } : {}
+    const models: string[] = []
+    let pageToken = ''
+    for (let page = 0; page < 20; page++) {
+      const url = `${root}/models?pageSize=1000${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`
+      const r = await fetch(url, { headers, signal, dispatcher } as any)
+      if (!r.ok) return failure(r)
+      const data: any = await r.json().catch(() => ({}))
+      for (const m of Array.isArray(data?.models) ? data.models : []) {
+        const methods = Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : null
+        if (typeof m?.name === 'string' && (!methods || methods.includes('generateContent'))) models.push(m.name.replace(/^models\//, ''))
+      }
+      pageToken = typeof data?.nextPageToken === 'string' ? data.nextPageToken : ''
+      if (!pageToken) break
+    }
+    return { ok: true, message: '连接成功', models }
+  }
 
   // openai / responses / anthropic：GET /v1/models；完整地址模式用模型列表地址
   if (input.type !== 'vertex') {
