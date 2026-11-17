@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net'
 import { runRegressions } from '../tests/e2e/regression'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const temporary = process.env.AGGHUB_TEST_ROOT || (process.platform === 'win32' ? 'E:/LLM工作区/回收站' : os.tmpdir())
+const temporary = process.env.AGGHUB_TEST_ROOT || os.tmpdir()
 fs.mkdirSync(temporary, { recursive: true })
 const artifacts = fs.mkdtempSync(path.join(temporary, 'agghub-e2e-'))
 const dist = path.join(artifacts, 'web-dist')

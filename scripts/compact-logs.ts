@@ -30,7 +30,7 @@ try {
   const before = measure()
   console.log(JSON.stringify({ before }, null, 2))
   if (apply) {
-    const root = process.env.AGGHUB_BACKUP_DIR || (process.platform === 'win32' ? 'E:/LLM工作区/回收站' : path.join(DATA_DIR, 'backups'))
+    const root = process.env.AGGHUB_BACKUP_DIR || path.join(DATA_DIR, 'backups')
     const directory = path.join(root, `agghub-before-vacuum-${Date.now()}-${randomUUID()}`)
     fs.mkdirSync(directory, { recursive: true })
     const backup = path.join(directory, 'agghub.db')

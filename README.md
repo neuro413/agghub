@@ -1,18 +1,23 @@
 # 🍊 AggHub
 
+[![CI](https://github.com/neuro413/agghub/actions/workflows/ci.yml/badge.svg)](https://github.com/neuro413/agghub/actions/workflows/ci.yml)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-%E2%89%A5%2020.18.1-339933?logo=node.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)
+
 轻量化 LLM 渠道聚合网关，以**内网个人自托管**为主，也可以开启独立的公网端口做**小规模 Key 分发**。参考 new-api 的核心思想，保留渠道管理、协议转换、选路重试和请求观测；分发支持管理员直接发 Key（分组、倍率点数、额度与限流），也可以在公网端口开放一个仿 new-api 的精简用户门户，让用户自助注册、建 Key、签到领额度。不引入 Redis。
 
 ## ✨ 特性
 
-- **渠道聚合**：支持 OpenAI Chat、OpenAI Responses、Anthropic、Vertex 四类渠道；支持模型别名映射、优先级与权重。
+- **渠道聚合**：支持 OpenAI Chat、OpenAI Responses、Anthropic、Vertex、Gemini（AI Studio）五类渠道；支持模型别名映射、优先级与权重。
 - **三类调用入口**：OpenAI Chat Completions、Anthropic Messages、OpenAI Responses；同协议优先直通，跨协议通过内部中间表示（IR）转换，支持非流式与 SSE。
-- **选路与故障转移**：同渠道重试、跨渠道降级、空回复检测、按状态码自动停用渠道，以及全局 HTTP 代理。
+- **选路与故障转移**：同渠道重试、跨渠道降级、空回复检测、按状态码自动停用渠道，以及全局 HTTP 代理和内置 mihomo 代理池（渠道可按关键词绑定节点、失败换节点重发）。
 - **请求预处理**：提示词正则、工具黑名单、thinking 清理、参数修改；提供可视化规则编辑和预览，以及限定链路的伪思考与历史续接。
 - **流量优化**：上游请求体压缩（zstd / br / gzip，可按渠道指定，被拒时自动明文重发）与管理端 / 门户的响应压缩、静态资源预压缩和长缓存。
 - **统计与请求日志**：请求量、成功率、Token、平均延迟概览；可对照原始与改写后请求，查看网关响应及上游原始 JSON / SSE / 错误体。
 - **小规模分发**：可选的公网端口开放 `/v1`（必须携带 Key）和用户门户；仿 new-api 的分组管理隔离私人渠道（分组勾选渠道与模型、带分组倍率），按模型倍率折算点数，支持总额度、每日额度、RPM 与并发限制，每个 Key 可单独决定是否记录正文。
 - **用户门户**：公网端口上的自助页面，用户名 + 密码注册登录，自建 / 删除 Key、查看余额与调用记录、每日签到领额度；仿 new-api 模型广场的模型列表页可按分组、供应商与计费类型筛选并查看缓存读写价格；可用性页按 10 分钟一格展示各模型最近 6 小时的健康度与错误率，无人调用的模型自动测活；控制台右上角的通知中心常驻展示通知与公告。界面仿 new-api 用户侧，额度按可配置比例显示为美元。
-- **轻量部署**：Node.js + SQLite 本地持久化，日志正文切块去重，冷数据整包压缩；React WebUI 提供渠道、令牌、用户、通知、统计、请求日志、预处理、设置八个页面。
+- **轻量部署**：Node.js + SQLite 本地持久化，日志正文切块去重，冷数据整包压缩；React WebUI 提供渠道、分组、令牌、用户、通知、统计、请求日志、预处理、代理池、设置十个页面。
 
 ## 快速开始
 
@@ -38,7 +43,6 @@ npm start
 ```
 
 - `npm run build` 依次构建管理端和用户门户，分别输出到 `web/dist/` 和 `portal/dist/`；后端通过 `tsx` 直接运行 TypeScript，**启动环境也需要安装开发依赖**，不要使用 `npm install --omit=dev`。
-- Windows 下的 `start.bat` 仅执行 `npm start`，首次使用仍需安装依赖并构建前端。
 - 开发服务器将 `/api`、`/v1` 代理到 `localhost:3210`，门户的开发服务器代理到公网端口 `localhost:3211`。修改端口时，也要同步调整 [web/vite.config.ts](web/vite.config.ts) 和 [portal/vite.config.ts](portal/vite.config.ts) 中的代理目标。
 - 可通过 `GET /api/health` 检查服务是否启动；该接口不要求访问令牌。
 
@@ -205,6 +209,17 @@ GROUP BY 1, 2 ORDER BY n DESC;
 ```
 
 6. 出现 `fallback_ok` 说明渠道不支持当前算法，改算法或设为「关闭」，再点「清除」重置记忆。
+
+### 代理池
+
+顶栏的**代理池**页管理一个由网关托管的 [mihomo](https://github.com/MetaCubeX/mihomo) 进程，让渠道请求经池内节点发出：
+
+- **内核**：默认使用 `data/mihomo/mihomo(.exe)`，可在页面上从 MetaCubeX/mihomo 的 GitHub Releases 下载最新版本，也可以在设置里指定自有内核路径。总开关开启后随网关自启，配置变更时热重载。
+- **节点来源**：订阅链接（base64、Clash YAML、SIP008、逐行 URI）或手动粘贴节点 URI；同一节点按身份去重。可设置入口代理（节点 URI 或 http(s) / socks5 地址）作为所有节点的前置跳板，以及下载内核 / 拉取订阅专用的代理。
+- **测速与拨测**：支持批量测速和定时拨测，连续失败达到阈值的节点自动禁用。
+- **渠道绑定**：渠道开启「启用代理池」后，可用包含 / 排除关键词筛选节点。上游返回 `429` / `403` 或发生网络错误时，节点进入冷却并在本次尝试内换节点重发，换节点不消耗渠道重试次数；池内没有可用节点时按换渠道处理。渠道测试与压缩测试同样走池内节点。
+- 请求日志记录本次使用的代理节点，支持按节点名搜索。
+- 代理池设置以 JSON 形式保存在设置项 `proxy_pool` 中；mihomo 控制器默认监听 `19090`，节点入站端口从 `19100` 起递增分配，控制器密钥首次启动时随机生成。
 
 ## 选路、重试与超时
 
@@ -673,7 +688,7 @@ thinking 清理不用于跨格式 IR 路径；单独的 `redacted_thinking` 清�
 - 当前版本不再自动迁移旧版存储布局（正文内嵌在 `blobs` 行内的块表、以签名文本为主键的暂存表）。检测到旧布局时服务启动报错且不修改数据库，需要先停服并离线转换，**转换前请先备份 `data/` 目录**。
 - **含 Zstd 正文或打包块的数据库需要支持 Zstd 的 Node.js 才能读取相关记录**。恢复备份时尽量保持兼容的运行时版本，避免直接降级。
 - 服务开始监听后启动维护，每分钟检查一次，单次最多删除 5000 条过期日志（每批 500 条）；有过期日志删除时或距离上次 GC 超过 6 小时，原子回收无引用块。每轮最多写入 2 个冷包，时间预算 250 ms，已开始的单包处理完成后再让出；任务单飞运行，积压在后续轮次继续处理。稀疏包直接重写有效片段，不先还原为单独压缩块。关闭正文存储只影响后续写入，思维链暂存保持独立容量设置。
-- 日常维护只增量回收少量空闲页并使用非阻塞 checkpoint。页内空洞可用 `npm run logs:storage` 只读检查；需要整库整理时，先停止服务，再执行 `npm run logs:storage -- --apply`。工具先取得独占锁并备份，再执行 `VACUUM`，备份默认保留在 Windows 的 `E:/LLM工作区/回收站`，其他平台为数据目录内的 `backups/`；可用 `AGGHUB_BACKUP_DIR` 指定目录，不自动删除备份。
+- 日常维护只增量回收少量空闲页并使用非阻塞 checkpoint。页内空洞可用 `npm run logs:storage` 只读检查；需要整库整理时，先停止服务，再执行 `npm run logs:storage -- --apply`。工具先取得独占锁并备份，再执行 `VACUUM`，备份默认保留在数据目录内的 `backups/`；可用 `AGGHUB_BACKUP_DIR` 指定目录，不自动删除备份。
 - 备份时建议先停止服务，再复制整个 `data/` 目录。
 - **内网端口默认无鉴权，请勿直接暴露到公网**。内网端口默认监听所有网卡，应配合可信内网和防火墙使用；静态页面和 `/api/health` 即使配置令牌也仍可访问。需要对外提供服务时，开启公网端口并只暴露公网端口。
 - 管理接口可以读取上游凭证，管理令牌带有全部管理权限，不要发给别人；分发请使用令牌页创建的 Key。分发 Key 以明文保存在数据库中，请妥善保护数据库、备份及浏览器中的令牌。
@@ -713,10 +728,11 @@ agghub/
 │   │   ├── paramRules.ts        参数规则
 │   │   ├── pseudoThinking.ts    伪思考拆分与历史续接
 │   │   └── thinkingStore.ts     伪思考及推理密文暂存
+│   ├── pool/                    mihomo 代理池（订阅解析、节点测速、进程管理与选路）
 │   ├── routes/                  渠道、设置、统计、日志、用户、公告等管理 API，portal.ts 为门户 API
 │   └── stats/                   日志记录、正文块存储与清理
 ├── web/src/
-│   ├── pages/                   八个主页面及编辑 / 详情弹窗
+│   ├── pages/                   十个主页面及编辑 / 详情弹窗
 │   ├── api/                     管理 API 客户端与令牌处理
 │   ├── lib/                     请求正文解析与 Markdown 渲染
 │   ├── components/              通用组件
@@ -727,3 +743,19 @@ agghub/
     ├── components/              布局、按钮、弹层、图标、通知中心等组件
     └── styles/                  仿 new-api 的主题变量与样式
 ```
+
+## 开发与测试
+
+```bash
+npm run typecheck   # 服务端、管理端、门户、测试与脚本的类型检查
+npm test            # 运行 server/test 下的全部单元 / 集成测试，可追加文件名片段筛选，如 npm test -- billing
+npm run test:e2e    # 管理端浏览器回归测试，复用本机 Chrome / Chromium，可用 AGGHUB_CHROME 指定路径
+```
+
+- 每个测试文件在独立的临时数据目录中运行，不会读写实际的 `data/`；测试产物默认放在系统临时目录，可用 `AGGHUB_TEST_ROOT` 指定位置，运行结束后保留以便排查。
+- 设置 `AGGHUB_TEST_QUIET=1` 时只输出每个文件的通过情况。
+- 推送到 `main` 与提交 Pull Request 时，GitHub Actions 会自动执行类型检查与测试。
+
+## 许可证
+
+本项目基于 [GNU Affero General Public License v3.0](LICENSE) 发布。修改后通过网络向他人提供服务时，需要按协议向这些用户提供对应的源代码。
