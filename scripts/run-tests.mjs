@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(path.join(root, 'package.json'))
 const loader = pathToFileURL(require.resolve('tsx')).href
-const testRoot = process.env.AGGHUB_TEST_ROOT || (process.platform === 'win32' ? 'E:/LLM工作区/回收站' : os.tmpdir())
+const testRoot = process.env.AGGHUB_TEST_ROOT || os.tmpdir()
 fs.mkdirSync(testRoot, { recursive: true })
 const artifacts = fs.mkdtempSync(path.join(testRoot, 'agghub-tests-'))
 const filters = process.argv.slice(2)
