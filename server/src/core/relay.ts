@@ -42,6 +42,7 @@ import { onAttemptSuccess, onBanSignal } from './channelHealth'
 import { availableKeys, keyLabel, onKeyFailure, onKeySuccess, pickRaceKeys } from './channelKeys'
 import { createRequestCompressor, isCompressionRejection, markUnsupported } from './upstreamCompression'
 import type { CompressionInfo, RequestCompressor } from './upstreamCompression'
+import { FAKE_STREAM_PING_MS, fakeStreamEvents } from './fakeStream'
 
 respConv.setReasoningStore({
   save: items => thinkingStore.saveReasoning(items, getSettings().reasoning_store_max),
@@ -106,6 +107,8 @@ interface AttemptState extends UpstreamContext {
   compression?: CompressionInfo
   /** 代理池节点名；本次尝试换过节点时按顺序用「 → 」连接 */
   proxyNode?: string
+  /** 假流式：客户端要流式、渠道开启假流式，本次尝试按非流式请求上游 */
+  fakeStream: boolean
 }
 
 type Description = Pick<AttemptState, 'adaptor' | 'upstreamModel' | 'upstreamWire' | 'passthrough'>
@@ -214,9 +217,10 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   const images = !state.passthrough && upstreamWire === 'gemini'
   if (images) await resolveImageUrls(body, settings, lifecycle.signal, { restrictPrivate: caller.surface === 'public' })
   let changed = (!!preprocess || images) && JSON.stringify(body) !== JSON.stringify(source)
+  const upstreamStream = ctx.stream && !state.fakeStream
   const request = state.passthrough
-    ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, ctx.stream, ctx.rawHeaders)
-    : adaptor.buildRequest(channel, body, upstreamModel, ctx.stream)
+    ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, upstreamStream, ctx.rawHeaders)
+    : adaptor.buildRequest(channel, body, upstreamModel, upstreamStream)
   if (channel.single_role) {
     const upstreamBody = JSON.parse(request.body)
     const options = { mergeSystem: channel.single_role_merge_system, excludeLastUser: channel.single_role_exclude_last_user }
@@ -311,6 +315,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
     response: new BoundedCapture(settings.store_response_body, settings.log_response_max_bytes),
     pseudo: description.passthrough && matchesPseudoThinking(ctx.entryFormat, description.upstreamWire, channel.id, model, settings),
     meter: new OutputMeter(),
+    fakeStream: ctx.stream && channel.fake_stream,
   })
 
   try {
@@ -458,6 +463,8 @@ async function runAttempt(
   let response: globalThis.Response | undefined
   // 代理池租约；换节点时整体替换，放在对象里便于闭包读取当前值
   const pool: { lease: Lease | null } = { lease: null }
+  // 假流式等待上游完整响应期间定时发 SSE 空帧，防止客户端或反代超时断开
+  const fakePing = state.fakeStream ? new StreamKeepAlive(ctx.res, FAKE_STREAM_PING_MS) : undefined
   try {
     const { channel } = state
     const triedNodes = new Set<number>()
@@ -547,9 +554,9 @@ async function runAttempt(
       }
       throw new UpstreamError(response.status, text, parseRetryAfter(response.headers.get('retry-after')))
     }
-    return ctx.stream
+    return ctx.stream && !state.fakeStream
       ? await pipeResponse(ctx, state, response, settings, requestSignal, caller, keepAlive)
-      : await sendResponse(ctx, state, response, settings)
+      : await sendResponse(ctx, state, response, settings, requestSignal, keepAlive)
   } catch (caught) {
     // 流式中途断开等网络错误也记到节点上（同一租约只记一次）
     if (pool.lease && !attempt.signal.aborted && errorKind(caught) === 'network') {
@@ -557,6 +564,7 @@ async function runAttempt(
     }
     throw attempt.signal.aborted ? attempt.signal.reason : caught
   } finally {
+    fakePing?.dispose()
     pool.lease?.release()
     state.elapsedMs = attempt.elapsed
     attempt.dispose()
@@ -568,7 +576,9 @@ async function runAttempt(
  * 非流式响应。上游已返回 2xx，此后的失败（超限、非 JSON、空回复、转换异常）一律抛 UpstreamResponseError：
  * 上游通常已经计费，不再重试也不换渠道；usage 在判定之前先行解析，保证失败也能按实际用量结算。
  */
-async function sendResponse(ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings): Promise<Outcome> {
+async function sendResponse(
+  ctx: RelayContext, state: AttemptState, response: globalThis.Response, settings: Settings, requestSignal: AbortSignal, keepAlive?: StreamKeepAlive,
+): Promise<Outcome> {
   let overflow = false
   let raw: string
   try {
@@ -614,7 +624,13 @@ async function sendResponse(ctx: RelayContext, state: AttemptState, response: gl
   state.response.append(text)
   state.lifecycle.signal.throwIfAborted()
   if (state.claim && !state.claim()) throw new RequestStopped('race_lost')
-  ctx.res.type('json').send(text)
+  if (state.fakeStream) {
+    // 假流式：完整响应合成为入口协议的 SSE 一次写出；响应头可能已被空帧提前提交
+    openEventStream(ctx.res)
+    state.firstTokenAt = performance.now()
+    await createStreamWriter(ctx.res, requestSignal, state.lifecycle, keepAlive)(fakeStreamEvents(ctx.entryFormat, output))
+    ctx.res.end()
+  } else ctx.res.type('json').send(text)
   return { status: 'success', code: 200, usage: state.usage }
 }
 

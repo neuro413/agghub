@@ -57,6 +57,7 @@ interface FormState {
   /** '' = 跟随全局 */
   request_compression: '' | RequestCompression
   always_retry: boolean
+  fake_stream: boolean
   proxy_pool: boolean
   proxy_pool_include: string
   proxy_pool_exclude: string
@@ -102,7 +103,7 @@ function initForm(c: Channel | null): FormState {
     return {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
-      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '', always_retry: false,
+      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '', always_retry: false, fake_stream: false,
       proxy_pool: false, proxy_pool_include: '', proxy_pool_exclude: '',
     }
   return {
@@ -132,6 +133,7 @@ function initForm(c: Channel | null): FormState {
     key_cooldown: String(c.key_cooldown_seconds ?? 300),
     request_compression: c.request_compression ?? '',
     always_retry: !!c.always_retry,
+    fake_stream: !!c.fake_stream,
     proxy_pool: !!c.proxy_pool,
     proxy_pool_include: c.proxy_pool_include || '',
     proxy_pool_exclude: c.proxy_pool_exclude || '',
@@ -180,6 +182,7 @@ function buildPayload(f: FormState): Partial<Channel> {
     key_cooldown_seconds: Number(f.key_cooldown) || 300,
     request_compression: f.request_compression || null,
     always_retry: f.always_retry,
+    fake_stream: f.fake_stream,
     proxy_pool: f.proxy_pool,
     proxy_pool_include: f.proxy_pool_include.trim() || null,
     proxy_pool_exclude: f.proxy_pool_exclude.trim() || null,
@@ -675,6 +678,20 @@ export function ChannelModal({
         <div className="ah-row">
           <Toggle checked={f.always_retry} onChange={(v) => set('always_retry', v)} />
           <span className="ah-mini ah-muted">{f.always_retry ? '任何上游错误都在本渠道重试' : '仅瞬时错误在本渠道重试'}</span>
+        </div>
+      </Field>
+
+      <Field
+        label="假流式"
+        hint={
+          f.fake_stream
+            ? '客户端流式请求本渠道时改用非流式请求上游，等待期间每 20 秒向客户端发送一个 SSE 空帧防止超时，拿到完整响应后一次性按流式格式下发。适合流式不稳定或不支持流式的上游；渠道超时此时按「等到完整响应」计算'
+            : '关闭时按客户端的请求方式原样流式 / 非流式请求上游'
+        }
+      >
+        <div className="ah-row">
+          <Toggle checked={f.fake_stream} onChange={(v) => set('fake_stream', v)} />
+          <span className="ah-mini ah-muted">{f.fake_stream ? '流式请求以非流式发往上游' : '关闭'}</span>
         </div>
       </Field>
 

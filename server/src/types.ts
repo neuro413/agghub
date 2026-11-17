@@ -76,6 +76,7 @@ export interface ChannelRow {
   ban_until: number | null
   request_compression: string | null
   always_retry: number
+  fake_stream: number
   proxy_pool: number
   proxy_pool_include: string | null
   proxy_pool_exclude: string | null
@@ -124,6 +125,8 @@ export interface Channel {
   request_compression: RequestCompression | null
   /** 一律重试：上游任何 HTTP 错误（含 401/403）都按瞬时错误在本渠道重试，且不因熔断状态码停用渠道或熔断 key */
   always_retry: boolean
+  /** 假流式：客户端流式请求时改用非流式请求上游，等待期间定时发 SSE 空帧保活，拿到完整响应后合成 SSE 下发 */
+  fake_stream: boolean
   /** 上游请求经内置 mihomo 代理池的节点发出（全局代理对该渠道不再生效） */
   proxy_pool: boolean
   /** 节点名包含关键词（逗号分隔，命中任一），null = 不限 */
