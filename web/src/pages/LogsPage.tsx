@@ -162,7 +162,7 @@ export function LogsPage() {
         actions={
           <>
             <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
-              <IconRefresh size={18} />
+              <IconRefresh size={16} />
             </IconButton>
             <Button variant="danger" size="sm" icon={<IconTrash size={16} />} onClick={clearAll}>
               清空
@@ -172,9 +172,9 @@ export function LogsPage() {
       />
 
       {/* 筛选栏 */}
-      <Card className="ah-log-filters">
+      <div className="ah-log-filters">
         <div className="ah-log-search">
-          <IconSearch size={17} className="ah-log-search-icon" />
+          <IconSearch size={15} className="ah-log-search-icon" />
           <Input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
@@ -251,7 +251,7 @@ export function LogsPage() {
             重置
           </Button>
         )}
-      </Card>
+      </div>
 
       {/* 列表 */}
       <Card className="ah-logs-table-card">

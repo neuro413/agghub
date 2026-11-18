@@ -61,6 +61,8 @@
   --role-system: #8b5cf6;
   --role-user: #3b7dd8;
   --role-assistant: #1e9e62;
+  --role-system-soft: #f1ecfe;
+  --role-system-text: #6d3fd9;
   --mark: #ffe08a;
 
   /* ── 图表 ── */

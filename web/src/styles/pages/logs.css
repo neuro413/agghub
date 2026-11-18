@@ -1,0 +1,377 @@
+/* ════════════ 请求日志页 ════════════ */
+
+/* 筛选栏：搜索框与下拉框统一 34px 高，一行排开，窄屏换行 */
+.ah-log-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+.ah-log-search {
+  position: relative;
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+.ah-log-search .ah-input {
+  height: 34px;
+  padding-left: 32px;
+}
+.ah-log-search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+  z-index: 1;
+}
+.ah-log-filters .ah-dd {
+  width: 128px;
+  flex: none;
+}
+.ah-log-filters .ah-dd-trigger {
+  height: 34px;
+  padding: 0 8px 0 10px;
+  font-size: var(--fs-sm);
+}
+
+/* 日志表列宽 */
+.c-time {
+  width: 116px;
+  flex: none;
+  color: var(--text-2);
+}
+.c-status {
+  width: 58px;
+  flex: none;
+}
+.c-model {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ah-logt-model {
+  display: flex;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.c-tok {
+  width: 64px;
+  flex: none;
+  text-align: right;
+}
+.c-lat {
+  width: 96px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: right;
+}
+.c-act {
+  width: 68px;
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* 入口格式徽标 */
+.ah-fmt-badge {
+  --type: var(--text-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-right: 7px;
+  border-radius: 5px;
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 600;
+  flex: none;
+  background: var(--fill);
+  color: var(--type);
+}
+.ah-fmt-badge.openai {
+  --type: var(--type-openai);
+}
+.ah-fmt-badge.anthropic {
+  --type: var(--type-anthropic);
+}
+.ah-fmt-badge.responses {
+  --type: var(--type-responses);
+}
+
+/* ── 详情弹窗 ── */
+.ah-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px 10px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--fill);
+  border-radius: var(--r-md);
+  margin-bottom: var(--sp-4);
+}
+.ah-detail-meta-model {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: var(--fs-base);
+}
+.ah-detail-tabs {
+  align-self: stretch;
+}
+.ah-detail-sec {
+  display: flex;
+  align-items: center;
+  margin: var(--sp-4) 0 8px;
+}
+.ah-detail-sec:first-child {
+  margin-top: 0;
+}
+.ah-detail-sec-label {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ah-detail-empty {
+  padding: var(--sp-10) 0;
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ── 对话块可视化：白底 + 左侧角色色条 ── */
+.ah-conv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ah-conv-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.ah-conv-search {
+  max-width: 320px;
+}
+.ah-conv-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.ah-conv-nav .ah-iconbtn {
+  font-size: 11px;
+  font-weight: 600;
+}
+.ah-conv-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ah-blk {
+  --role: var(--text-3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--role);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  overflow: hidden;
+  contain: content;
+}
+.ah-blk-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  background: var(--fill);
+  cursor: pointer;
+  user-select: none;
+}
+.ah-blk-head:hover {
+  background: var(--fill-strong);
+}
+.ah-blk-role {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  flex: none;
+  width: 82px;
+  color: var(--role);
+}
+.ah-blk-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+}
+.ah-blk-chars {
+  flex: none;
+  color: var(--text-2);
+}
+.ah-blk-body {
+  margin: 0;
+  padding: 10px 13px;
+  border-top: 1px solid var(--border-soft);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.6;
+  max-height: 52vh;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+}
+.ah-blk.role-system {
+  --role: var(--role-system);
+}
+.ah-blk.role-user {
+  --role: var(--role-user);
+}
+.ah-blk.role-assistant {
+  --role: var(--role-assistant);
+}
+.ah-blk.role-tool {
+  --role: var(--warn);
+}
+.ah-blk.role-other .ah-blk-role {
+  color: var(--text-2);
+}
+.ah-blk.hit {
+  box-shadow: 0 0 0 1px var(--border-strong) inset;
+}
+.ah-blk.cur {
+  box-shadow: 0 0 0 2px var(--accent-vivid) inset;
+}
+.ah-blk-body mark {
+  background: var(--mark);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* ── 请求头 ── */
+.ah-ua {
+  background: var(--fill);
+  border-radius: var(--r-md);
+  padding: 9px 13px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  word-break: break-all;
+  color: var(--text);
+}
+.ah-htable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.ah-htable td {
+  border-bottom: 1px solid var(--border-soft);
+  padding: 7px 9px;
+  vertical-align: top;
+  word-break: break-all;
+}
+.ah-htable td.k {
+  color: var(--text-2);
+  width: 210px;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  font-weight: 500;
+}
+.ah-htable td.sensitive {
+  color: var(--text-2);
+  font-family: var(--font-mono);
+}
+.ah-copy-inline {
+  margin-left: 8px;
+  color: var(--text-3);
+  vertical-align: -2px;
+}
+.ah-copy-inline:hover {
+  color: var(--text);
+}
+
+/* ── JSON / 文本查看 ── */
+.ah-jsonview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ah-jsonview-bar {
+  display: flex;
+  align-items: center;
+}
+.ah-code-block {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--fill);
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  max-height: 56vh;
+  overflow: auto;
+  color: var(--text);
+  line-height: 1.55;
+}
+.ah-code-err {
+  color: var(--err-text);
+  background: var(--err-soft);
+  border-color: transparent;
+}
+
+/* 日志标签 */
+.ah-tag-pp {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+.ah-tag-think {
+  background: var(--role-system-soft);
+  border-color: transparent;
+  color: var(--role-system-text);
+}
+.ah-pp-viewbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: var(--sp-3) 0 var(--sp-2);
+}
+.ah-pp-viewflag {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.ah-pp-viewflag.is-pp {
+  color: var(--accent-text);
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .ah-log-filters .ah-dd {
+    width: calc(50% - 4px);
+  }
+  .ah-log-search {
+    max-width: none;
+  }
+  .c-time {
+    display: none;
+  }
+}

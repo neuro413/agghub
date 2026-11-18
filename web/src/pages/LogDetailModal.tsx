@@ -193,7 +193,7 @@ export function LogDetailModal({
               </Button>
             </div>
           )}
-          <div className="ah-detail-tabs">
+          <div className="ah-detail-tabs ah-tabs-line">
             {TABS.map((t) => (
               <button key={t.k} className={`ah-detail-tab${tab === t.k ? ' is-active' : ''}`} onClick={() => setTab(t.k)}>
                 {t.label}
