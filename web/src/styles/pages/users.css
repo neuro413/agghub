@@ -164,7 +164,3 @@
   font-size: var(--fs-xs);
   color: var(--text-2);
 }
-.ah-logt-empty-icon {
-  display: block;
-  margin: 0 auto 10px;
-}

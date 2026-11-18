@@ -10,6 +10,8 @@ import './styles/pages/stats.css'
 import './styles/pages/logs.css'
 import './styles/pages/keys.css'
 import './styles/pages/users.css'
+import './styles/pages/settings.css'
+import './styles/pages/pool.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

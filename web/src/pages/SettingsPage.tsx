@@ -185,7 +185,7 @@ export function SettingsPage() {
 
   if (!s) {
     return (
-      <div className="ah-fade-up">
+      <div className="ah-fade-up ah-page-narrow">
         <PageHead title="设置" />
         <div className="ah-skel" style={{ height: 200 }} />
       </div>
@@ -204,8 +204,9 @@ export function SettingsPage() {
   const discordCallback = publicBase ? `${publicBase}/oauth/discord` : ''
 
   return (
-    <div className="ah-fade-up">
+    <div className="ah-fade-up ah-page-narrow">
       <PageHead
+        sticky
         title="设置"
         sub="对外入口 · 故障转移 · 数据留存"
         actions={
@@ -217,7 +218,7 @@ export function SettingsPage() {
         }
       />
 
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset disabled={saving} className="ah-set-fieldset">
       {/* 对外入口 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">
@@ -655,8 +656,8 @@ export function SettingsPage() {
         </SettingRow>)}
       </Card>
       </fieldset>
-      <div className="ah-mini ah-faint" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
-        <IconSettings size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+      <div className="ah-set-foot">
+        <IconSettings size={13} />
         AggHub · 渠道聚合网关
       </div>
     </div>
@@ -688,7 +689,7 @@ function EndpointRow({ label, url }: { label: string; url: string }) {
           else toast('err', '复制失败，请选择左侧地址手动复制')
         }}
       >
-        <IconCopy size={16} />
+        <IconCopy size={15} />
       </IconButton>
     </div>
   )

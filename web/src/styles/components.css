@@ -38,6 +38,13 @@
   background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
+/* 窄版页面里吸顶页头不向两侧延伸，底线与内容同宽 */
+.ah-page-narrow > .ah-page-head.is-sticky {
+  margin-left: 0;
+  margin-right: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
 .ah-page-head-text {
   min-width: 0;
 }
@@ -714,6 +721,9 @@
   background: var(--err-soft);
   color: var(--err-text);
 }
+.ah-banner.is-err > svg {
+  color: var(--err);
+}
 
 /* ── 弹窗 ── */
 .ah-overlay {
@@ -1238,6 +1248,10 @@ input[type="radio"] {
 .ah-logt-empty svg {
   color: var(--text-3);
 }
+.ah-logt-empty-icon {
+  display: block;
+  margin: 0 auto 10px;
+}
 .ah-logt-pager {
   display: flex;
   align-items: center;
@@ -1419,6 +1433,40 @@ input[type="radio"] {
 .ah-search .ah-input {
   height: 34px;
   padding-left: 32px;
+}
+
+/* ── 代码 / 文本块（日志详情、预处理测试、内核日志共用） ── */
+.ah-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--fill);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  max-height: 220px;
+  overflow: auto;
+  color: var(--text);
+}
+.ah-code-block {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--fill);
+  border: 0;
+  border-radius: var(--r-md);
+  padding: 12px 14px;
+  max-height: 56vh;
+  overflow: auto;
+  color: var(--text);
+  line-height: 1.55;
+}
+.ah-code-err {
+  color: var(--err-text);
+  background: var(--err-soft);
+  border-color: transparent;
 }
 
 /* ── 通用进度条 ── */

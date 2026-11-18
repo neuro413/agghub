@@ -4,7 +4,7 @@ import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { Dropdown, Input } from '../components/Form'
 import {
-  IconChevronLeft, IconChevronRight, IconCopy, IconEdit, IconGlobe, IconPlus, IconRefresh, IconSearch, IconTest, IconTrash,
+  IconChevronLeft, IconChevronRight, IconCopy, IconEdit, IconGlobe, IconPlus, IconRefresh, IconSearch, IconTest, IconTrash, IconWarn,
 } from '../components/Icons'
 import { Modal } from '../components/Modal'
 import { Loading } from '../components/Primitives'
@@ -147,7 +147,7 @@ export function PoolPage() {
         actions={
           <>
             <IconButton title="刷新" onClick={reloadAll}>
-              <IconRefresh size={18} />
+              <IconRefresh size={16} />
             </IconButton>
             <span className="ah-mini ah-muted">{status?.settings.enabled ? '已启用' : '未启用'}</span>
             {toggling ? <span className="ah-spin ah-spin-orange" /> : <Toggle checked={!!status?.settings.enabled} onChange={toggleEnabled} />}
@@ -157,13 +157,13 @@ export function PoolPage() {
 
       {status ? <CoreCard status={status} onChanged={setStatus} /> : <Loading />}
 
-      <div className="ah-pp-chips ah-pool-tabs">
+      <div className="ah-tabs-line ah-pool-tabs">
         {([
           ['nodes', `节点 ${counts?.total ?? 0}`],
           ['subs', `订阅 ${subs.list.length}`],
           ['settings', '设置'],
         ] as [SubTab, string][]).map(([key, label]) => (
-          <button key={key} type="button" className={`ah-pp-chip${tab === key ? ' is-on' : ''}`} onClick={() => setTab(key)}>
+          <button key={key} type="button" className={tab === key ? 'is-active' : ''} aria-current={tab === key ? 'page' : undefined} onClick={() => setTab(key)}>
             {label}
           </button>
         ))}
@@ -229,10 +229,10 @@ function CoreCard({ status, onChanged }: { status: PoolStatus; onChanged: (s: Po
         <span className="ah-faint">{core.path}</span>
         {settings.core_path && <span className="ah-faint">（自定义路径，「下载内核」只会写到默认位置 data/mihomo/）</span>}
       </div>
-      {core.error && <div className="ah-pool-alert">{core.error}</div>}
-      {core.entry_error && <div className="ah-pool-alert">{core.entry_error}</div>}
-      {!settings.enabled && core.installed && <div className="ah-mini ah-muted" style={{ marginBottom: 10 }}>打开右上角总开关后启动内核</div>}
-      <div className="ah-row" style={{ flexWrap: 'wrap' }}>
+      {core.error && <div className="ah-banner is-err ah-pool-alert"><IconWarn size={15} /><span>{core.error}</span></div>}
+      {core.entry_error && <div className="ah-banner is-err ah-pool-alert"><IconWarn size={15} /><span>{core.entry_error}</span></div>}
+      {!settings.enabled && core.installed && <div className="ah-pool-note">打开右上角总开关后启动内核</div>}
+      <div className="ah-row ah-pool-core-actions">
         <Button size="sm" variant="primary" loading={downloading || core.downloading} onClick={download}>
           {core.installed ? '更新内核' : '下载内核'}
         </Button>
@@ -403,9 +403,9 @@ function NodesPanel({
 
   return (
     <>
-      <Card className="ah-log-filters">
+      <div className="ah-log-filters">
         <div className="ah-log-search">
-          <IconSearch size={17} className="ah-log-search-icon" />
+          <IconSearch size={15} className="ah-log-search-icon" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索节点名 / 服务器…" />
         </div>
         <Dropdown
@@ -440,7 +440,7 @@ function NodesPanel({
             { value: 'name', label: '按名称' },
           ]}
         />
-      </Card>
+      </div>
 
       <div className="ah-pool-toolbar">
         <Button size="sm" variant="primary" icon={<IconPlus size={16} />} onClick={() => setImporting(true)}>
@@ -467,7 +467,7 @@ function NodesPanel({
 
       {test.running && (
         <Card className="ah-set-card ah-pool-progress">
-          <div className="ah-row" style={{ justifyContent: 'space-between' }}>
+          <div className="ah-row ah-pool-progress-head">
             <span className="ah-mini">
               {test.kind === 'probe' ? '定时拨测中' : test.paused ? '测速已暂停' : '测速中'} · {test.done}/{test.total} · 成功 {test.ok} · 失败 {test.fail}
             </span>
@@ -482,7 +482,7 @@ function NodesPanel({
               </span>
             )}
           </div>
-          <div className="ah-bar" style={{ marginTop: 8 }}>
+          <div className="ah-bar ah-pool-progress-bar">
             <i style={{ width: `${test.total ? Math.round((test.done / test.total) * 100) : 0}%` }} />
           </div>
         </Card>
@@ -505,7 +505,7 @@ function NodesPanel({
           <Loading />
         ) : pageItems.length === 0 ? (
           <div className="ah-logt-empty">
-            <IconGlobe size={30} style={{ opacity: 0.4, display: 'block', margin: '0 auto 10px' }} />
+            <IconGlobe size={30} className="ah-logt-empty-icon" />
             {nodes.length ? '没有符合条件的节点' : '还没有节点，点「导入节点」或在「订阅」页添加订阅'}
           </div>
         ) : (
