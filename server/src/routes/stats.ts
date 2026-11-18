@@ -42,31 +42,45 @@ statsRouter.get('/', (req, res) => {
   const extraSql = extra.length ? ` AND ${extra.join(' AND ')}` : ''
 
   // 统计口径：只算每次客户端请求的「最终结果」(is_retry=0)，重试中的中间尝试不计入
-  const overview = db
-    .prepare(
-      `SELECT
-         COUNT(*) AS total,
-         SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success,
-         COALESCE(SUM(total_tokens), 0) AS tokens,
-         COALESCE(SUM(quota_points), 0) AS points,
-         COALESCE(AVG(latency_ms), 0) AS avg_latency
-       FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0${extraSql}`,
-    )
-    .get(since, now, ...extraArgs) as { total: number; success: number; tokens: number; points: number; avg_latency: number }
-
-  const total = overview.total || 0
-  const success = overview.success || 0
+  const overviewStmt = db.prepare(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success,
+       COALESCE(SUM(total_tokens), 0) AS tokens,
+       COALESCE(SUM(quota_points), 0) AS points,
+       COALESCE(AVG(latency_ms), 0) AS avg_latency
+     FROM request_logs WHERE created_at >= ? AND created_at < ? AND is_retry = 0${extraSql}`,
+  )
+  /** [from, to) 区间的概览 */
+  const overviewOf = (from: number, to: number) => {
+    const o = overviewStmt.get(from, to, ...extraArgs) as { total: number; success: number; tokens: number; points: number; avg_latency: number }
+    const total = o.total || 0
+    const success = o.success || 0
+    return {
+      total,
+      success,
+      error: total - success,
+      success_rate: total > 0 ? success / total : 1,
+      total_tokens: o.tokens || 0,
+      total_points: o.points || 0,
+      avg_latency: Math.round(o.avg_latency || 0),
+    }
+  }
+  // 当前区间含 now 这一毫秒；上一个等长区间 [since - 长度, since) 用于指标卡环比
+  const overview = overviewOf(since, now + 1)
+  const overviewPrev = overviewOf(since - (now - since), since)
 
   const trendRows = db
     .prepare(
       `SELECT CAST(created_at / ? AS INTEGER) * ? AS bucket,
               COUNT(*) AS requests,
+              SUM(CASE WHEN status!='success' THEN 1 ELSE 0 END) AS errors,
               COALESCE(SUM(total_tokens), 0) AS tokens,
               COALESCE(SUM(quota_points), 0) AS points
        FROM request_logs WHERE created_at >= ? AND created_at <= ? AND is_retry = 0${extraSql}
        GROUP BY bucket ORDER BY bucket ASC`,
     )
-    .all(bucketMs, bucketMs, since, now, ...extraArgs) as { bucket: number; requests: number; tokens: number; points: number }[]
+    .all(bucketMs, bucketMs, since, now, ...extraArgs) as { bucket: number; requests: number; errors: number; tokens: number; points: number }[]
 
   // RPM / TPM：按自然分钟分桶（日志在请求结束时写入，即按完成时间计），再归到趋势桶取每桶内的峰值分钟
   const minuteRows = db
@@ -101,11 +115,11 @@ statsRouter.get('/', (req, res) => {
   const trendMap = new Map(trendRows.map((r) => [r.bucket, r]))
   const startBucket = Math.floor(since / bucketMs) * bucketMs
   const endBucket = Math.floor(now / bucketMs) * bucketMs
-  const trend: { bucket: number; requests: number; tokens: number; points: number; peak_rpm: number; peak_tpm: number }[] = []
+  const trend: { bucket: number; requests: number; errors: number; tokens: number; points: number; peak_rpm: number; peak_tpm: number }[] = []
   for (let b = startBucket; b <= endBucket; b += bucketMs) {
     const r = trendMap.get(b)
     const p = peaks.get(b)
-    trend.push({ bucket: b, requests: r?.requests || 0, tokens: r?.tokens || 0, points: r?.points || 0, peak_rpm: p?.rpm || 0, peak_tpm: p?.tpm || 0 })
+    trend.push({ bucket: b, requests: r?.requests || 0, errors: r?.errors || 0, tokens: r?.tokens || 0, points: r?.points || 0, peak_rpm: p?.rpm || 0, peak_tpm: p?.tpm || 0 })
   }
 
   const byChannel = db
@@ -184,15 +198,8 @@ statsRouter.get('/', (req, res) => {
     range,
     bucketMs,
     since,
-    overview: {
-      total,
-      success,
-      error: total - success,
-      success_rate: total > 0 ? success / total : 1,
-      total_tokens: overview.tokens || 0,
-      total_points: overview.points || 0,
-      avg_latency: Math.round(overview.avg_latency || 0),
-    },
+    overview,
+    overview_prev: overviewPrev,
     throughput: {
       current_rpm: current.requests || 0,
       current_tpm: current.tokens || 0,

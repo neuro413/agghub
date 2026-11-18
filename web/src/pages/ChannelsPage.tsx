@@ -14,6 +14,7 @@ import { useToast } from '../components/Toast'
 import { fmtDuration, rateTone, successRate } from '../lib/format'
 import type { Channel, ChannelGroupView } from '../types'
 import { ChannelModal } from './ChannelModal'
+import { Sparkline } from '../charts/Sparkline'
 
 type Filter = 'all' | 'on' | 'banned' | 'off'
 type View = 'cards' | 'table'
@@ -331,6 +332,9 @@ function ChannelTable({
   onEdit: (c: Channel) => void
   onDelete: (c: Channel) => void
 }) {
+  // 后端提供了对应字段才显示延迟、24 小时两列
+  const hasLatency = channels.some((c) => c.today_avg_latency !== undefined)
+  const hasHourly = channels.some((c) => c.today_hourly !== undefined)
   return (
     <Card className="ah-table-card">
       <div className="ah-table-wrap">
@@ -345,6 +349,8 @@ function ChannelTable({
               <th>分组</th>
               <th className="r">今日请求</th>
               <th className="r">成功率</th>
+              {hasLatency && <th className="r">延迟</th>}
+              {hasHourly && <th className="ah-chan-hourly">24 小时</th>}
               <th>启用</th>
               <th className="r">操作</th>
             </tr>
@@ -385,6 +391,12 @@ function ChannelTable({
                 <td className="r">
                   <RatePill rate={successRate(c.today_success, c.today_requests)} />
                 </td>
+                {hasLatency && <td className="r ah-num">{c.today_avg_latency == null ? '—' : fmtDuration(c.today_avg_latency)}</td>}
+                {hasHourly && (
+                  <td className="ah-chan-hourly" title="今天每小时请求数">
+                    {c.today_hourly?.some((v) => v > 0) ? <Sparkline values={c.today_hourly} className="ah-chan-spark" /> : <span className="ah-muted">—</span>}
+                  </td>
+                )}
                 <td>
                   <Toggle checked={c.status === 1} onChange={() => onToggle(c)} label={c.status === 1 ? '停用渠道' : '启用渠道'} />
                 </td>

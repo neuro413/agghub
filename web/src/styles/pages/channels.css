@@ -139,11 +139,39 @@
 }
 .ah-chan-url {
   display: block;
-  max-width: 260px;
+  max-width: 200px;
   font-family: var(--font-mono);
   font-size: 12.5px;
 }
 .ah-chan-tact {
   display: inline-flex;
   gap: 2px;
+}
+
+/* 表格里的 24 小时请求走势 */
+.ah-chan-spark {
+  display: block;
+  width: 60px;
+  height: 22px;
+  color: var(--chart-1);
+}
+@media (max-width: 1500px) {
+  .ah-chan-url {
+    max-width: 150px;
+  }
+}
+/* 渠道表列多，单元格左右内边距收窄到 10px */
+.ah-chan-table th,
+.ah-chan-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.ah-chan-table th:first-child,
+.ah-chan-table td:first-child {
+  padding-left: 14px;
+}
+@media (max-width: 1400px) {
+  .ah-chan-table .ah-chan-hourly {
+    display: none;
+  }
 }
