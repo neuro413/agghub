@@ -1,0 +1,480 @@
+/* ════════════ 统计页 ════════════ */
+.ah-stats-key {
+  width: 170px;
+}
+
+/* 通用面板（统计页的图表、分布区） */
+.ah-panel {
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.ah-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 46px;
+  padding: 12px 18px 0;
+}
+.ah-panel-head h2 {
+  margin: 0;
+  font-size: var(--fs-base);
+  font-weight: 600;
+}
+.ah-panel-hint {
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.ah-panel-chart {
+  padding: 8px 10px 10px;
+}
+.ah-panel-body {
+  padding: 10px 18px 16px;
+}
+.ah-legend {
+  display: inline-flex;
+  gap: 14px;
+}
+.ah-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  margin-right: 6px;
+}
+
+/* 指标卡 */
+.ah-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+.ah-kpi {
+  position: relative;
+  min-width: 0;
+  padding: 14px 16px 12px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.ah-kpi-label {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.ah-kpi-val {
+  margin-top: 4px;
+  font-size: var(--fs-3xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+.ah-kpi-val small {
+  margin-left: 1px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--text-2);
+  letter-spacing: 0;
+}
+.ah-kpi-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.ah-spark {
+  position: absolute;
+  right: 14px;
+  top: 16px;
+  width: 64px;
+  height: 24px;
+  color: var(--text-3);
+}
+.ah-delta {
+  flex: none;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ah-delta.up {
+  color: var(--ok-text);
+}
+.ah-delta.down {
+  color: var(--err-text);
+}
+.ah-delta.flat {
+  color: var(--text-2);
+}
+
+/* 吞吐带：一个面板内横向 4 格 */
+.ah-live {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 14px 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+.ah-live > div {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 18px;
+  border-left: 1px solid var(--border-soft);
+}
+.ah-live > div:first-child {
+  border-left: 0;
+}
+.ah-live label {
+  flex: none;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+.ah-live b {
+  flex: none;
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+.ah-live span {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+/* 图表行 */
+.ah-stats-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.ah-stats-row.is-21 {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+/* 折线图 */
+.ah-linechart {
+  position: relative;
+  width: 100%;
+}
+.ah-linechart svg {
+  display: block;
+}
+.ah-c-grid {
+  stroke: var(--chart-grid);
+  stroke-width: 1;
+}
+.ah-c-tick {
+  fill: var(--chart-axis);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ah-c-cursor {
+  stroke: var(--chart-axis);
+  stroke-dasharray: 3 3;
+}
+.ah-c-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.ah-chart-tip {
+  position: absolute;
+  z-index: 5;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  font-size: var(--fs-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  background: var(--tip-bg);
+  color: var(--tip-fg);
+  box-shadow: var(--shadow-pop);
+}
+.ah-chart-tip b {
+  font-weight: 600;
+  color: var(--tip-muted);
+}
+.ah-chart-tip span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ah-chart-tip i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.ah-chart-tip em {
+  margin-left: auto;
+  padding-left: 16px;
+  font-style: normal;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.ah-chart-empty {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  padding: 24px 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+/* 环形图 */
+.ah-donut-wrap {
+  padding: 0 18px 16px;
+}
+.ah-donut {
+  position: relative;
+  width: 148px;
+  margin: 16px auto 14px;
+}
+.ah-donut svg {
+  display: block;
+  transform: rotate(-90deg);
+}
+.ah-donut-track {
+  stroke: var(--border-soft);
+}
+.ah-donut-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+}
+.ah-donut-center b {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.ah-donut-center small {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+.ah-donut-legend {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ah-donut-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: var(--fs-sm);
+}
+.ah-donut-legend i {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.ah-donut-legend span {
+  min-width: 0;
+}
+.ah-donut-legend b {
+  margin-left: auto;
+  font-weight: 600;
+}
+.ah-donut-legend em {
+  flex: none;
+  width: 48px;
+  text-align: right;
+  font-style: normal;
+  color: var(--text-2);
+}
+
+/* 模型排名条 */
+.ah-minibar {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ah-minibar-row {
+  padding: 7px 0;
+}
+.ah-minibar-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: var(--fs-sm);
+}
+.ah-minibar-head .ah-mono {
+  font-size: 12.5px;
+}
+.ah-minibar-head b {
+  font-weight: 600;
+  color: var(--text);
+}
+.ah-minibar-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.ah-minibar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--chart-2);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.ah-minibar-fill.is-top {
+  background: var(--chart-1);
+}
+
+/* 分布区：带表头的网格行 */
+.ah-dist-panel {
+  margin-bottom: 14px;
+}
+.ah-dist {
+  margin-top: 8px;
+  font-size: var(--fs-sm);
+}
+.ah-dist-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+}
+.ah-dist-head,
+.ah-dist-row {
+  display: grid;
+  gap: 12px;
+  align-items: center;
+  padding: 0 18px;
+}
+.ah-dist-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.ah-dist-row {
+  min-height: 40px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.ah-dist-row:last-child {
+  border-bottom: 0;
+}
+.ah-dist-row:hover {
+  background: var(--row-hover);
+}
+.ah-dist .r {
+  text-align: right;
+}
+.ah-keydist-row {
+  grid-template-columns: minmax(0, 2fr) 0.8fr 0.7fr 0.9fr;
+}
+.ah-keydist-name {
+  color: var(--text);
+}
+.ah-ipdist-row {
+  grid-template-columns: minmax(0, 1.2fr) 0.6fr 0.5fr 0.6fr 0.7fr minmax(0, 2.4fr);
+}
+.ah-uadist-row {
+  grid-template-columns: minmax(0, 4fr) 0.6fr 0.5fr 0.6fr 0.7fr;
+}
+.ah-guildrank-row {
+  grid-template-columns: 32px minmax(0, 2.4fr) minmax(0, 1.4fr) 0.6fr 0.5fr 0.6fr 24px;
+}
+.ah-guildrank-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ah-ipdist-callers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 0;
+}
+/* inline-flex 下省略号不生效 */
+.ah-ipdist-callers .ah-tag {
+  display: inline-block;
+  max-width: 200px;
+  line-height: 18px;
+}
+.ah-rankbar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.ah-rankbar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--chart-2);
+}
+.ah-rankbar > i.is-top {
+  background: var(--chart-1);
+}
+
+/* 最近请求 */
+.ah-recent .ah-panel-head {
+  padding-bottom: 6px;
+}
+.ah-recent .ah-panel-head .ah-btn {
+  margin-right: -8px;
+}
+.ah-table tr.is-click {
+  cursor: pointer;
+}
+.ah-recent-model {
+  display: block;
+  max-width: 320px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ah-recent-chan {
+  display: block;
+  max-width: 180px;
+}
+
+@media (max-width: 1180px) {
+  .ah-kpis {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ah-live {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ah-live > div:nth-child(3) {
+    border-left: 0;
+  }
+  .ah-live > div:nth-child(n + 3) {
+    border-top: 1px solid var(--border-soft);
+  }
+}
+@media (max-width: 880px) {
+  .ah-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ah-stats-row,
+  .ah-stats-row.is-21 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

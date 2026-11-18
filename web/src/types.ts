@@ -53,9 +53,11 @@ export interface Stats {
   bucketMs: number
   since: number
   overview: StatsOverview
+  /** 上一个等长区间的概览，用于环比；需要后端支持，缺失时不显示涨跌 */
+  overview_prev?: StatsOverview
   throughput: StatsThroughput
-  /** peak_rpm / peak_tpm 为该桶内的峰值分钟 */
-  trend: { bucket: number; requests: number; tokens: number; points: number; peak_rpm: number; peak_tpm: number }[]
+  /** peak_rpm / peak_tpm 为该桶内的峰值分钟；errors 为失败数，需要后端支持 */
+  trend: { bucket: number; requests: number; tokens: number; points: number; peak_rpm: number; peak_tpm: number; errors?: number }[]
   by_channel: { channel_id: number; channel_name: string; count: number; success: number }[]
   by_model: { model: string; count: number }[]
   by_key: { key_id: number; key_name: string | null; count: number; success: number; points: number }[]
