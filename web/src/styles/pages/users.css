@@ -158,9 +158,3 @@
   background: var(--discord-soft);
   color: var(--discord);
 }
-
-.ah-users-foot {
-  margin-top: 10px;
-  font-size: var(--fs-xs);
-  color: var(--text-2);
-}

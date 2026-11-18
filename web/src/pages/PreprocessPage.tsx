@@ -158,7 +158,7 @@ export function PreprocessPage() {
       />
 
       {tagError && <div role="alert" className="ah-detail-empty">{tagError}</div>}
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset disabled={saving} className="ah-set-fieldset">
       {/* 卡片 A0：参数修改规则 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">
@@ -225,7 +225,7 @@ export function PreprocessPage() {
                 <div className="ah-set-row-desc">
                   开启后可保留最近 N 个 thinking 块，而非全部去除。
                   {s.drop_thinking_keep_last > 0 && s.pseudo_thinking_enabled && (
-                    <span style={{ color: 'var(--err)' }}> 保留模式下伪思考将自动失效</span>
+                    <span className="ah-c-err"> 保留模式下伪思考将自动失效</span>
                   )}
                 </div>
               </div>
@@ -270,8 +270,8 @@ export function PreprocessPage() {
           <div className="ah-set-row-info">
             <div className="ah-set-row-label">启用伪思考</div>
             <div className="ah-set-row-desc">
-              {!s.drop_thinking && <span style={{ color: 'var(--err)' }}>需先开启上方「丢弃 thinking 块」</span>}
-              {s.drop_thinking && s.drop_thinking_keep_last > 0 && <span style={{ color: 'var(--err)' }}>需关闭「自定义去除深度」（须全部去除才可用）</span>}
+              {!s.drop_thinking && <span className="ah-c-err">需先开启上方「丢弃 thinking 块」</span>}
+              {s.drop_thinking && s.drop_thinking_keep_last > 0 && <span className="ah-c-err">需关闭「自定义去除深度」（须全部去除才可用）</span>}
             </div>
           </div>
           <div className="ah-set-row-control">
@@ -362,7 +362,7 @@ export function PreprocessPage() {
           <IconWand size={18} /> 正则请求体修改
         </div>
         <div className="ah-set-desc">对请求消息文本做查找 / 替换 / 删除，可视化与正则共用同一份规则</div>
-        <div className="ah-detail-tabs">
+        <div className="ah-detail-tabs ah-tabs-line">
           <button className={`ah-detail-tab${subtab === 'visual' ? ' is-active' : ''}`} onClick={() => setSubtab('visual')}>
             可视化
           </button>
@@ -454,7 +454,7 @@ function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onT
           <div className="ah-pp-grid2">
             <Field
               label="查找（正则）"
-              hint={!reValid ? <span style={{ color: 'var(--err)' }}>正则表达式无效</span> : undefined}
+              hint={!reValid ? <span className="ah-c-err">正则表达式无效</span> : undefined}
             >
               <Textarea value={rule.pattern} onChange={(e) => up({ pattern: e.target.value })} placeholder="要匹配的正则" rows={2} />
             </Field>
@@ -764,7 +764,7 @@ function ToolImportModal({
             >
               {selected.has(t.name) ? '✓' : '　'}
             </span>
-            <span style={{ fontWeight: 500, flexShrink: 0 }}>{t.name}</span>
+            <span className="ah-pp-tool-name">{t.name}</span>
             {existing.has(t.name) && <span className="ah-mini ah-faint">（已添加）</span>}
             {t.description && (
               <span className="ah-mini ah-muted ah-truncate" style={{ flex: 1 }}>

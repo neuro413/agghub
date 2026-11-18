@@ -340,7 +340,7 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
           </div>
         )}
       </Card>
-      <div className="ah-users-foot">余额可能因最后一次请求透支为负。用户可用的分组 = 公开分组 + 专属分组。</div>
+      <div className="ah-page-foot">余额可能因最后一次请求透支为负。用户可用的分组 = 公开分组 + 专属分组。</div>
       {groupUser && <UserGroupsModal user={groupUser} groups={groups} onClose={() => setGroupUser(null)} onSaved={patch} />}
     </div>
   )

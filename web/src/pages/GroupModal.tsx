@@ -217,7 +217,7 @@ export function GroupModal({
               </button>
             ))}
             {invalid.map((m) => (
-              <button type="button" key={m} className="ah-pp-chip is-on" title="已勾选渠道中没有这个模型，点击移除" onClick={() => set('models', toggleIn(f.models, m))}>
+              <button type="button" key={m} className="ah-pp-chip is-on is-invalid" title="已勾选渠道中没有这个模型，点击移除" onClick={() => set('models', toggleIn(f.models, m))}>
                 {m}（已失效，可移除）
               </button>
             ))}

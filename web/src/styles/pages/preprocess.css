@@ -1,0 +1,307 @@
+/* ════════════ 提示词预处理 ════════════ */
+
+.ah-pp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+.ah-pp-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+}
+.ah-pp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 规则卡 */
+.ah-pp-rule {
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+.ah-pp-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  transition: background var(--dur) var(--ease-out);
+}
+.ah-pp-rule-head:hover {
+  background: var(--row-hover);
+}
+.ah-pp-grip {
+  display: inline-flex;
+  color: var(--text-3);
+  cursor: grab;
+}
+.ah-pp-summary {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.ah-pp-summary-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+/* 规则来源：正则 / 可视化 / 参数 */
+.ah-pp-src {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  background: var(--fill);
+  color: var(--text-2);
+}
+.ah-pp-src.is-regex {
+  background: var(--accent-soft);
+  color: var(--accent-text);
+}
+.ah-pp-src.is-visual {
+  background: var(--info-soft);
+  color: var(--info-text);
+}
+.ah-pp-src.is-param {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+.ah-pp-invalid {
+  color: var(--err);
+  font-size: 14px;
+}
+.ah-pp-rule-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: 14px 12px;
+  border-top: 1px solid var(--border-soft);
+  background: var(--surface);
+}
+.ah-pp-grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+/* 可点选的小按钮（预处理限定范围、分组弹窗、渠道弹窗、定价导入、公告类型共用）：按 .ah-tag 规格 */
+.ah-pp-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ah-pp-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.ah-pp-chip:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.ah-pp-chip.is-on {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent-text);
+}
+.ah-pp-chip.is-invalid {
+  background: var(--err-soft);
+  border-color: transparent;
+  color: var(--err-text);
+}
+.ah-pp-chip:focus-visible {
+  outline: 2px solid var(--accent-vivid);
+  outline-offset: 1px;
+}
+
+.ah-pp-test-out {
+  margin-top: 8px;
+  max-height: 160px;
+}
+.ah-pp-test-out-lg {
+  max-height: 320px;
+}
+
+/* 可视化选取：对话块 + 底部生成栏 */
+.ah-pp-visual {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.ah-pp-conv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ah-pp-blk-body {
+  max-height: 260px;
+  user-select: text;
+}
+.ah-pp-genbar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-pop);
+}
+.ah-pp-gen-sel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ah-pp-gen-text {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ah-pp-gen-act {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ah-pp-gen-act .ah-input {
+  flex: 1;
+  min-width: 160px;
+}
+
+/* 选取请求 / 工具列表 */
+.ah-pp-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ah-pp-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.ah-pp-picker-row:hover {
+  border-color: var(--border-strong);
+  background: var(--row-hover);
+}
+.ah-pp-picker-model {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ah-pp-tool-name {
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+/* ── 参数修改规则 ── */
+.ah-pp-ops {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ah-pp-op {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.ah-pp-op.is-invalid {
+  border-color: var(--err);
+}
+.ah-pp-op-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ah-pp-op-idx {
+  flex: none;
+  width: 18px;
+  text-align: center;
+}
+.ah-pp-op-head .ah-select-wrap {
+  flex: none;
+  width: 250px;
+}
+.ah-pp-op-head .ah-select,
+.ah-pp-op-head .ah-input {
+  height: 32px;
+  font-size: var(--fs-sm);
+}
+.ah-pp-op-head .ah-input {
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ah-pp-op-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  margin-left: auto;
+}
+.ah-pp-test-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 8px;
+}
+.ah-pp-test-err {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--err-soft);
+  color: var(--err-text);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 640px) {
+  .ah-pp-grid2 {
+    grid-template-columns: 1fr;
+  }
+}
