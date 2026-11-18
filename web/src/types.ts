@@ -13,9 +13,11 @@ export type {
   PoolSettings, NodeView as PoolNodeView, PoolSubscription, CoreStatus as PoolCoreStatus, TestProgress as PoolTestProgress, DelayResult,
 } from '../../server/src/pool/types'
 
-/** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数；附带记忆期内被判定不支持的压缩算法 */
+/** 列表接口附带今日统计；多 key 渠道附带 key 总数与当前可用数；附带记忆期内被判定不支持的压缩算法
+ *  today_avg_latency / today_hourly 需要后端支持，缺失时前端不渲染对应内容 */
 export type Channel = ServerChannel & {
   today_requests?: number; today_success?: number; key_total?: number; key_available?: number
+  today_avg_latency?: number | null; today_hourly?: number[]
   compression_unsupported?: CompressionUnsupported[]
 }
 

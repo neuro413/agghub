@@ -468,6 +468,7 @@
 /* ── 渠道类型徽章：中性底 + 类型色点 ── */
 .ah-badge {
   --type: var(--text-3);
+  vertical-align: middle;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1398,4 +1399,56 @@ input[type="radio"] {
 .ah-ctest td.ah-num {
   white-space: nowrap;
   word-break: normal;
+}
+
+/* ── 搜索框（带图标） ── */
+.ah-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 260px;
+  max-width: 100%;
+}
+.ah-search > svg {
+  position: absolute;
+  left: 11px;
+  color: var(--text-3);
+  pointer-events: none;
+  z-index: 1;
+}
+.ah-search .ah-input {
+  height: 34px;
+  padding-left: 32px;
+}
+
+/* ── 通用进度条 ── */
+.ah-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-soft);
+  overflow: hidden;
+}
+.ah-bar > i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--chart-3);
+  transition: width var(--dur-slow) var(--ease-out);
+}
+.ah-bar > i.is-warn {
+  background: var(--warn);
+}
+.ah-bar > i.is-err {
+  background: var(--err);
+}
+
+/* ── 骨架屏 ── */
+.ah-skel {
+  height: 188px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border-soft);
+  background: linear-gradient(100deg, var(--fill) 30%, var(--surface) 50%, var(--fill) 70%);
+  background-size: 360px 100%;
+  animation: ah-shimmer 1.3s infinite linear;
 }
