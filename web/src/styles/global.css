@@ -75,16 +75,6 @@ p {
     transform: none;
   }
 }
-@keyframes ah-pop {
-  0% {
-    opacity: 0;
-    transform: scale(0.92);
-  }
-  100% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
 @keyframes ah-fade-in {
   from {
     opacity: 0;
@@ -98,16 +88,6 @@ p {
     transform: rotate(360deg);
   }
 }
-@keyframes ah-pulse-ring {
-  0% {
-    transform: scale(0.7);
-    opacity: 0.55;
-  }
-  100% {
-    transform: scale(2.4);
-    opacity: 0;
-  }
-}
 @keyframes ah-shimmer {
   0% {
     background-position: -360px 0;
@@ -116,49 +96,10 @@ p {
     background-position: 360px 0;
   }
 }
-@keyframes ah-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-14px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 /* ── 通用动画工具类 ── */
 .ah-fade-up {
   animation: ah-fade-up var(--dur) var(--ease-out) both;
-}
-
-/* 入场 stagger（卡片网格逐个浮现）*/
-.ah-stagger > * {
-  animation: ah-fade-up var(--dur-slow) var(--ease-out) both;
-}
-.ah-stagger > *:nth-child(1) {
-  animation-delay: 0.02s;
-}
-.ah-stagger > *:nth-child(2) {
-  animation-delay: 0.06s;
-}
-.ah-stagger > *:nth-child(3) {
-  animation-delay: 0.1s;
-}
-.ah-stagger > *:nth-child(4) {
-  animation-delay: 0.14s;
-}
-.ah-stagger > *:nth-child(5) {
-  animation-delay: 0.18s;
-}
-.ah-stagger > *:nth-child(6) {
-  animation-delay: 0.22s;
-}
-.ah-stagger > *:nth-child(7) {
-  animation-delay: 0.26s;
-}
-.ah-stagger > *:nth-child(8) {
-  animation-delay: 0.3s;
 }
 
 /* 文本工具 */

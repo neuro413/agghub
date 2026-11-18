@@ -129,36 +129,4 @@
 
   /* ── 布局 ── */
   --side-w: 232px;
-
-  /* ════ 旧变量别名（过渡期，P5 删除） ════ */
-  --cream: var(--bg);
-  --white: var(--surface);
-  --paper: var(--surface);
-  --ink: var(--text);
-  --ink-soft: var(--text-2);
-  --ink-faint: var(--text-2);
-  --line: var(--border);
-  --line-soft: var(--border-soft);
-  --orange-50: var(--fill);
-  --orange-100: var(--fill-strong);
-  --orange-200: var(--fill-strong);
-  --orange-300: var(--border-strong);
-  --orange-400: var(--accent-vivid);
-  --orange-500: var(--accent-vivid);
-  --orange-600: var(--accent-vivid);
-  --orange-700: var(--text);
-  --grad-warm: var(--accent);
-  --grad-soft: var(--fill);
-  --grad-glow: var(--fill);
-  --grad-warm-soft: var(--fill);
-  --ok-bg: var(--ok-soft);
-  --warn-bg: var(--warn-soft);
-  --err-bg: var(--err-soft);
-  --info-bg: var(--info-soft);
-  --shadow-card: none;
-  --shadow-soft: var(--shadow-xs);
-  --shadow-ring: var(--ring);
-  --r-xs: 6px;
-  --r-2xl: 14px;
-  --ease-soft: var(--ease-out);
 }
