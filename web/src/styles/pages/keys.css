@@ -41,7 +41,7 @@
 /* Key 卡片网格 */
 .ah-keycards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
   gap: 14px;
 }
 .ah-keycards > .ah-skel {
@@ -161,9 +161,15 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 2px;
-  margin: 0 -6px;
+  margin: auto -6px 0;
   padding-top: 10px;
   border-top: 1px solid var(--border-soft);
+}
+.ah-key-actions .ah-btn.is-sm {
+  padding: 0 8px;
+}
+.ah-key-actions .sp {
+  flex: 1;
 }
 
 /* 公开分组 / Discord 标签（日志页、分组页、用户页共用） */
@@ -357,10 +363,4 @@
 }
 .ah-price-import-model .is-none {
   color: var(--err-text);
-}
-
-@media (max-width: 520px) {
-  .ah-keycards {
-    grid-template-columns: 1fr;
-  }
 }

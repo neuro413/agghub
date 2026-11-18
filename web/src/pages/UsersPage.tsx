@@ -276,7 +276,7 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
         }
       />
 
-      <Card className="ah-logs-table-card">
+      <Card className="ah-logs-table-card ah-users-table">
         <div className="ah-logt-head">
           <span className="u-name">用户名</span>
           <span className="u-num">余额</span>

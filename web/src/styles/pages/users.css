@@ -158,3 +158,16 @@
   background: var(--discord-soft);
   color: var(--discord);
 }
+
+/* 窄屏：先隐藏注册、最近登录两列，仍放不下时表格横向滚动 */
+.ah-users-table {
+  overflow-x: auto;
+}
+.ah-users-table > * {
+  min-width: 720px;
+}
+@media (max-width: 1180px) {
+  .ah-users-table .u-time {
+    display: none;
+  }
+}
