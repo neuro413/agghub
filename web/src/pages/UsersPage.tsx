@@ -113,7 +113,7 @@ function UserKeys({ userId, usable, onChanged }: { userId: number; usable: strin
         const expired = k.expires_at != null && k.expires_at <= Date.now()
         return (
           <div key={k.id} className="ah-user-key">
-            <span className="ah-truncate" style={{ fontWeight: 700 }}>{k.name}</span>
+            <span className="ah-truncate ah-strong">{k.name}</span>
             {k.groups[0] && usable.includes(k.groups[0])
               ? <span className="ah-tag">{k.groups[0]}</span>
               : <span className="ah-tag ah-tag-warn" title="分组已删除或不再对该用户可用，这个 Key 无法调用">{k.groups[0] ? `${k.groups[0]}（不可用）` : '无分组'}</span>}
@@ -122,7 +122,7 @@ function UserKeys({ userId, usable, onChanged }: { userId: number; usable: strin
             <span className="ah-mini ah-muted ah-num">已用 {money(k.quota_used)}</span>
             <span className="ah-mini ah-faint">{k.last_used_at ? `最近 ${fmtTime(k.last_used_at)}` : '从未使用'}</span>
             {expired && <span className="ah-tag ah-tag-warn">已过期</span>}
-            <span className="sp" style={{ flex: 1 }} />
+            <span className="sp" />
             <Toggle checked={k.enabled} onChange={() => toggle(k)} />
             <IconButton title="删除" danger onClick={() => del(k)}><IconTrash size={15} /></IconButton>
           </div>
@@ -163,7 +163,7 @@ function UserGuilds({ userId, recordedAt, onSearch }: { userId: number; recorded
               <GuildIcon guild={g} />
               <span className="ah-truncate" title={`${g.name}\n服务器 ID：${g.id}`}>{g.name}</span>
               {g.owner && <span className="ah-tag">服主</span>}
-              <span className="sp" style={{ flex: 1 }} />
+              <span className="sp" />
               {g.member_count != null && <span className="ah-mini ah-faint ah-num">{fmtNum(g.member_count)} 人</span>}
               <button type="button" className="ah-guild-search" title="搜索同在这个服务器的用户" onClick={() => onSearch(g.id)}>
                 <IconSearch size={13} />
@@ -267,11 +267,11 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
         sub="公网门户注册的用户 · 余额 · 停用 · 自建 Key"
         actions={
           <>
-            <div className="ah-user-search">
-              <IconSearch size={16} />
+            <div className="ah-search">
+              <IconSearch size={15} />
               <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord / 服务器" />
             </div>
-            <IconButton title="刷新" onClick={reload}><IconRefresh size={18} /></IconButton>
+            <IconButton title="刷新" onClick={reload}><IconRefresh size={16} /></IconButton>
           </>
         }
       />
@@ -291,16 +291,16 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
           <Loading />
         ) : data.items.length === 0 ? (
           <div className="ah-logt-empty">
-            <IconUsers size={30} style={{ opacity: 0.4, display: 'block', margin: '0 auto 10px' }} />
+            <IconUsers size={30} className="ah-logt-empty-icon" />
             {q ? '没有匹配的用户' : '还没有用户注册'}
           </div>
         ) : (
           data.items.map(u => (
             <Fragment key={u.id}>
-              <div className="ah-logt-row ah-user-row" onClick={() => setOpenId(id => (id === u.id ? null : u.id))}>
+              <div className={`ah-logt-row ah-user-row${openId === u.id ? ' is-open' : ''}`} onClick={() => setOpenId(id => (id === u.id ? null : u.id))}>
                 <span className="u-name">
                   <IconChevron size={14} className={`ah-user-chev${openId === u.id ? ' is-open' : ''}`} />
-                  <span className="ah-truncate" style={{ fontWeight: 700 }}>{u.username}</span>
+                  <span className="ah-truncate ah-strong">{u.username}</span>
                   {u.discord_id && (
                     <span className="ah-tag ah-tag-discord" title={`Discord ID：${u.discord_id}${u.has_password ? '' : '（仅 Discord 登录）'}`}>
                       <IconDiscord size={12} />{u.discord_username ?? 'Discord'}
@@ -340,7 +340,7 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
           </div>
         )}
       </Card>
-      <div className="ah-mini ah-faint" style={{ marginTop: 10 }}>余额可能因最后一次请求透支为负。用户可用的分组 = 公开分组 + 专属分组。</div>
+      <div className="ah-users-foot">余额可能因最后一次请求透支为负。用户可用的分组 = 公开分组 + 专属分组。</div>
       {groupUser && <UserGroupsModal user={groupUser} groups={groups} onClose={() => setGroupUser(null)} onSaved={patch} />}
     </div>
   )

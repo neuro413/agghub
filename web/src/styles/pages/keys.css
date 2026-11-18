@@ -1,0 +1,366 @@
+/* ════════════ 令牌页 ════════════ */
+
+/* 公网分发状态横幅 */
+.ah-keys-pub {
+  margin-bottom: var(--sp-4);
+  align-items: center;
+}
+.ah-keys-pub > svg {
+  margin-top: 0;
+}
+.ah-keys-pub-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-width: 0;
+}
+.ah-keys-pub-desc {
+  color: var(--text-2);
+}
+.ah-keys-pub-url {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--text-2);
+}
+.ah-keys-pub-url code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ah-keys-pub-url code.is-empty {
+  font-family: var(--font);
+  color: var(--text-2);
+}
+
+/* Key 卡片网格 */
+.ah-keycards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+  gap: 14px;
+}
+.ah-keycards > .ah-skel {
+  height: 220px;
+}
+.ah-key-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 16px 12px;
+}
+.ah-key-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ah-key-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  color: var(--text-2);
+}
+.ah-key-title {
+  flex: 1;
+  min-width: 0;
+}
+.ah-key-name {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ah-key-sub {
+  margin-top: 1px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 密钥：灰底等宽字 */
+.ah-key-secret {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 4px 0 12px;
+  background: var(--fill);
+  border-radius: var(--r-md);
+}
+.ah-key-secret-val {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 额度：两列「标签 + 数值」 */
+.ah-key-quotas {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.ah-key-q {
+  min-width: 0;
+}
+.ah-key-q label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.ah-key-q-val {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ah-key-q-val small {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--text-2);
+}
+
+/* 分组、限流、过期、正文记录 */
+.ah-key-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.ah-key-groups {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ah-key-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 0 -6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+/* 公开分组 / Discord 标签（日志页、分组页、用户页共用） */
+.ah-tag-pub {
+  background: var(--info-soft);
+  border-color: transparent;
+  color: var(--info-text);
+}
+.ah-tag-discord {
+  align-items: center;
+  gap: 4px;
+  background: var(--discord-soft);
+  border-color: transparent;
+  color: var(--discord);
+}
+
+/* ── 模型定价：紧凑表格 ── */
+.ah-ratio-card {
+  margin-top: var(--sp-4);
+}
+.ah-ratio-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.ah-ratio-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ah-ratio-head,
+.ah-ratio-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.6fr) repeat(5, minmax(84px, 0.8fr)) 30px;
+  gap: 8px;
+  align-items: center;
+}
+.ah-ratio-head {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+  font-weight: 500;
+  padding: 0 2px 2px;
+}
+.ah-ratio-head span:not(:first-child) {
+  text-align: right;
+  padding-right: 10px;
+}
+.ah-ratio-head em {
+  margin-left: 3px;
+  font-style: normal;
+  color: var(--text-3);
+}
+.ah-ratio-row .ah-input,
+.ah-ratio-row .ah-money-input,
+.ah-price-import-row .ah-money-input,
+.ah-ratio-trial-grid .ah-input {
+  height: 32px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.ah-ratio-row .ah-input {
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ah-ratio-row .ah-money-input,
+.ah-price-import-row .ah-money-input {
+  padding: 0 10px;
+}
+.ah-ratio-row .ah-money-input input,
+.ah-price-import-row .ah-money-input input {
+  font-size: var(--fs-sm);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ah-ratio-pattern {
+  position: relative;
+}
+.ah-ratio-pattern .ah-input {
+  padding-right: 52px;
+}
+.ah-ratio-pattern .ah-tag {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ah-ratio-dirty {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--warn-text);
+}
+.ah-ratio-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-4);
+}
+.ah-ratio-trial {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--border-soft);
+}
+.ah-ratio-trial-grid {
+  display: grid;
+  grid-template-columns: 1.6fr repeat(4, 0.9fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+.ah-ratio-trial-grid .ah-input {
+  padding: 0 10px;
+}
+.ah-ratio-trial-out {
+  margin-top: 10px;
+  padding: 9px 12px;
+  border-radius: var(--r-md);
+  background: var(--ok-soft);
+  color: var(--ok-text);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.ah-ratio-trial-out.is-empty {
+  background: var(--err-soft);
+  color: var(--err-text);
+}
+@media (max-width: 720px) {
+  .ah-ratio-head {
+    display: none;
+  }
+  .ah-ratio-row,
+  .ah-ratio-trial-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ah-ratio-pattern {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── 导入模型定价弹窗 ── */
+.ah-price-import-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: 10px;
+}
+.ah-price-import-search {
+  width: 220px;
+}
+.ah-price-import-table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ah-price-import-head,
+.ah-price-import-row {
+  display: grid;
+  grid-template-columns: 22px minmax(180px, 1.6fr) repeat(5, minmax(84px, 0.75fr));
+  gap: 8px;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+}
+.ah-price-import-head {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ah-price-import-head span:not(:nth-child(2)) {
+  text-align: center;
+}
+.ah-price-import-row.is-selected {
+  background: var(--fill);
+}
+.ah-price-import-head input,
+.ah-price-import-row input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-vivid);
+  cursor: pointer;
+}
+.ah-price-import-model {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-weight: 500;
+  cursor: pointer;
+}
+.ah-price-import-model .is-none {
+  color: var(--err-text);
+}
+
+@media (max-width: 520px) {
+  .ah-keycards {
+    grid-template-columns: 1fr;
+  }
+}

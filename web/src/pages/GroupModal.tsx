@@ -188,8 +188,8 @@ export function GroupModal({
 
       <Field label={`允许的模型（已选 ${f.models.length - invalid.length} / ${options.length}）`} hint="选项为已勾选渠道对外的模型名（含专属名和重映射别名）；未勾选的模型本组不能调用">
         <div className="ah-group-tools">
-          <div className="ah-user-search">
-            <IconSearch size={16} />
+          <div className="ah-search">
+            <IconSearch size={15} />
             <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="筛选模型" />
           </div>
           <button type="button" className="ah-btn is-ghost is-sm" onClick={() => set('models', [...new Set([...f.models, ...shown])])}>

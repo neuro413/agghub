@@ -1,0 +1,170 @@
+/* ════════════ 用户页 ════════════ */
+
+/* 列宽（表头与行共用 6.1 的网格表格） */
+.ah-user-row .u-name,
+.ah-logt-head .u-name {
+  flex: 1;
+  min-width: 120px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+/* 空间不够时先截断标签，用户名保持完整 */
+.ah-user-row .u-name > .ah-truncate {
+  flex: none;
+  max-width: 180px;
+}
+.ah-user-row .u-name > .ah-tag-discord {
+  flex: none;
+}
+.ah-user-row .u-name > .ah-tag:not(.ah-tag-discord) {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.u-num {
+  width: 80px;
+  flex: none;
+  text-align: right;
+}
+.u-num.u-sm {
+  width: 48px;
+}
+.u-num.is-neg {
+  color: var(--err-text);
+  font-weight: 600;
+}
+.u-time {
+  width: 84px;
+  flex: none;
+}
+.u-act {
+  width: 268px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+.ah-user-row {
+  cursor: pointer;
+}
+.ah-user-row.is-open {
+  background: var(--row-hover);
+  border-bottom-color: transparent;
+}
+.ah-user-chev {
+  flex: none;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transition: transform var(--dur) var(--ease-out);
+}
+.ah-user-chev.is-open {
+  transform: rotate(0deg);
+  color: var(--text-2);
+}
+
+/* 展开行：整行 --row-hover 底，左侧缩进与用户名对齐（行内边距 14 + 箭头 14 + 间距 6） */
+.ah-user-keys,
+.ah-user-guilds {
+  padding: 4px 14px 12px 34px;
+  background: var(--row-hover);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--fs-sm);
+}
+.ah-user-keys {
+  display: flex;
+  flex-direction: column;
+}
+.ah-user-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 36px;
+  border-bottom: 1px dashed var(--border-soft);
+}
+.ah-user-key:last-child {
+  border-bottom: 0;
+}
+.ah-user-key .ah-key-secret-val {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: var(--r-sm);
+  background: var(--fill);
+}
+.ah-user-key .sp,
+.ah-guild .sp {
+  flex: 1;
+}
+.ah-user-keys + .ah-user-guilds {
+  padding-top: 0;
+}
+.ah-user-guilds-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  margin-bottom: 4px;
+}
+.ah-user-guilds-head svg {
+  color: var(--discord);
+}
+.ah-guild-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 4px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.ah-guild {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 28px;
+  font-size: var(--fs-sm);
+}
+
+/* 服务器图标（统计页服务器排名共用） */
+.ah-guild-icon {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--r-sm);
+  display: inline-grid;
+  place-items: center;
+  object-fit: cover;
+  background: var(--discord-soft);
+  color: var(--discord);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ah-guild-search {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  background: transparent;
+  transition: background var(--dur) var(--ease-out), color var(--dur) var(--ease-out);
+}
+.ah-guild-search:hover {
+  background: var(--discord-soft);
+  color: var(--discord);
+}
+
+.ah-users-foot {
+  margin-top: 10px;
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+.ah-logt-empty-icon {
+  display: block;
+  margin: 0 auto 10px;
+}
