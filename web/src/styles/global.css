@@ -10,27 +10,11 @@ body {
   margin: 0;
   font-family: var(--font);
   font-size: var(--fs-base);
-  color: var(--ink);
-  background: var(--cream);
+  color: var(--text);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   line-height: 1.55;
-}
-
-/* 装饰性柔光背景 */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(42% 32% at 10% 6%, rgba(255, 168, 102, 0.16), transparent 70%),
-    radial-gradient(38% 30% at 94% 2%, rgba(255, 197, 158, 0.18), transparent 70%),
-    radial-gradient(50% 40% at 50% 108%, rgba(255, 138, 61, 0.08), transparent 70%),
-    var(--grad-glow);
-  /* 提升为独立合成层:柔光固定在视口,但不再参与主文档滚动重绘 */
-  transform: translateZ(0);
 }
 
 a {
@@ -57,8 +41,8 @@ p {
   margin: 0;
 }
 ::selection {
-  background: var(--orange-200);
-  color: var(--orange-700);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 /* 滚动条 */
@@ -67,13 +51,13 @@ p {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--orange-200);
+  background: var(--border-strong);
   border-radius: var(--r-pill);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--orange-300);
+  background: var(--text-3);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
@@ -84,7 +68,7 @@ p {
 @keyframes ah-fade-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
