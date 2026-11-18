@@ -9,6 +9,7 @@ import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { Channel, ChannelGroupView } from '../types'
 import { ChannelModal } from './ChannelModal'
+import { PageHead } from '../components/PageHead'
 
 export function ChannelsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
@@ -58,17 +59,17 @@ export function ChannelsPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">渠道管理</div>
-          <div className="ah-page-sub">
-            聚合 {channels.length} 个上游渠道 · {enabledCount} 个在线
-          </div>
-        </div>
-        <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
-          新增渠道
-        </Button>
-      </div>
+      <PageHead
+        title="渠道管理"
+        sub={<>聚合 {channels.length} 个上游渠道 · {enabledCount} 个在线</>}
+        actions={
+          <>
+            <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+              新增渠道
+            </Button>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="ah-chan-grid">

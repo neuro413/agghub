@@ -13,6 +13,7 @@ import { IconBolt, IconCheck, IconChevronRight, IconDiscord, IconKey, IconRefres
 import { useToast } from '../components/Toast'
 import type { ApiKeyView, DiscordGuildRanking, LogItem, Stats } from '../types'
 import { GuildIcon, StatusPill } from '../components/Primitives'
+import { PageHead } from '../components/PageHead'
 
 const RANGES: { k: string; label: string }[] = [
   { k: '24h', label: '24 小时' },
@@ -94,31 +95,31 @@ export function StatsPage({ onOpenLogs, onSearchUsers }: { onOpenLogs: () => voi
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">数据统计</div>
-          <div className="ah-page-sub">请求趋势 · 渠道分布 · 调用明细</div>
-        </div>
-        <div className="ah-row">
-          <div style={{ width: 170 }}>
-            <Dropdown
-              value={keyId}
-              onChange={setKeyId}
-              options={[{ value: '', label: '全部 Key' }, ...keys.map((k) => ({ value: String(k.id), label: k.name }))]}
-            />
-          </div>
-          <div className="ah-range">
-            {RANGES.map((r) => (
-              <button key={r.k} className={range === r.k ? 'is-active' : ''} onClick={() => setRange(r.k)}>
-                {r.label}
-              </button>
-            ))}
-          </div>
-          <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
-            <IconRefresh size={18} />
-          </IconButton>
-        </div>
-      </div>
+      <PageHead
+        title="数据统计"
+        sub="请求趋势 · 渠道分布 · 调用明细"
+        actions={
+          <>
+            <div style={{ width: 170 }}>
+              <Dropdown
+                value={keyId}
+                onChange={setKeyId}
+                options={[{ value: '', label: '全部 Key' }, ...keys.map((k) => ({ value: String(k.id), label: k.name }))]}
+              />
+            </div>
+            <div className="ah-range">
+              {RANGES.map((r) => (
+                <button key={r.k} className={range === r.k ? 'is-active' : ''} onClick={() => setRange(r.k)}>
+                  {r.label}
+                </button>
+              ))}
+            </div>
+            <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
+              <IconRefresh size={18} />
+            </IconButton>
+          </>
+        }
+      />
 
       <div className="ah-stats-grid">
         <StatCard icon={<IconBolt size={19} />} label="总请求" value={ov?.total ?? 0} sub={`成功 ${ov?.success ?? 0} · 失败 ${ov?.error ?? 0}`} />

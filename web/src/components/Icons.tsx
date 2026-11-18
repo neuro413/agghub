@@ -268,3 +268,23 @@ export const IconGlobe = (p: IconProps) => (
     <path d="M12 3C14.5 5.5 15.6 8.6 15.6 12C15.6 15.4 14.5 18.5 12 21C9.5 18.5 8.4 15.4 8.4 12C8.4 8.6 9.5 5.5 12 3Z" />
   </S>
 )
+
+export const IconMenu = (p: IconProps) => (
+  <S {...p}>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </S>
+)
+
+export const IconList = (p: IconProps) => (
+  <S {...p}>
+    <path d="M8 6h12M8 12h12M8 18h12" />
+    <path d="M4 6h.01M4 12h.01M4 18h.01" />
+  </S>
+)
+
+export const IconSidebar = (p: IconProps) => (
+  <S {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M9 4v16" />
+  </S>
+)

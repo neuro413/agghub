@@ -13,6 +13,7 @@ import { fmtNum, fmtTime } from '../lib/format'
 import { currencySymbol, money, toPoints } from '../lib/money'
 import type { ApiKeyView, ChannelGroupView, DiscordGuild, UserListResult, UserView } from '../types'
 import { MultiChips } from './preprocessShared'
+import { PageHead } from '../components/PageHead'
 
 const PAGE_SIZE = 20
 
@@ -261,19 +262,19 @@ export function UsersPage({ initialQuery = '' }: { initialQuery?: string }) {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">用户</div>
-          <div className="ah-page-sub">公网门户注册的用户 · 余额 · 停用 · 自建 Key</div>
-        </div>
-        <div className="ah-row">
-          <div className="ah-user-search">
-            <IconSearch size={16} />
-            <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord / 服务器" />
-          </div>
-          <IconButton title="刷新" onClick={reload}><IconRefresh size={18} /></IconButton>
-        </div>
-      </div>
+      <PageHead
+        title="用户"
+        sub="公网门户注册的用户 · 余额 · 停用 · 自建 Key"
+        actions={
+          <>
+            <div className="ah-user-search">
+              <IconSearch size={16} />
+              <Input value={qInput} onChange={e => setQInput(e.target.value)} placeholder="搜索用户名 / Discord / 服务器" />
+            </div>
+            <IconButton title="刷新" onClick={reload}><IconRefresh size={18} /></IconButton>
+          </>
+        }
+      />
 
       <Card className="ah-logs-table-card">
         <div className="ah-logt-head">

@@ -7,6 +7,7 @@ import { IconEdit, IconLayers, IconPlus, IconRefresh, IconTrash } from '../compo
 import { useToast } from '../components/Toast'
 import type { Channel, ChannelGroupView } from '../types'
 import { GroupModal } from './GroupModal'
+import { PageHead } from '../components/PageHead'
 
 export function GroupsPage() {
   const toast = useToast()
@@ -50,20 +51,20 @@ export function GroupsPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">分组</div>
-          <div className="ah-page-sub">按分组开放渠道与模型 · 分组倍率 · 公开或分配给门户用户</div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={refresh}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
-            新建分组
-          </Button>
-        </div>
-      </div>
+      <PageHead
+        title="分组"
+        sub="按分组开放渠道与模型 · 分组倍率 · 公开或分配给门户用户"
+        actions={
+          <>
+            <IconButton title="刷新" onClick={refresh}>
+              <IconRefresh size={18} />
+            </IconButton>
+            <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+              新建分组
+            </Button>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="ah-chan-grid">

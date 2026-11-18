@@ -15,6 +15,7 @@ import { fmtBytes, fmtTime } from '../lib/format'
 import type { PoolCoreStatus, PoolNodeView, PoolSettings, PoolStatus, PoolSubscription } from '../types'
 import { PoolImportModal } from './PoolImportModal'
 import { PoolSubscriptionModal } from './PoolSubscriptionModal'
+import { PageHead } from '../components/PageHead'
 
 type SubTab = 'nodes' | 'subs' | 'settings'
 type SubsState = { list: PoolSubscription[]; updating: number[] }
@@ -140,22 +141,19 @@ export function PoolPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">代理池</div>
-          <div className="ah-page-sub">
-            内置 mihomo · 内核 {stateInfo?.label ?? '…'}
-            {core?.version ? ` ${core.version}` : ''} · 节点 {counts?.total ?? 0} 个 · 可用 {counts?.available ?? 0} 个
-          </div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={reloadAll}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <span className="ah-mini ah-muted">{status?.settings.enabled ? '已启用' : '未启用'}</span>
-          {toggling ? <span className="ah-spin ah-spin-orange" /> : <Toggle checked={!!status?.settings.enabled} onChange={toggleEnabled} />}
-        </div>
-      </div>
+      <PageHead
+        title="代理池"
+        sub={<>内置 mihomo · 内核 {stateInfo?.label ?? '…'}{core?.version ? ` ${core.version}` : ''} · 节点 {counts?.total ?? 0} 个 · 可用 {counts?.available ?? 0} 个</>}
+        actions={
+          <>
+            <IconButton title="刷新" onClick={reloadAll}>
+              <IconRefresh size={18} />
+            </IconButton>
+            <span className="ah-mini ah-muted">{status?.settings.enabled ? '已启用' : '未启用'}</span>
+            {toggling ? <span className="ah-spin ah-spin-orange" /> : <Toggle checked={!!status?.settings.enabled} onChange={toggleEnabled} />}
+          </>
+        }
+      />
 
       {status ? <CoreCard status={status} onChanged={setStatus} /> : <Loading />}
 

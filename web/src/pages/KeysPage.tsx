@@ -12,6 +12,7 @@ import { currencySymbol, money, toPoints } from '../lib/money'
 import type { ApiKeyView, ChannelGroupView, ModelRatio, SystemInfo } from '../types'
 import { KeyModal } from './KeyModal'
 import { ModelRatioCard } from './ModelRatioCard'
+import { PageHead } from '../components/PageHead'
 
 /** sk-agh-XXXX…YYYY，前 4 位 + 后 4 位 */
 function maskKey(key: string): string {
@@ -133,20 +134,20 @@ export function KeysPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">令牌</div>
-          <div className="ah-page-sub">分发 Key · 额度 · 模型定价</div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={refresh}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
-            新建 Key
-          </Button>
-        </div>
-      </div>
+      <PageHead
+        title="令牌"
+        sub="分发 Key · 额度 · 模型定价"
+        actions={
+          <>
+            <IconButton title="刷新" onClick={refresh}>
+              <IconRefresh size={18} />
+            </IconButton>
+            <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+              新建 Key
+            </Button>
+          </>
+        }
+      />
 
       <Card className="ah-set-card">
         <div className="ah-set-title">

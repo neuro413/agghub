@@ -16,6 +16,7 @@ import { LogPickerModal, MultiChips, RuleList, ScopeFields, regexValid } from '.
 import type { Opt, RuleRowProps } from './preprocessShared'
 import { newId } from '../lib/id'
 import { channelModelNames } from '../lib/channelModels'
+import { PageHead } from '../components/PageHead'
 
 const ROLE_OPTIONS: Opt[] = [
   { value: 'system', label: 'system' },
@@ -136,11 +137,7 @@ export function PreprocessPage() {
   if (!s) {
     return (
       <div className="ah-fade-up">
-        <div className="ah-page-head">
-          <div>
-            <div className="ah-page-title">提示词预处理</div>
-          </div>
-        </div>
+        <PageHead title="提示词预处理" />
         <div className="ah-skel" style={{ height: 200 }} />
       </div>
     )
@@ -148,15 +145,17 @@ export function PreprocessPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">提示词预处理</div>
-          <div className="ah-page-sub">发往上游前改写请求体 · 丢弃 thinking · 正则替换 · 参数修改</div>
-        </div>
-        <Button variant="primary" loading={saving} disabled={!dirty || !!tagError} onClick={save}>
-          {dirty ? '保存修改' : '已保存'}
-        </Button>
-      </div>
+      <PageHead
+        title="提示词预处理"
+        sub="发往上游前改写请求体 · 丢弃 thinking · 正则替换 · 参数修改"
+        actions={
+          <>
+            <Button variant="primary" loading={saving} disabled={!dirty || !!tagError} onClick={save}>
+              {dirty ? '保存修改' : '已保存'}
+            </Button>
+          </>
+        }
+      />
 
       {tagError && <div role="alert" className="ah-detail-empty">{tagError}</div>}
       <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>

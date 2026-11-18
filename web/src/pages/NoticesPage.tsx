@@ -10,6 +10,7 @@ import { useToast } from '../components/Toast'
 import { Markdown } from '../lib/markdown'
 import type { Announcement } from '../types'
 import { AnnouncementModal, TYPE_OPTIONS } from './AnnouncementModal'
+import { PageHead } from '../components/PageHead'
 
 // 门户通知中心的内容管理：通知（设置项 portal_notice）+ 公告列表
 
@@ -96,12 +97,10 @@ export function NoticesPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">通知</div>
-          <div className="ah-page-sub">门户右上角通知中心的内容 · 通知 · 公告</div>
-        </div>
-      </div>
+      <PageHead
+        title="通知"
+        sub="门户右上角通知中心的内容 · 通知 · 公告"
+      />
 
       <Card className="ah-set-card">
         <div className="ah-notice-head">
