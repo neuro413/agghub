@@ -17,7 +17,7 @@ export type TabKey = 'channels' | 'groups' | 'keys' | 'users' | 'notices' | 'sta
 
 type TabDef = { key: TabKey; label: string; Icon: typeof IconChannels }
 
-/** 侧栏分组；导航项的可访问名称即 label，e2e 测试按名称查找，不要加角标 */
+/** 侧栏分组；导航项的可访问名称即 label */
 export const TAB_GROUPS: { label: string; tabs: TabDef[] }[] = [
   {
     label: '运行',

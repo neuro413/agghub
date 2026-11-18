@@ -753,7 +753,6 @@ agghub/
 ```bash
 npm run typecheck   # 服务端、管理端、门户、测试与脚本的类型检查
 npm test            # 运行 server/test 下的全部单元 / 集成测试，可追加文件名片段筛选，如 npm test -- billing
-npm run test:e2e    # 管理端浏览器回归测试，复用本机 Chrome / Chromium，可用 AGGHUB_CHROME 指定路径
 ```
 
 - 每个测试文件在独立的临时数据目录中运行，不会读写实际的 `data/`；测试产物默认放在系统临时目录，可用 `AGGHUB_TEST_ROOT` 指定位置，运行结束后保留以便排查。

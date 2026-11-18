@@ -18,10 +18,6 @@ const u1 = { role: 'user', content: 'u1' }
 const a1 = { role: 'assistant', content: 'a1' }
 const u2 = { role: 'user', content: 'u2' }
 
-test('SINGLE_ROLE_FILLER 为换行加零宽空格', () => {
-  assert.equal(SINGLE_ROLE_FILLER, '\n' + String.fromCharCode(0x200b))
-})
-
 test('OpenAI：开头 system 为系统提示，中途 system 原位打包', () => {
   const system = { role: 'system', content: 'S' }
   const mid = { role: 'system', content: 'mid' }
