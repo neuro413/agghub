@@ -10,27 +10,11 @@ body {
   margin: 0;
   font-family: var(--font);
   font-size: var(--fs-base);
-  color: var(--ink);
-  background: var(--cream);
+  color: var(--text);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   line-height: 1.55;
-}
-
-/* 装饰性柔光背景 */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  background:
-    radial-gradient(42% 32% at 10% 6%, rgba(255, 168, 102, 0.16), transparent 70%),
-    radial-gradient(38% 30% at 94% 2%, rgba(255, 197, 158, 0.18), transparent 70%),
-    radial-gradient(50% 40% at 50% 108%, rgba(255, 138, 61, 0.08), transparent 70%),
-    var(--grad-glow);
-  /* 提升为独立合成层:柔光固定在视口,但不再参与主文档滚动重绘 */
-  transform: translateZ(0);
 }
 
 a {
@@ -57,8 +41,8 @@ p {
   margin: 0;
 }
 ::selection {
-  background: var(--orange-200);
-  color: var(--orange-700);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 /* 滚动条 */
@@ -67,13 +51,13 @@ p {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--orange-200);
+  background: var(--border-strong);
   border-radius: var(--r-pill);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--orange-300);
+  background: var(--text-3);
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-track {
@@ -84,36 +68,24 @@ p {
 @keyframes ah-fade-up {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(4px);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
-@keyframes ah-pop {
-  0% {
+@keyframes ah-fade-in {
+  from {
     opacity: 0;
-    transform: scale(0.92);
   }
-  100% {
+  to {
     opacity: 1;
-    transform: scale(1);
   }
 }
 @keyframes ah-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes ah-pulse-ring {
-  0% {
-    transform: scale(0.7);
-    opacity: 0.55;
-  }
-  100% {
-    transform: scale(2.4);
-    opacity: 0;
   }
 }
 @keyframes ah-shimmer {
@@ -124,49 +96,10 @@ p {
     background-position: 360px 0;
   }
 }
-@keyframes ah-toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(-14px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
 
 /* ── 通用动画工具类 ── */
 .ah-fade-up {
   animation: ah-fade-up var(--dur) var(--ease-out) both;
-}
-
-/* 入场 stagger（卡片网格逐个浮现）*/
-.ah-stagger > * {
-  animation: ah-fade-up var(--dur-slow) var(--ease-out) both;
-}
-.ah-stagger > *:nth-child(1) {
-  animation-delay: 0.02s;
-}
-.ah-stagger > *:nth-child(2) {
-  animation-delay: 0.06s;
-}
-.ah-stagger > *:nth-child(3) {
-  animation-delay: 0.1s;
-}
-.ah-stagger > *:nth-child(4) {
-  animation-delay: 0.14s;
-}
-.ah-stagger > *:nth-child(5) {
-  animation-delay: 0.18s;
-}
-.ah-stagger > *:nth-child(6) {
-  animation-delay: 0.22s;
-}
-.ah-stagger > *:nth-child(7) {
-  animation-delay: 0.26s;
-}
-.ah-stagger > *:nth-child(8) {
-  animation-delay: 0.3s;
 }
 
 /* 文本工具 */

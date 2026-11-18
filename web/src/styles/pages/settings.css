@@ -1,0 +1,222 @@
+/* ════════════ 设置页（代理池设置面板、令牌页定价卡片共用 .ah-set-*） ════════════ */
+
+.ah-set-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.ah-set-card {
+  margin-bottom: var(--sp-4);
+  padding: 18px 20px 6px;
+}
+.ah-set-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.ah-set-title > svg {
+  flex: none;
+  color: var(--text-2);
+}
+.ah-set-desc {
+  margin-top: 3px;
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* 设置行：左侧标题 + 说明，右侧控件；行间细线 */
+.ah-set-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ah-set-row-info {
+  flex: 1;
+  min-width: 0;
+}
+.ah-set-row-label {
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+.ah-set-row-desc {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.ah-set-row-control {
+  flex: none;
+  width: 230px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+/* 占满整行的设置项（标题、说明在上，控件在下） */
+.ah-set-block {
+  padding: 14px 0;
+  border-top: 1px solid var(--border-soft);
+}
+.ah-set-block .ah-set-row-desc {
+  margin-bottom: var(--sp-3);
+}
+
+/* 品牌图标、背景图预览 */
+.ah-brand-preview {
+  flex: none;
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  border: 1px solid var(--border);
+  font-size: 18px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ah-brand-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ah-bg-preview {
+  height: 120px;
+  margin-bottom: var(--sp-4);
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  border: 1px solid var(--border);
+}
+.ah-bg-preview img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 入口地址行：灰底，地址用等宽字 */
+.ah-endpoint {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 40px;
+  padding: 0 4px 0 14px;
+  margin-bottom: 8px;
+  background: var(--fill);
+  border-radius: var(--r-md);
+}
+.ah-endpoint-label {
+  flex: none;
+  min-width: 112px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ah-endpoint-url {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+.ah-set-card > .ah-endpoint:last-of-type {
+  margin-bottom: var(--sp-3);
+}
+
+.ah-set-foot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: var(--sp-4);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+/* ── Discord 登录门槛 ── */
+.ah-dc-rules {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ah-dc-or {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ah-dc-or::before,
+.ah-dc-or::after {
+  content: '';
+  flex: 1;
+  border-top: 1px dashed var(--border);
+}
+.ah-dc-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.ah-dc-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ah-dc-group-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.ah-dc-group-head .ah-iconbtn {
+  margin-left: auto;
+}
+.ah-dc-cond {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--fill);
+}
+.ah-dc-label {
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ah-dc-guild {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ah-dc-cond .ah-input {
+  min-width: 0;
+  height: 32px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+@media (max-width: 640px) {
+  .ah-set-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--sp-3);
+  }
+  .ah-set-row-control {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

@@ -12,6 +12,7 @@ import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import type { CompressionAlgorithm, Settings, SystemInfo } from '../types'
 import { DiscordRulesEditor } from './DiscordRulesEditor'
+import { PageHead } from '../components/PageHead'
 
 // 只提交本页 UI 涉及的字段：整份回写会用本页加载时的旧缓存覆盖预处理页的规则
 const KEYS: (keyof Settings)[] = [
@@ -184,12 +185,8 @@ export function SettingsPage() {
 
   if (!s) {
     return (
-      <div className="ah-fade-up">
-        <div className="ah-page-head">
-          <div>
-            <div className="ah-page-title">设置</div>
-          </div>
-        </div>
+      <div className="ah-fade-up ah-page-narrow">
+        <PageHead title="设置" />
         <div className="ah-skel" style={{ height: 200 }} />
       </div>
     )
@@ -207,18 +204,21 @@ export function SettingsPage() {
   const discordCallback = publicBase ? `${publicBase}/oauth/discord` : ''
 
   return (
-    <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">设置</div>
-          <div className="ah-page-sub">对外入口 · 故障转移 · 数据留存</div>
-        </div>
-        <Button variant="primary" loading={saving} onClick={save}>
-          保存设置
-        </Button>
-      </div>
+    <div className="ah-fade-up ah-page-narrow">
+      <PageHead
+        sticky
+        title="设置"
+        sub="对外入口 · 故障转移 · 数据留存"
+        actions={
+          <>
+            <Button variant="primary" loading={saving} onClick={save}>
+              保存设置
+            </Button>
+          </>
+        }
+      />
 
-      <fieldset disabled={saving} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+      <fieldset disabled={saving} className="ah-set-fieldset">
       {/* 对外入口 */}
       <Card className="ah-set-card">
         <div className="ah-set-title">
@@ -656,8 +656,8 @@ export function SettingsPage() {
         </SettingRow>)}
       </Card>
       </fieldset>
-      <div className="ah-mini ah-faint" style={{ textAlign: 'center', padding: 'var(--sp-4)' }}>
-        <IconSettings size={13} style={{ verticalAlign: '-2px', marginRight: 4 }} />
+      <div className="ah-set-foot">
+        <IconSettings size={13} />
         AggHub · 渠道聚合网关
       </div>
     </div>
@@ -689,7 +689,7 @@ function EndpointRow({ label, url }: { label: string; url: string }) {
           else toast('err', '复制失败，请选择左侧地址手动复制')
         }}
       >
-        <IconCopy size={16} />
+        <IconCopy size={15} />
       </IconButton>
     </div>
   )

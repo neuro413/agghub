@@ -1,0 +1,177 @@
+/* ════════════ 渠道页 ════════════ */
+
+/* 工具栏：搜索 + 筛选条 + 视图切换 */
+.ah-chan-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+  margin-bottom: 14px;
+}
+.ah-chan-toolbar .sp {
+  flex: 1;
+}
+
+/* 卡片网格（分组页复用） */
+.ah-chan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 14px;
+}
+.ah-chan {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 16px 12px;
+}
+.ah-chan.is-off {
+  background: var(--row-hover);
+}
+.ah-chan.is-off .ah-chan-name,
+.ah-chan.is-off .ah-chan-nums b {
+  color: var(--text-2);
+}
+.ah-chan-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ah-chan-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ah-chan-sub {
+  margin: 3px 0 14px 18px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 指标：成功率、今日请求、平均延迟 */
+.ah-chan-nums {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 14px;
+}
+.ah-chan-nums.is-2 {
+  grid-template-columns: 1fr 1fr;
+}
+.ah-chan-nums > div {
+  min-width: 0;
+}
+.ah-chan-nums label {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.ah-chan-nums b {
+  display: block;
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 配置项：一行说明文字 */
+.ah-chan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 12px 0;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ah-chan-meta .sep {
+  color: var(--text-3);
+}
+
+/* 底部：分组、状态、熔断倒计时在左；编辑、删除、开关在右 */
+.ah-chan-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--text-2);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.ah-chan-foot .sp {
+  flex: 1;
+}
+.ah-chan-foot .ah-toggle {
+  margin-left: 4px;
+}
+.ah-chan-groups {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 表格视图 */
+.ah-table-card {
+  padding: 0;
+  overflow: hidden;
+}
+.ah-chan-tname {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 220px;
+  font-weight: 600;
+}
+.ah-chan-table tr.is-off .ah-chan-tname {
+  color: var(--text-2);
+}
+.ah-chan-url {
+  display: block;
+  max-width: 200px;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ah-chan-tact {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* 表格里的 24 小时请求走势 */
+.ah-chan-spark {
+  display: block;
+  width: 60px;
+  height: 22px;
+  color: var(--chart-1);
+}
+@media (max-width: 1500px) {
+  .ah-chan-url {
+    max-width: 150px;
+  }
+}
+/* 渠道表列多，单元格左右内边距收窄到 10px */
+.ah-chan-table th,
+.ah-chan-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.ah-chan-table th:first-child,
+.ah-chan-table td:first-child {
+  padding-left: 14px;
+}
+@media (max-width: 1400px) {
+  .ah-chan-table .ah-chan-hourly {
+    display: none;
+  }
+}

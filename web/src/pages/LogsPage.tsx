@@ -19,6 +19,7 @@ import type { LogFacets, LogItem } from '../types'
 import { LogDetailModal } from './LogDetailModal'
 import { fmtShort } from './preprocessShared'
 import { Loading, StatusPill } from '../components/Primitives'
+import { PageHead } from '../components/PageHead'
 
 const PAGE_SIZE = 50
 
@@ -155,25 +156,25 @@ export function LogsPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">请求日志</div>
-          <div className="ah-page-sub">共 {total} 条记录 · 可视化对话 / 请求头 / 原始报文</div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <Button variant="danger" size="sm" icon={<IconTrash size={16} />} onClick={clearAll}>
-            清空
-          </Button>
-        </div>
-      </div>
+      <PageHead
+        title="请求日志"
+        sub={<>共 {total} 条记录 · 可视化对话 / 请求头 / 原始报文</>}
+        actions={
+          <>
+            <IconButton title="刷新" onClick={() => setRefresh(value => value + 1)}>
+              <IconRefresh size={16} />
+            </IconButton>
+            <Button variant="danger" size="sm" icon={<IconTrash size={16} />} onClick={clearAll}>
+              清空
+            </Button>
+          </>
+        }
+      />
 
       {/* 筛选栏 */}
-      <Card className="ah-log-filters">
+      <div className="ah-log-filters">
         <div className="ah-log-search">
-          <IconSearch size={17} className="ah-log-search-icon" />
+          <IconSearch size={15} className="ah-log-search-icon" />
           <Input
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
@@ -250,7 +251,7 @@ export function LogsPage() {
             重置
           </Button>
         )}
-      </Card>
+      </div>
 
       {/* 列表 */}
       <Card className="ah-logs-table-card">

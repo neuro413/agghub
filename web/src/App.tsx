@@ -4,7 +4,8 @@ import { setMoneyConfig } from './lib/money'
 import { Button } from './components/Button'
 import { Field, Input } from './components/Form'
 import { Modal } from './components/Modal'
-import { TopNav, type TabKey } from './components/TopNav'
+import { MobileBar, Sidebar, type TabKey } from './components/Sidebar'
+import { useHashRoute } from './lib/route'
 import { ToastProvider } from './components/Toast'
 import { ChannelsPage } from './pages/ChannelsPage'
 import { GroupsPage } from './pages/GroupsPage'
@@ -54,10 +55,13 @@ function TokenGate() {
   )
 }
 
+const SIDEBAR_KEY = 'agghub_admin_sidebar'
+
 export default function App() {
-  const [tab, setTab] = useState<TabKey>('channels')
-  // 统计页点服务器跳到用户页时带上的搜索词；从顶栏切页时清空
-  const [usersQuery, setUsersQuery] = useState('')
+  const { tab, query, go } = useHashRoute()
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1')
+  // 窄屏抽屉是否展开；宽屏下该状态不生效
+  const [drawer, setDrawer] = useState(false)
   const [needToken, setNeedToken] = useState(false)
   // 金额换算比例和符号来自设置，读到之后再渲染页面；失败（如需要令牌）时按默认值继续
   const [moneyReady, setMoneyReady] = useState(false)
@@ -65,24 +69,39 @@ export default function App() {
     setUnauthorizedHandler(() => setNeedToken(true))
     api.getSettings().then(setMoneyConfig, () => {}).finally(() => setMoneyReady(true))
   }, [])
+  const toggleCollapse = () => {
+    setCollapsed((c) => {
+      localStorage.setItem(SIDEBAR_KEY, c ? '0' : '1')
+      return !c
+    })
+  }
+  // 从侧栏切页不带 query（统计页跳用户页时才带搜索词）
+  const onTab = (t: TabKey) => {
+    setDrawer(false)
+    go(t)
+  }
   return (
     <ToastProvider>
-      <div className="ah-app">
-        <TopNav tab={tab} onTab={(t) => { setUsersQuery(''); setTab(t) }} />
-        {moneyReady && (
-          <main className="ah-main">
-            {tab === 'channels' && <ChannelsPage />}
-            {tab === 'groups' && <GroupsPage />}
-            {tab === 'keys' && <KeysPage />}
-            {tab === 'users' && <UsersPage initialQuery={usersQuery} />}
-            {tab === 'notices' && <NoticesPage />}
-            {tab === 'stats' && <StatsPage onOpenLogs={() => setTab('logs')} onSearchUsers={(q) => { setUsersQuery(q); setTab('users') }} />}
-            {tab === 'logs' && <LogsPage />}
-            {tab === 'preprocess' && <PreprocessPage />}
-            {tab === 'pool' && <PoolPage />}
-            {tab === 'settings' && <SettingsPage />}
-          </main>
-        )}
+      <div className={`ah-app${collapsed ? ' is-collapsed' : ''}${drawer ? ' is-drawer-open' : ''}`}>
+        <Sidebar tab={tab} onTab={onTab} collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+        <div className="ah-side-mask" onClick={() => setDrawer(false)} />
+        <main className="ah-main">
+          <MobileBar tab={tab} onOpen={() => setDrawer(true)} />
+          {moneyReady && (
+            <>
+              {tab === 'channels' && <ChannelsPage />}
+              {tab === 'groups' && <GroupsPage />}
+              {tab === 'keys' && <KeysPage />}
+              {tab === 'users' && <UsersPage initialQuery={query.get('q') ?? ''} />}
+              {tab === 'notices' && <NoticesPage />}
+              {tab === 'stats' && <StatsPage onOpenLogs={() => go('logs')} onSearchUsers={(q) => go('users', { q })} />}
+              {tab === 'logs' && <LogsPage />}
+              {tab === 'preprocess' && <PreprocessPage />}
+              {tab === 'pool' && <PoolPage />}
+              {tab === 'settings' && <SettingsPage />}
+            </>
+          )}
+        </main>
         {needToken && <TokenGate />}
       </div>
     </ToastProvider>

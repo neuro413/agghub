@@ -147,7 +147,7 @@ export function ModelPriceImportModal({
       }
     >
       <div className="ah-price-import-bar">
-        <div className="ah-price-import-search">
+        <div className="ah-search ah-price-import-search">
           <IconSearch size={15} />
           <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索模型" />
         </div>

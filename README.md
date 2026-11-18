@@ -212,7 +212,7 @@ GROUP BY 1, 2 ORDER BY n DESC;
 
 ### 代理池
 
-顶栏的**代理池**页管理一个由网关托管的 [mihomo](https://github.com/MetaCubeX/mihomo) 进程，让渠道请求经池内节点发出：
+侧栏的**代理池**页管理一个由网关托管的 [mihomo](https://github.com/MetaCubeX/mihomo) 进程，让渠道请求经池内节点发出：
 
 - **内核**：默认使用 `data/mihomo/mihomo(.exe)`，可在页面上从 MetaCubeX/mihomo 的 GitHub Releases 下载最新版本，也可以在设置里指定自有内核路径。总开关开启后随网关自启，配置变更时热重载。
 - **节点来源**：订阅链接（base64、Clash YAML、SIP008、逐行 URI）或手动粘贴节点 URI；同一节点按身份去重。可设置入口代理（节点 URI 或 http(s) / socks5 地址）作为所有节点的前置跳板，以及下载内核 / 拉取订阅专用的代理。
@@ -267,7 +267,7 @@ GROUP BY 1, 2 ORDER BY n DESC;
 
 ### 分组
 
-顶栏的**分组**页仿 new-api 管理分组，每个分组包含：
+侧栏的**分组**页仿 new-api 管理分组，每个分组包含：
 
 - **名称与描述**：名称是唯一标识，Key 和用户按名称引用；改名时会同步更新所有引用。描述显示在门户的分组选择里。
 - **分组倍率**：扣费点数 = 模型定价算出的点数 × 分组倍率（例如 vip `0.8`、svip `1.5`），向上取整。
@@ -731,13 +731,17 @@ agghub/
 │   ├── pool/                    mihomo 代理池（订阅解析、节点测速、进程管理与选路）
 │   ├── routes/                  渠道、设置、统计、日志、用户、公告等管理 API，portal.ts 为门户 API
 │   └── stats/                   日志记录、正文块存储与清理
-├── web/src/
+├── web/src/                     管理端（分组侧栏 + hash 路由，如 #/users?q=xxx）
 │   ├── pages/                   十个主页面及编辑 / 详情弹窗
 │   ├── api/                     管理 API 客户端与令牌处理
-│   ├── lib/                     请求正文解析与 Markdown 渲染
-│   ├── components/              通用组件
-│   ├── charts/                  SVG 图表
-│   └── styles/                  设计变量与样式
+│   ├── lib/                     hash 路由、格式化、请求正文解析与 Markdown 渲染
+│   ├── components/              侧栏、页头、按钮、表单、筛选条、进度条等通用组件
+│   ├── charts/                  SVG 图表（折线、环形、条形、迷你走势线）
+│   └── styles/
+│       ├── tokens.css           设计变量（颜色、圆角、阴影、字号，只有这里写色值）
+│       ├── global.css           基础样式与关键帧
+│       ├── components.css       骨架与通用组件样式
+│       └── pages/               各页面样式，一页一个文件
 └── portal/src/                  用户门户（只在公网端口托管）
     ├── pages/                   登录注册与 Discord 回调页（DiscordCallbackPage，在 AuthPages.tsx 中）、概览、模型列表、可用性、令牌、使用日志、个人中心
     ├── components/              布局、按钮、弹层、图标、通知中心等组件

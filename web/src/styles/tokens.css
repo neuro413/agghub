@@ -1,55 +1,101 @@
 :root {
-  /* ── 橙色主色阶 ── */
-  --orange-700: #d9590f;
-  --orange-600: #f2701f;
-  --orange-500: #ff8a3d;
-  --orange-400: #ffa866;
-  --orange-300: #ffc59e;
-  --orange-200: #ffdcc4;
-  --orange-100: #ffe8d6;
-  --orange-50: #fff6ef;
+  /* ── 底色与表面 ── */
+  --bg: #faf9f6;
+  --bg-side: #f3f1ec;
+  --surface: #ffffff;
+  --fill: #f5f3ef;
+  --fill-strong: #efece6;
+  --row-hover: #fcfbf9;
+  --nav-hover: rgba(31, 27, 22, 0.05);
 
-  /* ── 中性暖色 ── */
-  --cream: #fffbf7;
-  --white: #ffffff;
-  --paper: #fffdfb;
-  --ink: #4a3f37;
-  --ink-soft: #8a7b6e;
-  --ink-faint: #b8a99b;
-  --line: #f2e6db;
-  --line-soft: #f7eee5;
+  /* ── 边框 ── */
+  --border: #e8e4dd;
+  --border-soft: #f1eee8;
+  --border-strong: #d8d2c8;
 
-  /* ── 状态色（偏暖）── */
-  --ok: #3fb984;
-  --ok-bg: #e6f7ef;
-  --warn: #f2a40c;
-  --warn-bg: #fff3d9;
-  --err: #f2683c;
-  --err-bg: #ffeae0;
-  --info: #5b9bd9;
-  --info-bg: #e8f1fb;
+  /* ── 文字 ── */
+  --text: #1f1b16;
+  /* 次要文字、说明文字（白底约 5.8:1） */
+  --text-2: #6b645c;
+  /* 占位符、禁用、装饰性文字（白底约 2.8:1，不用于需要阅读的内容） */
+  --text-3: #a39b91;
+  --text-on-accent: #ffffff;
 
-  /* ── 渐变 ── */
-  --grad-warm: linear-gradient(135deg, #ff9a4d 0%, #ff7a33 100%);
-  --grad-warm-soft: linear-gradient(135deg, #ffb877 0%, #ff8f4d 100%);
-  --grad-soft: linear-gradient(135deg, #fff6ef 0%, #ffeedf 100%);
-  --grad-glow: radial-gradient(125% 125% at 50% 0%, #fff6ef 0%, #fffbf7 58%);
+  /* ── 强调色：只用于主按钮、当前导航、焦点环、图表主序列 ── */
+  --accent: #e8590c;
+  --accent-hover: #d9500a;
+  --accent-vivid: #f26b1d;
+  --accent-soft: #fdefe5;
+  --accent-text: #c2410c;
+  --ring: 0 0 0 3px rgba(242, 107, 29, 0.14);
 
-  /* ── 圆角（无棱角弧度感）── */
-  --r-xs: 8px;
-  --r-sm: 12px;
-  --r-md: 16px;
-  --r-lg: 22px;
-  --r-xl: 28px;
-  --r-2xl: 34px;
+  /* ── 状态色 ── */
+  --ok: #1e9e62;
+  --ok-soft: #e6f5ec;
+  --ok-text: #14784a;
+  --ok-halo: rgba(30, 158, 98, 0.15);
+  --warn: #d29211;
+  --warn-soft: #fbf1d6;
+  --warn-text: #8f6206;
+  --warn-halo: rgba(210, 146, 17, 0.16);
+  --err: #d9482e;
+  --err-soft: #fce9e4;
+  --err-text: #b5361e;
+  --err-halo: rgba(217, 72, 46, 0.15);
+  --info: #3b7dd8;
+  --info-soft: #e8f0fb;
+  --info-text: #2a62b0;
+
+  /* ── 渠道类型色点 ── */
+  --type-anthropic: #d97757;
+  --type-openai: #10a37f;
+  --type-responses: #7c6cf0;
+  --type-vertex: #4285f4;
+  --type-gemini: #1fa5c9;
+
+  /* ── Discord 品牌色（用户页、令牌页的 Discord 标识） ── */
+  --discord: #5865f2;
+  --discord-soft: #eef0fe;
+
+  /* ── 日志详情对话块角色色 ── */
+  --role-system: #8b5cf6;
+  --role-user: #3b7dd8;
+  --role-assistant: #1e9e62;
+  --role-system-soft: #f1ecfe;
+  --role-system-text: #6d3fd9;
+  --mark: #ffe08a;
+
+  /* ── 图表 ── */
+  --chart-1: #f26b1d;
+  --chart-2: #f6b48a;
+  --chart-3: #8e8479;
+  --chart-4: #2f9e8f;
+  --chart-5: #4c8bd9;
+  --chart-6: #d8d2c8;
+  --chart-grid: #f1eee8;
+  --chart-axis: #a39b91;
+  --tip-bg: #1f1b16;
+  --tip-fg: #ffffff;
+  --tip-muted: rgba(255, 255, 255, 0.6);
+
+  /* ── 控件 ── */
+  --toggle-off: #d9d4cb;
+  --overlay: rgba(31, 27, 22, 0.4);
+  --chip-on-muted: rgba(255, 255, 255, 0.6);
+
+  /* ── 圆角 ── */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 14px;
   --r-pill: 999px;
 
-  /* ── 阴影（柔和橙调）── */
-  --shadow-xs: 0 1px 3px rgba(74, 63, 55, 0.05);
-  --shadow-card: 0 4px 16px rgba(217, 89, 15, 0.06), 0 1px 3px rgba(74, 63, 55, 0.04);
-  --shadow-soft: 0 10px 30px -10px rgba(242, 112, 31, 0.22);
-  --shadow-pop: 0 18px 46px -12px rgba(242, 112, 31, 0.32);
-  --shadow-ring: 0 0 0 4px rgba(255, 138, 61, 0.16);
+  /* ── 阴影：卡片默认只用边框 ── */
+  --shadow-xs: 0 1px 2px rgba(31, 27, 22, 0.06);
+  --shadow-hover: 0 6px 20px -8px rgba(31, 27, 22, 0.14);
+  --shadow-pop: 0 12px 32px -8px rgba(31, 27, 22, 0.18), 0 2px 6px rgba(31, 27, 22, 0.06);
+  --shadow-btn-primary: 0 1px 2px rgba(180, 72, 12, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  --shadow-knob: 0 1px 2px rgba(0, 0, 0, 0.2);
 
   /* ── 间距 ── */
   --sp-1: 4px;
@@ -69,16 +115,18 @@
   --fs-md: 15px;
   --fs-lg: 17px;
   --fs-xl: 20px;
-  --fs-2xl: 26px;
-  --fs-3xl: 34px;
+  --fs-2xl: 22px;
+  --fs-3xl: 28px;
 
-  /* ── 动效曲线 ── */
-  --ease-soft: cubic-bezier(0.34, 1.32, 0.64, 1);
+  /* ── 动效 ── */
   --ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
-  --dur: 0.22s;
-  --dur-slow: 0.4s;
+  --dur: 0.15s;
+  --dur-slow: 0.3s;
 
   /* ── 字体 ── */
-  --font: "PingFang SC", "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  --font: "Inter", "Segoe UI Variable Text", "Segoe UI", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+
+  /* ── 布局 ── */
+  --side-w: 232px;
 }

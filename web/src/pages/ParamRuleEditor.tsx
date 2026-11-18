@@ -273,7 +273,7 @@ function ParamOpRow({
       {isRegex && (
         <>
           <div className="ah-pp-grid2">
-            <Field label="查找（正则）" hint={!reOk ? <span style={{ color: 'var(--err)' }}>正则表达式无效</span> : undefined}>
+            <Field label="查找（正则）" hint={!reOk ? <span className="ah-c-err">正则表达式无效</span> : undefined}>
               <Textarea
                 value={op.pattern ?? ''}
                 onChange={(e) => onChange({ ...op, pattern: e.target.value })}

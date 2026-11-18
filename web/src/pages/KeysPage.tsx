@@ -3,7 +3,7 @@ import { api } from '../api/client'
 import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { EmptyState } from '../components/EmptyState'
-import { IconCopy, IconEdit, IconExternal, IconKey, IconPlus, IconRefresh, IconTrash } from '../components/Icons'
+import { IconCopy, IconEdit, IconGlobe, IconKey, IconPlus, IconRefresh, IconTrash } from '../components/Icons'
 import { useToast } from '../components/Toast'
 import { Toggle } from '../components/Toggle'
 import { copyText } from '../lib/clipboard'
@@ -12,6 +12,8 @@ import { currencySymbol, money, toPoints } from '../lib/money'
 import type { ApiKeyView, ChannelGroupView, ModelRatio, SystemInfo } from '../types'
 import { KeyModal } from './KeyModal'
 import { ModelRatioCard } from './ModelRatioCard'
+import { PageHead } from '../components/PageHead'
+import { Meter } from '../components/Meter'
 
 /** sk-agh-XXXX…YYYY，前 4 位 + 后 4 位 */
 function maskKey(key: string): string {
@@ -22,6 +24,12 @@ function maskKey(key: string): string {
 function pct(used: number, total: number | null): number {
   if (!total || total <= 0) return 0
   return Math.max(0, Math.min(100, Math.round((used / total) * 100)))
+}
+
+/** 额度进度条：用满 100% 标红，80% 以上标黄 */
+function QuotaBar({ used, total }: { used: number; total: number }) {
+  const p = pct(used, total)
+  return <Meter value={p} tone={p >= 100 ? 'err' : p >= 80 ? 'warn' : 'none'} />
 }
 
 export function KeysPage() {
@@ -133,46 +141,47 @@ export function KeysPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">令牌</div>
-          <div className="ah-page-sub">分发 Key · 额度 · 模型定价</div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={refresh}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
-            新建 Key
-          </Button>
+      <PageHead
+        title="令牌"
+        sub="分发 Key · 额度 · 模型定价"
+        actions={
+          <>
+            <IconButton title="刷新" onClick={refresh}>
+              <IconRefresh size={16} />
+            </IconButton>
+            <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+              新建 Key
+            </Button>
+          </>
+        }
+      />
+
+      <div className={`ah-banner ah-keys-pub${system && !system.public_enabled ? ' is-warn' : ''}`}>
+        <IconGlobe size={16} />
+        <div className="ah-keys-pub-body">
+          <span className="ah-strong">公网分发状态</span>
+          {system && !system.public_enabled ? (
+            <span className="ah-keys-pub-desc">
+              公网端口未开启：设置环境变量 AGGHUB_PUBLIC_PORT 后重启服务生效；Key 也可以在内网端口使用（按 Key 的权限和额度限制）
+            </span>
+          ) : system ? (
+            <>
+              <span className="ah-keys-pub-desc">
+                公网端口已开启：监听 {system.public_host}:{system.public_port}
+              </span>
+              <span className="ah-keys-pub-url">
+                对外 Base URL
+                <code className={publicBaseUrl ? '' : 'is-empty'}>{publicBaseUrl || '未设置（在设置页填写）'}</code>
+              </span>
+            </>
+          ) : (
+            <span className="ah-keys-pub-desc">读取中…</span>
+          )}
         </div>
       </div>
 
-      <Card className="ah-set-card">
-        <div className="ah-set-title">
-          <IconExternal size={18} /> 公网分发状态
-        </div>
-        {system && !system.public_enabled ? (
-          <div className="ah-set-desc">
-            公网端口未开启：设置环境变量 AGGHUB_PUBLIC_PORT 后重启服务生效；Key 也可以在内网端口使用（按 Key 的权限和额度限制）
-          </div>
-        ) : system ? (
-          <>
-            <div className="ah-set-desc">
-              公网端口已开启：监听 {system.public_host}:{system.public_port}
-            </div>
-            <div className="ah-endpoint">
-              <span className="ah-endpoint-label">对外 Base URL</span>
-              <code className="ah-endpoint-url ah-truncate">{publicBaseUrl || '未设置（在设置页填写）'}</code>
-            </div>
-          </>
-        ) : (
-          <div className="ah-set-desc">读取中…</div>
-        )}
-      </Card>
-
       {loading ? (
-        <div className="ah-key-list">
+        <div className="ah-keycards">
           {[0, 1, 2].map((i) => (
             <div key={i} className="ah-skel" />
           ))}
@@ -191,7 +200,7 @@ export function KeysPage() {
           />
         </Card>
       ) : (
-        <div className="ah-key-list">
+        <div className="ah-keycards">
           {keys.map((k) => (
             <KeyCard
               key={k.id}
@@ -250,87 +259,67 @@ function KeyCard({
 
   return (
     <Card hover className="ah-key-card">
-      <div className="ah-chan-top">
-        <div>
-          <div className="ah-chan-name ah-truncate">
-            <IconKey size={16} />
-            {k.name}
-          </div>
-          <div className="ah-mini ah-muted ah-truncate">
-            最近使用：{k.last_used_at ? fmtTime(k.last_used_at) : '从未使用'}
-          </div>
+      <div className="ah-key-top">
+        <span className="ah-key-icon">
+          <IconKey size={15} />
+        </span>
+        <div className="ah-key-title">
+          <h3 className="ah-key-name" title={k.name}>{k.name}</h3>
+          <div className="ah-key-sub">最近使用：{k.last_used_at ? fmtTime(k.last_used_at) : '从未使用'}</div>
         </div>
-        <Toggle checked={k.enabled} onChange={onToggle} />
-      </div>
-
-      <div className="ah-key-secret">
-        <code className="ah-key-secret-val">{maskKey(k.key)}</code>
-        <IconButton title="复制完整 Key" onClick={copyKey}>
-          <IconCopy size={16} />
-        </IconButton>
         {!k.enabled && (
           <span className={`ah-tag${k.admin_disabled ? ' ah-tag-err' : ''}`} title={k.admin_disabled ? '管理员已停用该 Key' : undefined}>
             {k.admin_disabled ? '管理员已停用' : '已停用'}
           </span>
         )}
+        <Toggle checked={k.enabled} onChange={onToggle} label={k.enabled ? '停用 Key' : '启用 Key'} />
       </div>
 
-      <div className="ah-pp-chips">
-        {k.groups.map((g) => (
-          <span key={g} className="ah-tag">
-            {g}
-          </span>
-        ))}
-        {!k.groups.length && <span className="ah-mini ah-faint">未设分组</span>}
+      <div className="ah-key-secret">
+        <code className="ah-key-secret-val">{maskKey(k.key)}</code>
+        <IconButton title="复制完整 Key" onClick={copyKey}>
+          <IconCopy size={15} />
+        </IconButton>
       </div>
 
-      <div className="ah-key-quota">
-        <div className="ah-key-quota-row">
-          <span className="ah-mini ah-muted">总额度</span>
-          {k.quota_total == null ? (
-            <span className="ah-mini ah-num">已用 {money(k.quota_used)} · 不限</span>
-          ) : (
-            <span className="ah-mini ah-num">
-              {money(k.quota_used)} / {money(k.quota_total)}
-            </span>
-          )}
-        </div>
-        {k.quota_total != null && (
-          <div className="ah-bar">
-            <i style={{ width: `${pct(k.quota_used, k.quota_total)}%` }} />
+      <div className="ah-key-quotas">
+        <div className="ah-key-q">
+          <label>总额度</label>
+          <div className="ah-key-q-val ah-num">
+            {money(k.quota_used)}
+            <small>{k.quota_total == null ? ' · 不限' : ` / ${money(k.quota_total)}`}</small>
           </div>
-        )}
-      </div>
-
-      <div className="ah-key-quota">
-        <div className="ah-key-quota-row">
-          <span className="ah-mini ah-muted">今日</span>
-          {k.quota_daily == null ? (
-            <span className="ah-mini ah-num">
-              今日 {money(k.today_points)} · 不限 · {k.today_requests} 次
-            </span>
-          ) : (
-            <span className="ah-mini ah-num">
-              {money(k.today_points)} / {money(k.quota_daily)} · {k.today_requests} 次
-            </span>
-          )}
+          {k.quota_total != null && <QuotaBar used={k.quota_used} total={k.quota_total} />}
         </div>
-        {k.quota_daily != null && (
-          <div className="ah-bar">
-            <i style={{ width: `${pct(k.today_points, k.quota_daily)}%` }} />
+        <div className="ah-key-q">
+          <label>今日</label>
+          <div className="ah-key-q-val ah-num">
+            {money(k.today_points)}
+            <small>
+              {k.quota_daily == null ? ' · 不限' : ` / ${money(k.quota_daily)}`} · {k.today_requests} 次
+            </small>
           </div>
-        )}
+          {k.quota_daily != null && <QuotaBar used={k.today_points} total={k.quota_daily} />}
+        </div>
       </div>
 
       <div className="ah-key-meta">
+        <span className="ah-key-groups">
+          {k.groups.map((g) => (
+            <span key={g} className="ah-tag">
+              {g}
+            </span>
+          ))}
+          {!k.groups.length && <span className="ah-muted">未设分组</span>}
+        </span>
         <span>限流：RPM {k.rpm ?? '不限'} · 并发 {k.concurrency ?? '不限'}</span>
-        <span className={expired ? 'is-err' : ''}>
+        <span className={expired ? 'ah-c-err ah-strong' : ''}>
           过期：{k.expires_at == null ? '永不过期' : expired ? '已过期' : fmtTime(k.expires_at)}
         </span>
         <span>正文：{k.log_bodies == null ? '跟随全局' : k.log_bodies ? '记录正文' : '不记录正文'}</span>
       </div>
 
-      <div className="ah-chan-actions">
+      <div className="ah-key-actions">
         <Button variant="soft" size="sm" icon={<IconEdit size={15} />} onClick={onEdit}>
           编辑
         </Button>
@@ -350,7 +339,7 @@ function KeyCard({
         </Button>
         <span className="sp" />
         <IconButton title="删除" danger onClick={onDelete}>
-          <IconTrash size={17} />
+          <IconTrash size={16} />
         </IconButton>
       </div>
     </Card>

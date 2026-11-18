@@ -4,12 +4,13 @@ import { Button, IconButton } from '../components/Button'
 import { Card } from '../components/Card'
 import { EmptyState } from '../components/EmptyState'
 import { Textarea } from '../components/Form'
-import { IconBell, IconEdit, IconMegaphone, IconPlus, IconRefresh, IconTrash } from '../components/Icons'
+import { IconBell, IconEdit, IconMegaphone, IconPlus, IconRefresh, IconTrash, IconWarn } from '../components/Icons'
 import { Toggle } from '../components/Toggle'
 import { useToast } from '../components/Toast'
 import { Markdown } from '../lib/markdown'
 import type { Announcement } from '../types'
 import { AnnouncementModal, TYPE_OPTIONS } from './AnnouncementModal'
+import { PageHead } from '../components/PageHead'
 
 // 门户通知中心的内容管理：通知（设置项 portal_notice）+ 公告列表
 
@@ -95,13 +96,11 @@ export function NoticesPage() {
   const now = Date.now()
 
   return (
-    <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">通知</div>
-          <div className="ah-page-sub">门户右上角通知中心的内容 · 通知 · 公告</div>
-        </div>
-      </div>
+    <div className="ah-fade-up ah-page-narrow">
+      <PageHead
+        title="通知"
+        sub="门户右上角通知中心的内容 · 通知 · 公告"
+      />
 
       <Card className="ah-set-card">
         <div className="ah-notice-head">
@@ -152,7 +151,7 @@ export function NoticesPage() {
             <span className="ah-mini ah-muted">在门户显示</span>
             <Toggle checked={enabled} onChange={toggleEnabled} />
             <IconButton title="刷新" onClick={() => loadList()}>
-              <IconRefresh size={18} />
+              <IconRefresh size={16} />
             </IconButton>
             <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
               新建公告
@@ -160,7 +159,7 @@ export function NoticesPage() {
           </div>
         </div>
 
-        {!enabled && <div className="ah-ann-off">公告已在门户隐藏，用户看不到下面的公告</div>}
+        {!enabled && <div className="ah-banner is-warn ah-ann-off"><IconWarn size={15} /><span>公告已在门户隐藏，用户看不到下面的公告</span></div>}
 
         {items == null ? (
           <div className="ah-skel" style={{ height: 120 }} />
@@ -184,10 +183,10 @@ export function NoticesPage() {
                 </div>
                 <div className="ah-ann-actions">
                   <IconButton title="编辑" onClick={() => setEditing(a)}>
-                    <IconEdit size={17} />
+                    <IconEdit size={15} />
                   </IconButton>
                   <IconButton title="删除" danger onClick={() => del(a)}>
-                    <IconTrash size={17} />
+                    <IconTrash size={15} />
                   </IconButton>
                 </div>
               </div>

@@ -151,20 +151,38 @@ function validate(input: ChannelInput): string | null {
   return null
 }
 
-// 列表（附带今日请求数 / 成功数）
+// 列表（附带今日请求数 / 成功数 / 成功请求平均延迟 / 按小时请求数）
 channelsRouter.get('/', (_req, res) => {
   const rows = db.prepare('SELECT * FROM channels ORDER BY priority DESC, id ASC').all() as ChannelRow[]
   const since = startOfToday()
-  const statStmt = db.prepare(
-    `SELECT COUNT(*) AS total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS ok
-     FROM request_logs WHERE channel_id = ? AND created_at >= ? AND is_retry = 0`,
+  // 一条分组语句查完所有渠道，避免每个渠道各查一次
+  const stats = new Map(
+    (db.prepare(
+      `SELECT channel_id, COUNT(*) AS total, SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS ok,
+              AVG(CASE WHEN status='success' THEN latency_ms END) AS avg_latency
+       FROM request_logs WHERE created_at >= ? AND is_retry = 0 AND channel_id IS NOT NULL GROUP BY channel_id`,
+    ).all(since) as { channel_id: number; total: number; ok: number; avg_latency: number | null }[]).map((s) => [s.channel_id, s]),
   )
+  const hourly = new Map<number, number[]>()
+  const hourRows = db.prepare(
+    `SELECT channel_id, CAST((created_at - ?) / 3600000 AS INTEGER) AS h, COUNT(*) AS n
+     FROM request_logs WHERE created_at >= ? AND is_retry = 0 AND channel_id IS NOT NULL GROUP BY channel_id, h`,
+  ).all(since, since) as { channel_id: number; h: number; n: number }[]
+  for (const r of hourRows) {
+    let arr = hourly.get(r.channel_id)
+    if (!arr) hourly.set(r.channel_id, (arr = Array(24).fill(0)))
+    // 夏令时切换日可能多出一小时，并入最后一格
+    arr[Math.min(23, Math.max(0, r.h))] += r.n
+  }
   const list = rows.map((r) => {
     const ch = rowToChannel(r)
-    const s = statStmt.get(r.id, since) as { total: number; ok: number }
+    const s = stats.get(r.id)
     const keys = keyCounts(ch)
     return {
-      ...ch, today_requests: s.total || 0, today_success: s.ok || 0, key_total: keys?.total, key_available: keys?.available,
+      ...ch, today_requests: s?.total || 0, today_success: s?.ok || 0,
+      today_avg_latency: s?.avg_latency == null ? null : Math.round(s.avg_latency),
+      today_hourly: hourly.get(r.id) ?? Array(24).fill(0),
+      key_total: keys?.total, key_available: keys?.available,
       compression_unsupported: unsupportedList(ch.id),
     }
   })

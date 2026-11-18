@@ -7,6 +7,7 @@ import { IconEdit, IconLayers, IconPlus, IconRefresh, IconTrash } from '../compo
 import { useToast } from '../components/Toast'
 import type { Channel, ChannelGroupView } from '../types'
 import { GroupModal } from './GroupModal'
+import { PageHead } from '../components/PageHead'
 
 export function GroupsPage() {
   const toast = useToast()
@@ -50,20 +51,20 @@ export function GroupsPage() {
 
   return (
     <div className="ah-fade-up">
-      <div className="ah-page-head">
-        <div>
-          <div className="ah-page-title">分组</div>
-          <div className="ah-page-sub">按分组开放渠道与模型 · 分组倍率 · 公开或分配给门户用户</div>
-        </div>
-        <div className="ah-row">
-          <IconButton title="刷新" onClick={refresh}>
-            <IconRefresh size={18} />
-          </IconButton>
-          <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
-            新建分组
-          </Button>
-        </div>
-      </div>
+      <PageHead
+        title="分组"
+        sub="按分组开放渠道与模型 · 分组倍率 · 公开或分配给门户用户"
+        actions={
+          <>
+            <IconButton title="刷新" onClick={refresh}>
+              <IconRefresh size={16} />
+            </IconButton>
+            <Button variant="primary" icon={<IconPlus size={18} />} onClick={() => setEditing('new')}>
+              新建分组
+            </Button>
+          </>
+        }
+      />
 
       {loading ? (
         <div className="ah-chan-grid">
@@ -92,7 +93,7 @@ export function GroupsPage() {
         </div>
       )}
 
-      <div className="ah-mini ah-faint" style={{ marginTop: 10 }}>
+      <div className="ah-page-foot">
         Key 只能调用所属分组里同时勾选了渠道和模型的组合；管理员发的 Key 属于多个分组时，按倍率最低的命中分组计费。
       </div>
 
@@ -121,53 +122,55 @@ function GroupCard({
 }) {
   const members = channels.filter((c) => g.channel_ids.includes(c.id))
   return (
-    <Card hover className="ah-chan">
+    <Card hover className="ah-chan ah-group-card">
       <div className="ah-chan-top">
-        <div style={{ minWidth: 0 }}>
-          <div className="ah-chan-name">
-            <IconLayers size={16} />
-            <span className="ah-truncate">{g.name}</span>
-          </div>
-          <div className="ah-chan-sub ah-truncate">{g.description || '无描述'}</div>
-        </div>
+        <span className="ah-group-icon">
+          <IconLayers size={14} />
+        </span>
+        <h3 className="ah-chan-name" title={g.name}>
+          {g.name}
+        </h3>
         {g.is_public ? <span className="ah-tag ah-tag-pub">公开</span> : <span className="ah-tag">需分配</span>}
       </div>
+      <div className="ah-chan-sub" title={g.description || undefined}>
+        {g.description || '无描述'}
+      </div>
 
-      <div className="ah-chan-meta">
-        <div className="ah-meta-box">
-          <div className="k">倍率</div>
-          <div className="v">×{g.ratio}</div>
+      <div className="ah-chan-nums">
+        <div>
+          <label>倍率</label>
+          <b>×{g.ratio}</b>
         </div>
-        <div className="ah-meta-box">
-          <div className="k">渠道</div>
-          <div className="v">{members.length}</div>
+        <div>
+          <label>渠道</label>
+          <b>{members.length}</b>
         </div>
-        <div className="ah-meta-box">
-          <div className="k">模型</div>
-          <div className="v">{g.models.length}</div>
+        <div>
+          <label>模型</label>
+          <b>{g.models.length}</b>
         </div>
       </div>
 
-      <div className="ah-pp-chips">
+      <div className="ah-group-chans">
         {members.map((c) => (
-          <span key={c.id} className="ah-tag" style={c.status === 1 ? undefined : { opacity: 0.5 }} title={c.status === 1 ? undefined : '渠道未启用'}>
+          <span key={c.id} className={`ah-tag${c.status === 1 ? '' : ' is-off'}`} title={c.status === 1 ? undefined : '渠道未启用'}>
             {c.name}
           </span>
         ))}
-        {!members.length && <span className="ah-mini ah-faint">未勾选渠道</span>}
-        {g.ua_blacklist?.length ? <span className="ah-tag" title={`UA 黑名单：${g.ua_blacklist.join('、')}`}>UA 黑名单 {g.ua_blacklist.length}</span> : null}
+        {!members.length && <span className="ah-muted">未勾选渠道</span>}
+        {g.ua_blacklist?.length ? <span className="ah-tag ah-tag-warn" title={`UA 黑名单：${g.ua_blacklist.join('、')}`}>UA 黑名单 {g.ua_blacklist.length}</span> : null}
       </div>
 
-      <div className="ah-chan-actions">
-        <span className="ah-mini ah-muted">
+      <div className="ah-chan-foot">
+        <span className="ah-truncate">
           {g.is_public ? '所有用户' : `${g.user_count} 个用户`} · {g.key_count} 个 Key · 排序 {g.sort}
         </span>
         <span className="sp" />
         <IconButton title="编辑" onClick={onEdit}>
-          <IconEdit size={17} />
+          <IconEdit size={15} />
         </IconButton>
         <IconButton title="删除" danger onClick={onDelete}>
-          <IconTrash size={17} />
+          <IconTrash size={15} />
         </IconButton>
       </div>
     </Card>

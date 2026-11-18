@@ -30,3 +30,23 @@ export function prettyJson(s: string | null): string {
 export function clampOffset(offset: number, total: number, size: number): number {
   return Math.min(Math.max(0, offset), total > 0 ? Math.floor((total - 1) / size) * size : 0)
 }
+
+/** 时长：小于 1 秒显示 420ms，否则显示 8.4s */
+export function fmtDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+export type RateTone = 'ok' | 'warn' | 'err' | 'none'
+
+/** 成功率档位（百分数）：≥95 ok，80–94 warn，<80 err；null 表示没有请求 */
+export function rateTone(rate: number | null | undefined): RateTone {
+  if (rate == null) return 'none'
+  return rate >= 95 ? 'ok' : rate >= 80 ? 'warn' : 'err'
+}
+
+/** 成功率百分数（取整）；没有请求时为 null，不显示成 100% */
+export function successRate(success: number | undefined, total: number | undefined): number | null {
+  if (!total) return null
+  return Math.round(((success || 0) / total) * 100)
+}

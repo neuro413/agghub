@@ -71,7 +71,7 @@ export function MultiChips({
         <button
           type="button"
           key={o.value}
-          className={`ah-pp-chip${selected.includes(o.value) ? ' is-on' : ''}`}
+          className={`ah-pp-chip${selected.includes(o.value) ? ' is-on' : ''}${options.some(option => option.value === o.value) ? '' : ' is-invalid'}`}
           onClick={() => toggle(o.value)}
         >
           {o.label}
