@@ -75,7 +75,7 @@ export function PreprocessPage() {
   const channelOptions = useMemo<Opt[]>(() => channels.map((c) => ({ value: String(c.id), label: c.name })), [channels])
   const keyOptions = useMemo<Opt[]>(() => keys.map((k) => ({ value: String(k.id), label: k.name })), [keys])
   const anthChannelOptions = useMemo<Opt[]>(
-    () => channels.filter((c) => c.type === 'anthropic' || c.type === 'vertex').map((c) => ({ value: String(c.id), label: c.name })),
+    () => channels.filter((c) => c.type === 'anthropic' || c.type === 'vertex' || c.type === 'bedrock').map((c) => ({ value: String(c.id), label: c.name })),
     [channels],
   )
 

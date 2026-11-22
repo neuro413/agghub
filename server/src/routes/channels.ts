@@ -12,13 +12,15 @@ import { getAdaptor } from '../adapters'
 import { acquireNode, noNodeMessage, type Lease } from '../pool/select'
 import { trimSlash, withV1 } from '../adapters/base'
 import { geminiApiRoot } from '../adapters/gemini'
+import { BEDROCK_ANTHROPIC_VERSION, bedrockInvokeUrl, resolveBedrockRegion } from '../adapters/bedrock'
+import { parseAwsCredentials, signAwsV4 } from '../adapters/bedrock-auth'
 import type { Channel, ChannelRow, ChannelType, CompressionAlgorithm, CompressionTestItem, CompressionTestResult, KeyMode, RequestCompression, SingleRoleMode } from '../types'
 
 export const channelsRouter = Router()
 
-const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses', 'gemini']
+const TYPES: ChannelType[] = ['openai', 'anthropic', 'vertex', 'responses', 'gemini', 'bedrock']
 /** 不支持完整地址模式的渠道：请求地址随模型与流式动作变化 */
-const NO_FULL_URL: ChannelType[] = ['vertex', 'gemini']
+const NO_FULL_URL: ChannelType[] = ['vertex', 'gemini', 'bedrock']
 const SINGLE_ROLE_MODES: SingleRoleMode[] = ['user', 'system']
 const KEY_MODES: KeyMode[] = ['poll', 'race']
 const REQUEST_COMPRESSIONS: RequestCompression[] = ['off', 'gzip', 'br', 'zstd']
@@ -135,7 +137,7 @@ function modelsUrlOf(input: ChannelInput): string | null {
 
 function validate(input: ChannelInput): string | null {
   if (!input.name || !input.name.trim()) return '渠道名称不能为空'
-  if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses / gemini'
+  if (!input.type || !TYPES.includes(input.type)) return '渠道类型必须是 openai / anthropic / vertex / responses / gemini / bedrock'
   const models = normalizeModels(input.models)
   if (models.length === 0) return '至少配置一个模型'
   const aliases = Object.values(normalizeAlias(input) ?? {})
@@ -426,7 +428,8 @@ channelsRouter.post('/test-compression', async (req, res) => {
       const timeout = AbortSignal.timeout(COMPRESSION_TEST_TIMEOUT_MS)
       const signal = AbortSignal.any([ac.signal, timeout])
       try {
-        const headers = algorithm === 'plain' ? request.headers : { ...request.headers, 'content-encoding': algorithm }
+        let headers = algorithm === 'plain' ? request.headers : { ...request.headers, 'content-encoding': algorithm }
+        if (adaptor.signRequest) headers = adaptor.signRequest(channel, request.url, headers, body)
         const r = await fetch(request.url, { method: 'POST', headers, body, signal, dispatcher } as any)
         item.status = r.status
         if (r.ok) {
@@ -495,6 +498,96 @@ async function probe(input: ChannelInput, signal: AbortSignal, proxyUrl?: string
       if (!pageToken) break
     }
     return { ok: true, message: '连接成功', models }
+  }
+
+  // bedrock：先拉取官方控制面 Claude 推理配置文件与基础模型；无列表权限（403）或自定义地址时回退到 1 token 探活
+  if (input.type === 'bedrock') {
+    const creds = parseAwsCredentials(key)
+    if (!creds) return { ok: false, message: 'AWS Bedrock 需要有效的 IAM 凭证（AccessKeyId|SecretAccessKey 或 JSON）' }
+    const region = resolveBedrockRegion({ region: input.region?.trim() || null }, creds)
+    const listedModels = normalizeModels(input.models)
+    const invokeProbe = async (model: string): Promise<{ ok: boolean; message: string }> => {
+      const url = bedrockInvokeUrl({ base_url: base || null, region }, model, false, region)
+      const body = JSON.stringify({
+        anthropic_version: BEDROCK_ANTHROPIC_VERSION,
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'hi' }],
+      })
+      const headers = signAwsV4({
+        method: 'POST',
+        url,
+        headers: { 'content-type': 'application/json', accept: 'application/json' },
+        body,
+        credentials: creds,
+        region,
+        service: 'bedrock',
+      })
+      const r = await fetch(url, { method: 'POST', headers, body, signal, dispatcher } as any)
+      if (!r.ok) return failure(r)
+      await r.body?.cancel()
+      return { ok: true, message: '连接成功' }
+    }
+
+    if (!base) {
+      const controlRoot = `https://bedrock.${region}.amazonaws.com`
+      const profilesUrl = `${controlRoot}/inference-profiles?maxResults=1000`
+      const modelsUrl = `${controlRoot}/foundation-models?byProvider=Anthropic&byOutputModality=TEXT`
+      const [profilesRes, modelsRes] = await Promise.all([
+        fetch(profilesUrl, {
+          method: 'GET',
+          headers: signAwsV4({ method: 'GET', url: profilesUrl, headers: { accept: 'application/json' }, body: '', credentials: creds, region, service: 'bedrock' }),
+          signal,
+          dispatcher,
+        } as any),
+        fetch(modelsUrl, {
+          method: 'GET',
+          headers: signAwsV4({ method: 'GET', url: modelsUrl, headers: { accept: 'application/json' }, body: '', credentials: creds, region, service: 'bedrock' }),
+          signal,
+          dispatcher,
+        } as any),
+      ])
+
+      if (profilesRes.ok || modelsRes.ok) {
+        const collected: string[] = []
+        const seen = new Set<string>()
+        const push = (id: unknown) => {
+          if (typeof id !== 'string' || !id || seen.has(id)) return
+          seen.add(id)
+          collected.push(id)
+        }
+        if (profilesRes.ok) {
+          const data: any = await profilesRes.json().catch(() => ({}))
+          for (const item of Array.isArray(data?.inferenceProfileSummaries) ? data.inferenceProfileSummaries : []) {
+            const id = typeof item?.inferenceProfileId === 'string' ? item.inferenceProfileId : ''
+            if (id && /anthropic|claude/i.test(id)) push(id)
+          }
+        } else {
+          await profilesRes.body?.cancel().catch(() => {})
+        }
+        if (modelsRes.ok) {
+          const data: any = await modelsRes.json().catch(() => ({}))
+          for (const item of Array.isArray(data?.modelSummaries) ? data.modelSummaries : []) {
+            push(item?.modelId)
+          }
+        } else {
+          await modelsRes.body?.cancel().catch(() => {})
+        }
+        return { ok: true, message: '连接成功', models: collected }
+      }
+
+      // 区分签名/凭证错误与最小权限 IAM（无 List 权限但有 InvokeModel 权限）
+      const errText = await modelsRes.text().catch(() => '')
+      await profilesRes.body?.cancel().catch(() => {})
+      const isAccessDenied = modelsRes.status === 403 && /AccessDeniedException|is not authorized to perform/i.test(errText)
+      if (isAccessDenied) {
+        if (listedModels.length > 0) return invokeProbe(listedModels[0])
+        return { ok: false, message: 'HTTP 403: 凭证缺少列出模型权限（bedrock:ListFoundationModels / ListInferenceProfiles），请手动填写模型后再测试' }
+      }
+      return { ok: false, message: `HTTP ${modelsRes.status}: ${errText.slice(0, 200)}` }
+    }
+
+    if (!listedModels.length) return { ok: false, message: '自定义 Base URL 模式下请至少填写一个模型后再测试连接' }
+    return invokeProbe(listedModels[0])
   }
 
   // openai / responses / anthropic：GET /v1/models；完整地址模式用模型列表地址

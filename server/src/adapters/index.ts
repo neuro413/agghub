@@ -5,6 +5,7 @@ import { anthropicAdaptor } from './anthropic'
 import { vertexAdaptor } from './vertex'
 import { responsesAdaptor } from './responses'
 import { geminiAdaptor } from './gemini'
+import { bedrockAdaptor } from './bedrock'
 
 export function getAdaptor(type: ChannelType): Adaptor {
   switch (type) {
@@ -18,6 +19,8 @@ export function getAdaptor(type: ChannelType): Adaptor {
       return responsesAdaptor
     case 'gemini':
       return geminiAdaptor
+    case 'bedrock':
+      return bedrockAdaptor
   }
 }
 

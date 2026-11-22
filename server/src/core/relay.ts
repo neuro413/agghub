@@ -487,7 +487,8 @@ async function runAttempt(
     const compression = state.compression = encoded.info
     attempt.touch()
     const send = (body: string | Buffer, encoding: string | null) => {
-      const headers = encoding ? { ...request.headers, 'content-encoding': encoding } : request.headers
+      let headers = encoding ? { ...request.headers, 'content-encoding': encoding } : request.headers
+      if (state.adaptor.signRequest) headers = state.adaptor.signRequest(state.channel, request.url, headers, body)
       const options: any = { method: 'POST', headers, body, signal: attempt.signal }
       if (pool.lease) options.dispatcher = pool.lease.dispatcher
       else if (settings.proxy_url) options.dispatcher = getProxyAgent(settings.proxy_url)
@@ -675,10 +676,17 @@ async function pipeResponse(ctx: RelayContext, state: AttemptState, response: gl
     await emit(encoder.encode(chunk))
   }
   try {
-    for await (const event of parseSSEEvents(response.body, undefined, {
-      signal: state.lifecycle.signal,
-      onBytes: bytes => { state.lifecycle.touch(); upstreamLog.append(bytes) },
-    })) {
+    const customStream = state.adaptor.parseStreamEvents
+    const events = customStream
+      ? customStream(response.body, { signal: state.lifecycle.signal, onBytes: () => { state.lifecycle.touch() } }, response.headers.get('content-type'))
+      : parseSSEEvents(response.body, undefined, {
+          signal: state.lifecycle.signal,
+          onBytes: bytes => { state.lifecycle.touch(); upstreamLog.append(bytes) },
+        })
+    for await (const event of events) {
+      if (customStream) {
+        upstreamLog.append(Buffer.from((event.event ? `event: ${event.event}\n` : '') + `data: ${event.data.replace(/\n/g, '\ndata: ')}\n\n`, 'utf8'))
+      }
       const data = observer.observe(event)
       if (observer.failed) {
         // 公网端口不原样转发上游错误事件，统一走下方脱敏后的 encoder.fail

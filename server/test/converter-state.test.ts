@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import * as anthropic from '../src/convert/anthropic'
+import * as gemini from '../src/convert/gemini'
 import * as responses from '../src/convert/responses'
 
 const chunk = (delta: any, finish: string | null = null) => ({ id: 'synthetic', model: 'alias', choices: [{ index: 0, delta, finish_reason: finish }] })
@@ -173,4 +174,50 @@ test('Responses 解码：空摘要密文写占位并签名，工具参数只在 
   } finally {
     responses.setReasoningStore({ save: () => '', lookup: () => null })
   }
+})
+
+test('Gemini 请求构造：functionResponse 与后续中途 system / user 文本 / 附加媒体拆成独立 user turn', () => {
+  // 1. tool_result 后紧跟中途 system（Claude Code 典型场景）以及 user[tool_result, text] + system
+  const { ir } = anthropic.parseRequest({
+    model: 'gemini-4-neon',
+    system: '顶层系统提示',
+    messages: [
+      { role: 'user', content: '查一下文件' },
+      { role: 'system', content: '# Environment' },
+      { role: 'assistant', content: [{ type: 'tool_use', id: 'c1', name: 'Read', input: { path: 'a.ts' } }, { type: 'tool_use', id: 'c2', name: 'Glob', input: { pattern: '*' } }] },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool_result', tool_use_id: 'c1', content: 'file-a' },
+          { type: 'tool_result', tool_use_id: 'c2', content: 'file-b' },
+          { type: 'text', text: '继续' },
+        ],
+      },
+      { role: 'system', content: [{ type: 'text', text: '[SYSTEM NOTIFICATION]' }] },
+    ],
+  })
+  const req = gemini.buildRequest(ir, 'gemini-4-neon')
+  assert.deepEqual(req.systemInstruction, { parts: [{ text: '顶层系统提示' }] })
+  assert.equal(req.contents.length, 4)
+  // 普通 user + 中途 system 仍合并在同一条 user turn
+  assert.deepEqual(req.contents[0], { role: 'user', parts: [{ text: '查一下文件' }, { text: '# Environment' }] })
+  assert.equal(req.contents[1].role, 'model')
+  // 并行 functionResponse 保持在纯 functionResponse 的 user turn 中
+  assert.equal(req.contents[2].role, 'user')
+  assert.deepEqual(req.contents[2].parts.map((p: any) => p.functionResponse?.name), ['Read', 'Glob'])
+  // 后续 user 文本与中途 system 合并到下一条独立 user turn，不与 functionResponse 混装
+  assert.deepEqual(req.contents[3], { role: 'user', parts: [{ text: '继续' }, { text: '[SYSTEM NOTIFICATION]' }] })
+
+  // 2. 非内嵌工具媒体（Gemini 2.5 图片无法嵌进 functionResponse.parts）同样拆成后续独立 user turn
+  const mediaReq = gemini.buildRequest({
+    model: 'gemini-2.5-pro',
+    messages: [
+      { role: 'user', content: '截图' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'c1', type: 'function', function: { name: 'snap', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'ok' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }] },
+    ],
+  }, 'gemini-2.5-pro')
+  assert.equal(mediaReq.contents.length, 4)
+  assert.deepEqual(mediaReq.contents[2].parts.map((p: any) => Object.keys(p)), [['functionResponse']])
+  assert.deepEqual(mediaReq.contents[3], { role: 'user', parts: [{ inlineData: { mimeType: 'image/png', data: 'AA==' } }] })
 })

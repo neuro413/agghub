@@ -8,6 +8,7 @@ const TYPE_LABEL: Record<ChannelType, string> = {
   vertex: 'Vertex',
   responses: 'Responses',
   gemini: 'Gemini',
+  bedrock: 'AWS',
 }
 
 export function Badge({ type }: { type: ChannelType }) {

@@ -1,5 +1,5 @@
 // ── 渠道 ───────────────────────────────────────────────
-export type ChannelType = 'openai' | 'anthropic' | 'vertex' | 'responses' | 'gemini'
+export type ChannelType = 'openai' | 'anthropic' | 'vertex' | 'responses' | 'gemini' | 'bedrock'
 
 /** 0=手动禁用 1=启用 2=自动禁用（命中熔断） */
 export type ChannelStatus = 0 | 1 | 2

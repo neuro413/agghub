@@ -15,12 +15,43 @@ const PLACEHOLDER: Record<ChannelType, string> = {
   vertex: '留空自动用 aiplatform.googleapis.com',
   responses: 'https://api.openai.com（留空用官方）',
   gemini: 'https://generativelanguage.googleapis.com（留空用官方）',
+  bedrock: '留空自动用 bedrock-runtime.{region}.amazonaws.com',
 }
 
-/** Vertex / Gemini 的请求地址随模型与流式动作变化，不支持完整地址模式 */
-type FullUrlType = Exclude<ChannelType, 'vertex' | 'gemini'>
+/** Vertex / Gemini / Bedrock 的请求地址随模型与流式动作变化，不支持完整地址模式 */
+type FullUrlType = Exclude<ChannelType, 'vertex' | 'gemini' | 'bedrock'>
 function supportsFullUrl(type: ChannelType): type is FullUrlType {
-  return type !== 'vertex' && type !== 'gemini'
+  return type !== 'vertex' && type !== 'gemini' && type !== 'bedrock'
+}
+
+/** 拆解 Bedrock 单条凭证（支持 AK|SK|ST、AK:SK:ST 与 JSON）供分栏输入使用 */
+function parseBedrockKey(raw: string): { ak: string; sk: string; st: string } {
+  const s = (raw || '').trim()
+  if (!s) return { ak: '', sk: '', st: '' }
+  if (s.startsWith('{')) {
+    try {
+      const obj = JSON.parse(s)
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        return {
+          ak: String(obj.accessKeyId ?? obj.access_key_id ?? obj.AccessKeyId ?? obj.AWS_ACCESS_KEY_ID ?? '').trim(),
+          sk: String(obj.secretAccessKey ?? obj.secret_access_key ?? obj.SecretAccessKey ?? obj.AWS_SECRET_ACCESS_KEY ?? '').trim(),
+          st: String(obj.sessionToken ?? obj.session_token ?? obj.SessionToken ?? obj.AWS_SESSION_TOKEN ?? '').trim(),
+        }
+      }
+    } catch {}
+  }
+  const sep = s.includes('|') ? '|' : s.includes(':') ? ':' : null
+  if (!sep) return { ak: s, sk: '', st: '' }
+  const parts = s.split(sep)
+  return { ak: parts[0] ?? '', sk: parts[1] ?? '', st: parts[2] ?? '' }
+}
+
+function formatBedrockKey(ak: string, sk: string, st: string): string {
+  const a = ak.trim()
+  const s = sk.trim()
+  const t = st.trim()
+  if (!a && !s && !t) return ''
+  return t ? `${a}|${s}|${t}` : s ? `${a}|${s}` : a
 }
 
 /** 模型专属名的一行：模型列表原名 → 专属名 */
@@ -83,6 +114,7 @@ const FULL_PLACEHOLDER: Record<FullUrlType, string> = {
 
 function baseUrlHint(f: FormState): string {
   if (f.type === 'gemini') return '自定义反代地址，未以 /v1、/v1beta 结尾时自动补 /v1beta 和接口路径；留空用官方默认'
+  if (f.type === 'bedrock') return '自定义反代地址，直接拼接 /model/{id}/invoke；留空用官方 bedrock-runtime.{region}.amazonaws.com'
   if (!supportsFullUrl(f.type) || !f.base_url_full) return '自定义反代地址，会自动补 /v1 和接口路径；留空用官方默认'
   return '填写完整的请求地址，原样请求不做任何拼接；拉取模型与测试连接使用下方的模型列表地址'
 }
@@ -169,7 +201,7 @@ function buildPayload(f: FormState): Partial<Channel> {
     model_alias: Object.keys(aliases).length ? aliases : null,
     priority: f.priority,
     weight: f.weight,
-    region: f.type === 'vertex' ? f.region.trim() || null : null,
+    region: f.type === 'vertex' || f.type === 'bedrock' ? f.region.trim() || null : null,
     timeout_ms: f.timeout ? Number(f.timeout) : null,
     ua_override: f.ua_override,
     ua_value: f.ua_override ? f.ua_value.trim() || null : null,
@@ -457,12 +489,29 @@ export function ChannelModal({
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setF((s) => ({ ...s, [k]: v }))
 
   const keyCount = splitKeys(f.api_key).length
+  const bedrockCreds = f.type === 'bedrock' && !f.multi_key ? parseBedrockKey(f.api_key) : null
+  const updateBedrockCreds = (patch: Partial<{ ak: string; sk: string; st: string }>) => {
+    const cur = parseBedrockKey(f.api_key)
+    // 允许直接在 Access Key ID 栏粘贴 AK|SK、AK:SK 或 JSON，自动拆填到各栏
+    if (patch.ak !== undefined && (patch.ak.includes('|') || patch.ak.includes(':') || patch.ak.trim().startsWith('{'))) {
+      const parsed = parseBedrockKey(patch.ak)
+      if (parsed.sk) {
+        set('api_key', formatBedrockKey(parsed.ak, parsed.sk, parsed.st))
+        return
+      }
+    }
+    set('api_key', formatBedrockKey(patch.ak ?? cur.ak, patch.sk ?? cur.sk, patch.st ?? cur.st))
+  }
   const apiKeyHint =
     f.type === 'vertex'
       ? '粘贴 API Key 或服务账号 JSON 全文'
-      : f.multi_key
-        ? '每行一个 key，重复的自动去除；测试连接与拉取模型使用第一个 key'
-        : '可选 · 不鉴权的渠道可留空'
+      : f.type === 'bedrock'
+        ? f.multi_key
+          ? '每行一组 IAM 凭证（AK|SK 或 AK|SK|SessionToken，也支持 : 分隔或单行 JSON）；测试连接与拉取模型使用第一组'
+          : '填写 AWS IAM Access Key ID 与 Secret Access Key（STS 临时凭证可另填 Session Token），也可直接粘贴 AK|SK 或 JSON 自动拆分'
+        : f.multi_key
+          ? '每行一个 key，重复的自动去除；测试连接与拉取模型使用第一个 key'
+          : '可选 · 不鉴权的渠道可留空'
 
   // 关闭多 key 模式只保留第一个 key：单行密码框无法承载多行内容
   const toggleMultiKey = (on: boolean): void => {
@@ -564,19 +613,27 @@ export function ChannelModal({
               { value: 'anthropic', label: 'Anthropic 格式' },
               { value: 'vertex', label: 'Vertex AI' },
               { value: 'gemini', label: 'Gemini（AI Studio）' },
+              { value: 'bedrock', label: 'AWS Bedrock' },
               { value: 'responses', label: 'OpenAI Responses' },
             ]}
             onChange={(v) => set('type', v as ChannelType)}
           />
         </Field>
-        {f.type === 'vertex' && (
-          <Field label="区域 Region" hint="留空 = global">
-            <Input value={f.region} onChange={(e) => set('region', e.target.value)} placeholder="us-central1 / global" />
+        {(f.type === 'vertex' || f.type === 'bedrock') && (
+          <Field label="区域 Region" hint={f.type === 'bedrock' ? '留空 = us-east-1' : '留空 = global'}>
+            <Input
+              value={f.region}
+              onChange={(e) => set('region', e.target.value)}
+              placeholder={f.type === 'bedrock' ? 'us-east-1 / us-west-2 / eu-west-1' : 'us-central1 / global'}
+            />
           </Field>
         )}
       </div>
 
-      <Field label={f.type === 'vertex' ? 'API Key / JSON 凭证' : 'API Key'} hint={apiKeyHint}>
+      <Field
+        label={f.type === 'vertex' ? 'API Key / JSON 凭证' : f.type === 'bedrock' ? 'AWS IAM 凭证' : 'API Key'}
+        hint={apiKeyHint}
+      >
         {f.type === 'vertex' ? (
           <Textarea
             value={f.api_key}
@@ -585,11 +642,41 @@ export function ChannelModal({
             rows={4}
             style={{ fontFamily: 'monospace', fontSize: 12 }}
           />
+        ) : f.type === 'bedrock' && !f.multi_key && bedrockCreds ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="ah-grid2">
+              <Input
+                value={bedrockCreds.ak}
+                onChange={(e) => updateBedrockCreds({ ak: e.target.value })}
+                placeholder="Access Key ID（如 AKIA…）"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <Input
+                type="password"
+                value={bedrockCreds.sk}
+                onChange={(e) => updateBedrockCreds({ sk: e.target.value })}
+                placeholder="Secret Access Key"
+                autoComplete="off"
+              />
+            </div>
+            <Input
+              type="password"
+              value={bedrockCreds.st}
+              onChange={(e) => updateBedrockCreds({ st: e.target.value })}
+              placeholder="Session Token（可选，仅 STS 临时凭证需要）"
+              autoComplete="off"
+            />
+          </div>
         ) : f.multi_key ? (
           <Textarea
             value={f.api_key}
             onChange={(e) => set('api_key', e.target.value)}
-            placeholder={'每行一个 key\nsk-aaa…\nsk-bbb…'}
+            placeholder={
+              f.type === 'bedrock'
+                ? '每行一组 IAM 凭证\nAKIA...|SecretKey1\nAKIA...|SecretKey2|SessionToken'
+                : '每行一个 key\nsk-aaa…\nsk-bbb…'
+            }
             rows={5}
             spellCheck={false}
             style={{ fontFamily: 'monospace', fontSize: 12 }}
@@ -708,7 +795,9 @@ export function ChannelModal({
           <Button size="sm" variant="soft" icon={<IconRefresh size={15} />} loading={fetching} onClick={fetchModels}>
             拉取模型
           </Button>
-          <span className="ah-mini ah-faint">从上游 /models 拉取可用模型</span>
+          <span className="ah-mini ah-faint">
+            {f.type === 'bedrock' ? '从 Bedrock 拉取 Claude 推理配置文件与基础模型' : '从上游 /models 拉取可用模型'}
+          </span>
         </div>
         {fetchedModels && (
           <div className="ah-model-pick">

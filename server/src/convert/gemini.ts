@@ -424,13 +424,25 @@ export function buildRequest(ir: any, upstreamModel: string): any {
   // 无法嵌进 functionResponse 的工具结果媒体，等这一串工具结果结束后再追加，保持 functionResponse 连续
   let deferredMedia: any[] = []
 
-  // 把 parts 追加进相邻 user content（合并并行 functionResponse / 连续 user），
-  // 否则新建一条 user content，避免 Gemini 收到连续 user role。
+  // 判断是否为纯 functionResponse 的 user turn（与普通文本 / 媒体 user turn 区分）
+  const isFunctionResponseTurn = (c: any): boolean =>
+    c?.role === 'user' && Array.isArray(c.parts) && c.parts.length > 0 && 'functionResponse' in c.parts[0]
+
+  // 把非 functionResponse 的 parts 追加进相邻普通 user content；若前一条是 functionResponse turn，
+  // 则另起一条 user content，避免 functionResponse 后紧跟 text / 媒体混装在同一 turn 中：
+  // Vertex AI Gemini 3.6+ / 4 会拒绝该形态并误报 400 "Requests ending with a model turn are not supported."。
+  // 全历史统一拆分，保证多轮前缀稳定、不破坏提示词缓存。
   const appendUser = (parts: any[]): void => {
     if (!parts.length) return
     const last = contents[contents.length - 1]
-    if (last && last.role === 'user') last.parts.push(...parts)
-    else contents.push({ role: 'user', parts })
+    if (last && last.role === 'user' && !isFunctionResponseTurn(last)) last.parts.push(...parts)
+    else contents.push({ role: 'user', parts: [...parts] })
+  }
+  // 并行工具结果合并到同一条纯 functionResponse 的 user content
+  const appendFunctionResponse = (part: any): void => {
+    const last = contents[contents.length - 1]
+    if (isFunctionResponseTurn(last)) last.parts.push(part)
+    else contents.push({ role: 'user', parts: [part] })
   }
   const flushMedia = (): void => {
     appendUser(deferredMedia)
@@ -454,7 +466,7 @@ export function buildRequest(ir: any, upstreamModel: string): any {
     leading = false
     if (msg.role === 'tool' || msg.role === 'function') {
       const { part, media } = toolResultParts(msg, toolCallNames, modern)
-      appendUser([part])
+      appendFunctionResponse(part)
       deferredMedia.push(...media)
       continue
     }

@@ -516,6 +516,9 @@
 .ah-badge.t-gemini {
   --type: var(--type-gemini);
 }
+.ah-badge.t-bedrock {
+  --type: var(--type-bedrock);
+}
 
 /* ── 状态点：静态光环，不呼吸 ── */
 .ah-dot {

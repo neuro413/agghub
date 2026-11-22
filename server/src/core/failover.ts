@@ -114,6 +114,7 @@ export function sanitizePublicError(kind: ErrorKind, message: string): string {
   // 每段都有上界，最坏 O(n)；原来的 [0-9a-f]*:[0-9a-f:]*:[0-9a-f]* 在无冒号长串上是 O(n²)。段内允许 0 位以覆盖 :: 缩写
   text = text.replace(/(?:[0-9a-f]{0,4}:){2,7}[0-9a-f]{0,4}/gi, m => net.isIPv6(m) ? '[ip]' : m)
   text = text.replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[redacted]')
+  text = text.replace(/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, '[redacted]')
   text = text.replace(/[A-Za-z0-9_-]{32,}/g, '[redacted]')
   const trimmed = text.slice(0, 300).trim()
   return trimmed || '上游返回错误'

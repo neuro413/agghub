@@ -1,5 +1,7 @@
 import type { Channel, WireFormat } from '../types'
 import type { StreamDecoder } from '../convert/ir'
+import type { ReadOptions } from '../core/bodyReader'
+import type { SSEEvent } from '../core/streamState'
 
 export interface UpstreamRequest {
   url: string
@@ -27,6 +29,10 @@ export interface Adaptor {
     stream: boolean,
     rawHeaders?: Record<string, any>,
   ): UpstreamRequest
+  /** 发送前对最终 URL、请求头与请求体签名（在单 role、参数规则、UA 覆写与请求体压缩之后执行） */
+  signRequest?(channel: Channel, url: string, headers: Record<string, string>, body: string | Buffer): Record<string, string>
+  /** 自定义上游流式响应事件解析（如 AWS Bedrock 二进制 EventStream）；缺省按标准 SSE 解析 */
+  parseStreamEvents?(body: ReadableStream<Uint8Array>, options: ReadOptions, contentType?: string | null): AsyncGenerator<SSEEvent>
   parseResponse(json: any, context: UpstreamContext): any
   createStreamDecoder(context: UpstreamContext): StreamDecoder
 }
