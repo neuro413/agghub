@@ -1,6 +1,8 @@
 import { DEFAULT_SETTINGS, INTEGER_RANGES } from '../config'
 import type { Settings } from '../types'
 import { parseSafePath } from './safePath'
+import { compileCode, compileTemplate } from './promptTemplate'
+import { parseRegexLiteral } from './regexPacks'
 
 export class SettingsValidationError extends Error {
   readonly status = 400
@@ -231,6 +233,7 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
       }
       if (key === 'preprocess_rules') {
         check(['visual', 'regex'].includes(rule.source), `${at}.source`, '须为 visual 或 regex')
+        if (rule.action !== undefined) check(['replace', 'remove_message'].includes(rule.action), `${at}.action`, '须为 replace 或 remove_message')
         if (rule.roles !== undefined) check(Array.isArray(rule.roles) && rule.roles.every((v: any) => roles.has(v)), `${at}.roles`, '含不支持的角色')
         if (rule.depth !== undefined) check(Number.isSafeInteger(rule.depth) && rule.depth >= 0 && rule.depth <= 100_000, `${at}.depth`, '须为 0～100000 的整数')
         regex(rule, at)
@@ -247,6 +250,89 @@ export function validateSettingsPatch(current: Settings, input: unknown): Record
           } else errors[`${where}.type`] = '未知操作类型'
         })
       }
+    })
+  }
+  if (!Array.isArray(merged.regex_packs)) errors.regex_packs = '须为正则包数组'
+  else {
+    const packIds = new Set<string>()
+    /** 语法检查：只编译，不执行 */
+    const compiles = (compile: () => unknown, where: string, label: string) => {
+      try { compile() } catch (error) { errors[where] = `${label}：${(error as Error).message}` }
+    }
+    const depth = (value: any, where: string) => check(Number.isSafeInteger(value) && value >= 0 && value <= 100_000, where, '须为 0～100000 的整数')
+    merged.regex_packs.forEach((pack: any, index: number) => {
+      const at = `regex_packs[${index}]`
+      if (!object(pack)) { errors[at] = '正则包须为对象'; return }
+      check(typeof pack.id === 'string' && !!pack.id && !packIds.has(pack.id), `${at}.id`, 'ID 须为非空且不重复的字符串')
+      packIds.add(pack.id)
+      check(typeof pack.enabled === 'boolean', `${at}.enabled`, '须为布尔值')
+      check(typeof pack.name === 'string' && pack.name.length <= 128, `${at}.name`, '须为不超过 128 字符的字符串')
+      if (pack.description !== undefined) check(typeof pack.description === 'string' && pack.description.length <= 20_000, `${at}.description`, '须为不超过 20000 字符的字符串')
+      if (pack.channelIds !== undefined) check(ids(pack.channelIds), `${at}.channelIds`, '须为正整数数组')
+      if (pack.models !== undefined) check(strings(pack.models), `${at}.models`, '须为模型名数组')
+      if (pack.formats !== undefined) check(Array.isArray(pack.formats) && pack.formats.every((v: any) => formats.has(v)), `${at}.formats`, '含不支持的入口格式')
+      if (pack.sources !== undefined) check(Array.isArray(pack.sources) && pack.sources.every((v: any) => sources.has(v)), `${at}.sources`, '含不支持的调用来源')
+      if (pack.keyIds !== undefined) check(ids(pack.keyIds), `${at}.keyIds`, '须为正整数数组')
+      if (pack.uaWhitelist !== undefined) {
+        if (!strings(pack.uaWhitelist)) errors[`${at}.uaWhitelist`] = '须为非空字符串数组'
+        else for (const entry of pack.uaWhitelist) compiles(() => parseRegexLiteral(entry.trim()), `${at}.uaWhitelist`, `「${entry}」不是有效的正则`)
+      }
+      const when = pack.when
+      if (when !== undefined) {
+        if (!object(when) || !['regex', 'expr'].includes(when.mode) || typeof when.source !== 'string' || (when.flags !== undefined && typeof when.flags !== 'string')) {
+          errors[`${at}.when`] = '须为 { mode: regex | expr, source, flags? }'
+        } else if (when.source.trim()) {
+          if (when.mode === 'regex') compiles(() => new RegExp(when.source, when.flags ?? ''), `${at}.when`, '启用条件的正则无效')
+          else compiles(() => compileCode(when.source, true), `${at}.when`, '启用条件的表达式有语法错误')
+        }
+      }
+      if (!Array.isArray(pack.params)) errors[`${at}.params`] = '须为参数数组'
+      else {
+        const keys = new Set<string>()
+        pack.params.forEach((param: any, i: number) => {
+          const where = `${at}.params[${i}]`
+          if (!object(param)) { errors[where] = '参数须为对象'; return }
+          check(typeof param.key === 'string' && /^[A-Za-z_$][\w$]*$/.test(param.key) && !keys.has(param.key), `${where}.key`, '变量名须为不重复的合法标识符（字母、数字、下划线，不以数字开头）')
+          keys.add(param.key)
+          const type = param.type === 'text' ? 'string' : param.type
+          check((type === 'string' || type === 'boolean' || type === 'number') && typeof param.value === type && (type !== 'number' || Number.isFinite(param.value)),
+            `${where}.value`, '类型须为 text / boolean / number，且值与类型一致')
+          if (param.label !== undefined) check(typeof param.label === 'string', `${where}.label`, '须为字符串')
+          if (param.description !== undefined) check(typeof param.description === 'string', `${where}.description`, '须为字符串')
+        })
+      }
+      if (!Array.isArray(pack.steps)) { errors[`${at}.steps`] = '须为步骤数组'; return }
+      const stepIds = new Set<string>()
+      pack.steps.forEach((step: any, i: number) => {
+        const where = `${at}.steps[${i}]`
+        if (!object(step)) { errors[where] = '步骤须为对象'; return }
+        check(typeof step.id === 'string' && !!step.id && !stepIds.has(step.id), `${where}.id`, 'ID 须为非空且不重复的字符串')
+        stepIds.add(step.id)
+        check(typeof step.enabled === 'boolean', `${where}.enabled`, '须为布尔值')
+        if (step.name !== undefined) check(typeof step.name === 'string', `${where}.name`, '须为字符串')
+        if (step.condition !== undefined) {
+          if (typeof step.condition !== 'string') errors[`${where}.condition`] = '须为字符串'
+          else if (step.condition.trim()) compiles(() => compileCode(step.condition, true), `${where}.condition`, '条件表达式有语法错误')
+        }
+        if (step.type === 'regex') {
+          if (typeof step.pattern !== 'string' || typeof step.flags !== 'string' || typeof step.replacement !== 'string') { errors[where] = 'pattern / flags / replacement 须为字符串'; return }
+          compiles(() => new RegExp(step.pattern, step.flags || 'g'), `${where}.pattern`, '正则表达式无效')
+          compiles(() => compileTemplate(step.replacement), `${where}.replacement`, '替换模板有语法错误')
+          if (step.action !== undefined) check(['replace', 'remove_message'].includes(step.action), `${where}.action`, '须为 replace 或 remove_message')
+          if (step.targets !== undefined) check(Array.isArray(step.targets) && step.targets.every((v: any) => v === 'messages' || v === 'tools'), `${where}.targets`, '须为 messages / tools 组成的数组')
+          if (step.roles !== undefined) check(Array.isArray(step.roles) && step.roles.every((v: any) => roles.has(v)), `${where}.roles`, '含不支持的角色')
+          if (step.depth !== undefined) depth(step.depth, `${where}.depth`)
+        } else if (step.type === 'inject') {
+          if (typeof step.content !== 'string') { errors[`${where}.content`] = '须为字符串'; return }
+          compiles(() => compileTemplate(step.content), `${where}.content`, '注入模板有语法错误')
+          check(['system_start', 'system_end', 'depth'].includes(step.position), `${where}.position`, '须为 system_start / system_end / depth')
+          if (step.role !== undefined) check(['system', 'user', 'assistant'].includes(step.role), `${where}.role`, '须为 system / user / assistant')
+          if (step.depth !== undefined) depth(step.depth, `${where}.depth`)
+        } else if (step.type === 'script') {
+          if (typeof step.code !== 'string') { errors[`${where}.code`] = '须为字符串'; return }
+          compiles(() => compileCode(step.code), `${where}.code`, '脚本有语法错误')
+        } else errors[`${where}.type`] = '未知步骤类型'
+      })
     })
   }
   for (const key of Object.keys(errors)) {

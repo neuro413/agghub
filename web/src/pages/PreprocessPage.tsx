@@ -361,7 +361,10 @@ export function PreprocessPage() {
         <div className="ah-set-title">
           <IconWand size={18} /> 正则请求体修改
         </div>
-        <div className="ah-set-desc">对请求消息文本做查找 / 替换 / 删除，可视化与正则共用同一份规则</div>
+        <div className="ah-set-desc">
+          对请求消息文本做查找 / 替换 / 删除，或在命中时移除整条消息，可视化与正则共用同一份规则 · 需要按客户端 UA 启用、成套打包，或用宏模板 / 脚本大改提示词时，使用{' '}
+          <a href="#/packs">正则包</a>
+        </div>
         <div className="ah-detail-tabs ah-tabs-line">
           <button className={`ah-detail-tab${subtab === 'visual' ? ' is-active' : ''}`} onClick={() => setSubtab('visual')}>
             可视化
@@ -421,10 +424,23 @@ export function PreprocessPage() {
 function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onToggleExpand, onChange, onDelete, drag }: RuleRowProps<PreprocessRule>) {
   const [test, setTest] = useState('')
   const reValid = regexValid(rule.pattern, rule.flags)
-  const tested = test && reValid && rule.pattern ? test.replace(new RegExp(rule.pattern, rule.flags || 'g'), rule.replacement ?? '') : null
+  const removing = rule.action === 'remove_message'
+  const testRe = test && reValid && rule.pattern ? new RegExp(rule.pattern, rule.flags || 'g') : null
+  // 预览：替换模式显示替换后的文本，移除模式显示这段文本所在的消息是否会被移除
+  const tested = !testRe ? null : removing ? (testRe.test(test) ? '命中：这条消息会被整条移除' : '未命中：这条消息保留') : test.replace(testRe, rule.replacement ?? '')
 
   const up = (p: Partial<PreprocessRule>) => onChange({ ...rule, ...p })
-  const summary = rule.name || (rule.pattern ? `${rule.pattern}  →  ${rule.replacement || '（删除）'}` : '（空规则）')
+  const summary = rule.name || (rule.pattern ? `${rule.pattern}  →  ${removing ? '（移除整条消息）' : rule.replacement || '（删除）'}` : '（空规则）')
+  const find = (
+    <Field label="查找（正则）" hint={!reValid ? <span className="ah-c-err">正则表达式无效</span> : undefined}>
+      <Textarea
+        value={rule.pattern}
+        onChange={(e) => up({ pattern: e.target.value })}
+        placeholder={removing ? '关键词或正则，多个关键词用 | 分隔' : '要匹配的正则'}
+        rows={2}
+      />
+    </Field>
+  )
 
   return (
     <div className="ah-pp-rule" {...drag}>
@@ -435,6 +451,7 @@ function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onT
         <Toggle checked={rule.enabled} onChange={(v) => up({ enabled: v })} />
         <button type="button" className="ah-pp-summary" onClick={onToggleExpand}>
           <span className={`ah-pp-src is-${rule.source}`}>{rule.source === 'visual' ? '可视化' : '正则'}</span>
+          {removing && <span className="ah-pp-src is-remove">移除消息</span>}
           <span className="ah-pp-summary-text ah-truncate">{summary}</span>
         </button>
         {!reValid && (
@@ -451,22 +468,34 @@ function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onT
           <Field label="名称（可选）">
             <Input value={rule.name ?? ''} onChange={(e) => up({ name: e.target.value })} placeholder="便于识别" />
           </Field>
-          <div className="ah-pp-grid2">
-            <Field
-              label="查找（正则）"
-              hint={!reValid ? <span className="ah-c-err">正则表达式无效</span> : undefined}
-            >
-              <Textarea value={rule.pattern} onChange={(e) => up({ pattern: e.target.value })} placeholder="要匹配的正则" rows={2} />
-            </Field>
-            <Field label="替换为（空 = 删除）">
-              <Textarea
-                value={rule.replacement}
-                onChange={(e) => up({ replacement: e.target.value })}
-                placeholder="留空即删除匹配内容，支持 $1 捕获组"
-                rows={2}
-              />
-            </Field>
-          </div>
+          <Field
+            label="命中后"
+            hint={removing ? '消息文本命中查找内容时，这条消息（整个 role）不再发往上游；它带有的工具调用 / 结果会连同配对的另一半一起移除' : undefined}
+          >
+            <div className="ah-pp-chips">
+              <button type="button" className={`ah-pp-chip${removing ? '' : ' is-on'}`} onClick={() => up({ action: undefined })}>
+                替换文本
+              </button>
+              <button type="button" className={`ah-pp-chip${removing ? ' is-on' : ''}`} onClick={() => up({ action: 'remove_message' })}>
+                移除整条消息
+              </button>
+            </div>
+          </Field>
+          {removing ? (
+            find
+          ) : (
+            <div className="ah-pp-grid2">
+              {find}
+              <Field label="替换为（空 = 删除）">
+                <Textarea
+                  value={rule.replacement}
+                  onChange={(e) => up({ replacement: e.target.value })}
+                  placeholder="留空即删除匹配内容，支持 $1 捕获组"
+                  rows={2}
+                />
+              </Field>
+            </div>
+          )}
           <div className="ah-pp-grid2">
             <Field label="flags">
               <Input value={rule.flags} onChange={(e) => up({ flags: e.target.value })} placeholder="g / gi / gm…" />
@@ -485,7 +514,12 @@ function RuleRow({ rule, channelOptions, modelOptions, keyOptions, expanded, onT
           </Field>
           <ScopeFields rule={rule} onChange={up} channelOptions={channelOptions} modelOptions={modelOptions} keyOptions={keyOptions} />
           <Field label="测试预览">
-            <Textarea value={test} onChange={(e) => setTest(e.target.value)} placeholder="粘贴一段文本，实时查看替换效果" rows={2} />
+            <Textarea
+              value={test}
+              onChange={(e) => setTest(e.target.value)}
+              placeholder={removing ? '粘贴一条消息的文本，查看它是否会被移除' : '粘贴一段文本，实时查看替换效果'}
+              rows={2}
+            />
             {test && <pre className="ah-code ah-code-block ah-pp-test-out">{reValid ? tested ?? '' : '（正则无效）'}</pre>}
           </Field>
         </div>
@@ -499,7 +533,7 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
   const [picking, setPicking] = useState(false)
   const [detail, setDetail] = useState<LogDetail | null>(null)
   const [sel, setSel] = useState<{ text: string; role: string } | null>(null)
-  const [action, setAction] = useState<'delete' | 'replace'>('delete')
+  const [action, setAction] = useState<'delete' | 'replace' | 'remove'>('delete')
   const [replaceText, setReplaceText] = useState('')
 
   const blocks = useMemo(() => (detail ? parseConversation(detail.request_body) : []), [detail])
@@ -542,6 +576,7 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
         pattern: escapeRegExp(sel.text),
         flags: 'g',
         replacement: action === 'replace' ? replaceText : '',
+        action: action === 'remove' ? 'remove_message' : undefined,
         roles,
       }),
     )
@@ -563,7 +598,7 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
       </div>
 
       {!detail ? (
-        <div className="ah-detail-empty">从历史请求里选一条，划选文本即可生成删除 / 替换规则</div>
+        <div className="ah-detail-empty">从历史请求里选一条，划选文本即可生成删除 / 替换 / 移除整条消息的规则</div>
       ) : !blocks.length ? (
         <div className="ah-detail-empty">该请求未存储正文或无对话内容</div>
       ) : (
@@ -592,6 +627,14 @@ function VisualEditor({ onAddRule }: { onAddRule: (r: PreprocessRule) => void })
             </button>
             <button type="button" className={`ah-pp-chip${action === 'replace' ? ' is-on' : ''}`} onClick={() => setAction('replace')}>
               替换
+            </button>
+            <button
+              type="button"
+              className={`ah-pp-chip${action === 'remove' ? ' is-on' : ''}`}
+              title="含有所选文本的消息整条不再发往上游"
+              onClick={() => setAction('remove')}
+            >
+              移除整条消息
             </button>
             {action === 'replace' && (
               <Input value={replaceText} onChange={(e) => setReplaceText(e.target.value)} placeholder="替换为…" />

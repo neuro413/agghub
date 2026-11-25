@@ -627,8 +627,8 @@ export function SettingsPage() {
           <IconSpark size={18} /> 数据留存
         </div>
         <div className="ah-set-desc">统计日志的保留时长与正文存储</div>
-        <SettingRow label="日志保留天数" desc="超过天数的请求日志会被自动清理">
-          <Slider value={s.log_retention_days} min={1} max={90} onChange={(v) => set('log_retention_days', v)} suffix=" 天" />
+        <SettingRow label="日志保留天数" desc="超过天数的请求日志会被自动清理；0 = 永久保留，不自动清理">
+          <Slider value={s.log_retention_days} min={0} max={90} onChange={(v) => set('log_retention_days', v)} suffix=" 天" />
         </SettingRow>
         <SettingRow label="记录请求正文" desc="统计页可回看每次请求的 prompt（占用空间）">
           <Toggle checked={s.store_request_body} onChange={(v) => set('store_request_body', v)} />

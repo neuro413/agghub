@@ -69,11 +69,21 @@ export function ruleMatchesMeta(rule: RuleScope, meta: Pick<PreprocessMeta, 'ent
 function applyRule(target: any, rule: PreprocessRule): void {
   const re = new RegExp(rule.pattern, rule.flags || 'g')
   const replacement = rule.replacement
-  const roles = rule.roles?.length ? new Set(rule.roles) : null
-  const apply = (s: string): string => {
+  transformMessageText(target, rule, (s) => {
     re.lastIndex = 0
     return s.replace(re, replacement)
-  }
+  })
+}
+
+/** 消息文本的角色 / 深度限定，提示词规则与正则包的正则步骤共用 */
+export type TextScope = Pick<PreprocessRule, 'roles' | 'depth'>
+
+/**
+ * 按角色与深度遍历请求里的消息文本，逐段交给 apply 改写。
+ * 遍历顺序只取决于请求结构，同一请求体上两次调用访问的文本段及其先后完全一致。
+ */
+export function transformMessageText(target: any, scope: TextScope, apply: (s: string) => string): void {
+  const roles = scope.roles?.length ? new Set(scope.roles) : null
 
   // anthropic 直通的 top-level system 当作虚拟 role='system'（openai/ir 的 system 在 messages 内）
   if (target.system != null && (!roles || roles.has('system'))) {
@@ -91,7 +101,7 @@ function applyRule(target: any, rule: PreprocessRule): void {
   const list: any[] | null = Array.isArray(target.messages) ? target.messages : Array.isArray(target.input) ? target.input : null
   if (list) {
     const len = list.length
-    const start = rule.depth && rule.depth > 0 ? Math.max(0, len - rule.depth) : 0
+    const start = scope.depth && scope.depth > 0 ? Math.max(0, len - scope.depth) : 0
     for (let i = start; i < len; i++) {
       const msg = list[i]
       if (!msg) continue
@@ -114,6 +124,122 @@ function applyRule(target: any, rule: PreprocessRule): void {
       } else if (selected) msg.content = transformContentText(msg.content, apply)
     }
   }
+}
+
+// Responses 输入项里的工具调用及其结果，靠 call_id 配对
+const RESPONSES_TOOL_ITEM_TYPES = new Set(['function_call', 'custom_tool_call', 'function_call_output', 'custom_tool_call_output'])
+
+/** message.content（string 或 part 数组）里是否有文本命中，判断的文本范围与 transformContentText 一致 */
+function contentMatches(content: any, hit: (s: string) => boolean): boolean {
+  if (typeof content === 'string') return hit(content)
+  if (!Array.isArray(content)) return false
+  return content.some((p) => (typeof p === 'string' ? hit(p) : !!p && typeof p === 'object' && TEXT_PART_TYPES.has(p.type) && typeof p.text === 'string' && hit(p.text)))
+}
+
+/** 一条消息 / 输入项携带的工具调用 id：Chat 的 tool_calls 与 tool_call_id、Claude 的 tool_use / tool_result 块、Responses 的 call_id */
+function toolIdsOf(msg: any): string[] {
+  const ids: any[] = [msg.tool_call_id, msg.call_id]
+  if (Array.isArray(msg.tool_calls)) for (const tc of msg.tool_calls) ids.push(tc?.id)
+  if (Array.isArray(msg.content)) for (const b of msg.content) ids.push(b?.type === 'tool_use' ? b.id : b?.type === 'tool_result' ? b.tool_use_id : null)
+  return ids.filter((id) => id != null)
+}
+
+/**
+ * 清掉消息里 id 在 dead 中的工具调用 / 结果。
+ * 返回 true 表示整条都该移除：它本身就是这样一个调用 / 结果，或清完后已没有可发送的内容。
+ */
+function stripDeadTools(msg: any, dead: Set<string>): boolean {
+  if (!msg || typeof msg !== 'object') return false
+  // Chat 的 tool 消息；Responses 的调用项与结果项
+  if (msg.role === 'tool' && dead.has(msg.tool_call_id)) return true
+  if (RESPONSES_TOOL_ITEM_TYPES.has(msg.type) && dead.has(msg.call_id)) return true
+  // Chat 的 assistant.tool_calls
+  if (Array.isArray(msg.tool_calls)) {
+    const kept = msg.tool_calls.filter((tc: any) => !dead.has(tc?.id))
+    if (kept.length !== msg.tool_calls.length) {
+      if (kept.length) msg.tool_calls = kept
+      else {
+        delete msg.tool_calls
+        if (msg.content == null || msg.content === '' || (Array.isArray(msg.content) && !msg.content.length)) return true
+      }
+    }
+  }
+  // Claude 的 tool_use / tool_result 块；清完只剩 thinking 的消息上游不接受，同样移除
+  if (Array.isArray(msg.content)) {
+    const kept = msg.content.filter((b: any) => !(b?.type === 'tool_use' && dead.has(b.id)) && !(b?.type === 'tool_result' && dead.has(b.tool_use_id)))
+    if (kept.length !== msg.content.length) {
+      if (kept.every((b: any) => THINKING_TYPES.has(b?.type))) return true
+      msg.content = kept
+    }
+  }
+  return false
+}
+
+/**
+ * 移除模式：消息文本命中即整条移除（top-level system / instructions / 字符串 input 视作单条消息）。
+ * 角色、深度与判断的文本范围同 applyRule；被移除内容带有工具调用 / 结果时，配对的另一半一并移除，避免上游因配对缺失拒绝请求。
+ */
+export function removeMatchedMessages(target: any, rule: Pick<PreprocessRule, 'pattern' | 'flags' | 'roles' | 'depth'>): boolean {
+  const re = new RegExp(rule.pattern, rule.flags || 'g')
+  const roles = rule.roles?.length ? new Set(rule.roles) : null
+  const on = (role: string): boolean => !roles || roles.has(role)
+  const hit = (content: any): boolean => contentMatches(content, (s) => {
+    re.lastIndex = 0
+    return re.test(s)
+  })
+
+  let changed = false
+  if (target.system != null && on('system') && hit(target.system)) { delete target.system; changed = true }
+  if (typeof target.instructions === 'string' && on('system') && hit(target.instructions)) { delete target.instructions; changed = true }
+  if (typeof target.input === 'string' && on('user') && hit(target.input)) { delete target.input; changed = true }
+
+  const key = Array.isArray(target.messages) ? 'messages' : Array.isArray(target.input) ? 'input' : null
+  if (!key) return changed
+  const list: any[] = target[key]
+  const removed = new Set<any>()
+  // 失去配对的工具调用 id
+  const dead = new Set<string>()
+  const start = rule.depth && rule.depth > 0 ? Math.max(0, list.length - rule.depth) : 0
+  for (let i = start; i < list.length; i++) {
+    const msg = list[i]
+    if (!msg) continue
+    if (msg.type === 'function_call_output' || msg.type === 'custom_tool_call_output') {
+      if (on('tool') && hit(msg.output)) removed.add(msg)
+      continue
+    }
+    const role = msg.role === 'developer' ? 'system' : msg.role
+    if (!role) continue
+    if (!Array.isArray(msg.content)) {
+      if (on(role) && hit(msg.content)) removed.add(msg)
+      continue
+    }
+    // Claude 的 tool_result 块按 tool 角色单独判断，命中只移除这一个结果（连同对应的调用），同条消息的其余内容保留
+    if (on(role) && hit(msg.content.filter((part: any) => part?.type !== 'tool_result'))) removed.add(msg)
+    else if (on('tool')) {
+      for (const part of msg.content) if (part?.type === 'tool_result' && part.tool_use_id != null && hit(part.content)) dead.add(part.tool_use_id)
+    }
+  }
+  return dropMessages(target, removed, dead) || changed
+}
+
+/**
+ * 从消息列表（Chat / Claude 的 messages，或 Responses 的 input 项数组）移除 removed 中的项，以及 id 在 dead 中的工具调用 / 结果；
+ * 被移除内容带有的工具调用 / 结果，配对的另一半一并移除。返回是否有改动。
+ */
+export function dropMessages(target: any, removed: Set<any>, dead: Set<string> = new Set()): boolean {
+  const key = Array.isArray(target.messages) ? 'messages' : Array.isArray(target.input) ? 'input' : null
+  if (!key || (!removed.size && !dead.size)) return false
+  for (const msg of removed) if (msg && typeof msg === 'object') for (const id of toolIdsOf(msg)) dead.add(id)
+
+  const kept: any[] = []
+  for (const msg of target[key]) {
+    if (removed.has(msg) || (dead.size > 0 && stripDeadTools(msg, dead))) {
+      // Responses 的 reasoning 项要紧跟它产出的输出项，后者移除时一并移除
+      while (kept.length && kept[kept.length - 1]?.type === 'reasoning') kept.pop()
+    } else kept.push(msg)
+  }
+  target[key] = kept
+  return true
 }
 
 /** 收集所有命中的工具过滤规则，合并为一个黑名单集合 */
@@ -267,6 +393,7 @@ export function applyPreprocess(target: any, meta: PreprocessMeta, settings: Set
   for (const rule of settings.preprocess_rules) {
     if (!rule.enabled || !rule.pattern) continue
     if (!ruleMatchesMeta(rule, meta)) continue
-    applyRule(target, rule)
+    if (rule.action === 'remove_message') removeMatchedMessages(target, rule)
+    else applyRule(target, rule)
   }
 }

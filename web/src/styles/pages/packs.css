@@ -1,0 +1,284 @@
+/* ════════════ 正则包（提示词预处理高级模式） ════════════ */
+
+.ah-pk-layout {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* 左侧：包列表 */
+.ah-pk-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+}
+.ah-pk-side-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: 4px;
+}
+.ah-pk-side-empty {
+  padding: var(--sp-4) 4px;
+}
+.ah-pk-side-note {
+  margin-top: 6px;
+  padding: 8px 4px 0;
+  border-top: 1px solid var(--border-soft);
+  line-height: 1.6;
+}
+.ah-pk-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  transition: border-color var(--dur) var(--ease-out), background var(--dur) var(--ease-out);
+}
+.ah-pk-item:hover {
+  border-color: var(--border-strong);
+  background: var(--row-hover);
+}
+.ah-pk-item.is-active {
+  border-color: var(--accent-vivid);
+  background: var(--accent-soft);
+}
+.ah-pk-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.ah-pk-item-name {
+  font-size: var(--fs-base);
+  font-weight: 500;
+}
+
+/* 右侧：编辑区 */
+.ah-pk-main {
+  padding: 16px 20px 20px;
+  min-width: 0;
+}
+.ah-pk-main-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: var(--sp-2);
+}
+.ah-pk-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: 500;
+}
+.ah-pk-pane {
+  margin-top: var(--sp-4);
+}
+.ah-pk-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ah-pk-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ah-pk-inline > .ah-input {
+  flex: 1;
+  min-width: 0;
+}
+.ah-pk-grid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+/* 代码 / 模板输入 */
+.ah-pk-mono,
+.ah-pk-code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.ah-pk-code {
+  line-height: 1.55;
+  tab-size: 2;
+}
+
+/* 参数 */
+.ah-pk-param-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ah-pk-param-head > .ah-input {
+  flex: 1;
+  min-width: 0;
+}
+.ah-pk-param-key {
+  flex: none;
+  width: 180px;
+}
+.ah-pk-param-type {
+  flex: none;
+  width: 110px;
+}
+
+/* 执行记录（试运行与日志详情共用） */
+.ah-pk-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ah-pk-trace-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  background: var(--surface);
+}
+.ah-pk-trace-name {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.ah-pk-trace-err {
+  flex-basis: 100%;
+  padding: 6px 8px;
+  border-radius: var(--r-sm);
+  background: var(--err-soft);
+  color: var(--err-text);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ah-pk-trace-pack {
+  margin: var(--sp-3) 0 6px;
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text);
+}
+.ah-pk-trace-pack:first-child {
+  margin-top: 0;
+}
+.ah-pk-warn {
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--warn-text);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* 改写前后对比 */
+.ah-pk-diff {
+  max-height: 56vh;
+  overflow: auto;
+  border-radius: var(--r-md);
+  background: var(--fill);
+  padding: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.ah-pk-diff-line {
+  position: relative;
+  padding: 0 14px 0 30px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+}
+.ah-pk-diff-line::before {
+  content: attr(data-sign);
+  position: absolute;
+  left: 12px;
+  color: var(--text-3);
+}
+.ah-pk-diff-line.is-add {
+  background: var(--ok-soft);
+  color: var(--ok-text);
+}
+.ah-pk-diff-line.is-del {
+  background: var(--err-soft);
+  color: var(--err-text);
+}
+.ah-pk-diff-line.is-add::before,
+.ah-pk-diff-line.is-del::before {
+  color: inherit;
+}
+.ah-pk-diff-gap {
+  padding: 4px 14px;
+  text-align: center;
+  color: var(--text-3);
+  font-family: inherit;
+}
+
+/* 语法速查 */
+.ah-pk-help {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.ah-pk-help-title {
+  margin-top: var(--sp-3);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--text);
+}
+.ah-pk-help-title:first-child {
+  margin-top: 0;
+}
+.ah-pk-help-table {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.ah-pk-help-row {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: var(--sp-3);
+  padding: 7px 12px;
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.ah-pk-help-row + .ah-pk-help-row {
+  border-top: 1px solid var(--border-soft);
+}
+.ah-pk-help-row code {
+  font-family: var(--font-mono);
+  color: var(--text);
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .ah-pk-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 640px) {
+  .ah-pk-grid3,
+  .ah-pk-help-row {
+    grid-template-columns: 1fr;
+  }
+  .ah-pk-inline,
+  .ah-pk-param-head {
+    flex-wrap: wrap;
+  }
+}

@@ -41,6 +41,8 @@ export interface LogEntry {
   preprocessed_body?: string | null
   pseudo_thinking?: boolean
   thinking_inject?: string | null
+  /** 正则包执行记录 JSON；不受「存储请求正文」开关影响，调用方在关闭时自行去掉其中的脚本输出 */
+  pack_trace?: string | null
   source?: CallerSource | null
   key_id?: number | null
   key_name?: string | null
@@ -98,7 +100,7 @@ const insertStmt = db.prepare(
    (created_at, channel_id, channel_name, entry_format, model, upstream_model, status, status_code,
     latency_ms, prompt_tokens, completion_tokens, total_tokens, cache_read_tokens, cache_write_tokens,
     retry_count, is_stream, is_retry, error_message, preprocessed, pseudo_thinking,
-    request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref,
+    request_headers_ref, request_body_ref, response_body_ref, preprocessed_body_ref, thinking_inject_ref, pack_trace_ref,
     upstream_response_body_ref, request_id, attempt_latency_ms, response_body_truncated, upstream_response_body_truncated,
     source, key_id, key_name, client_ip, quota_points, user_id, group_name, channel_key, user_agent, first_token_ms,
     upstream_encoding, upstream_raw_bytes, upstream_sent_bytes, compress_ms, compress_status, compress_note, client_error, proxy_node)
@@ -106,7 +108,7 @@ const insertStmt = db.prepare(
    (@created_at, @channel_id, @channel_name, @entry_format, @model, @upstream_model, @status, @status_code,
     @latency_ms, @prompt_tokens, @completion_tokens, @total_tokens, @cache_read_tokens, @cache_write_tokens,
     @retry_count, @is_stream, @is_retry, @error_message, @preprocessed, @pseudo_thinking,
-    @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref,
+    @request_headers_ref, @request_body_ref, @response_body_ref, @preprocessed_body_ref, @thinking_inject_ref, @pack_trace_ref,
     @upstream_response_body_ref, @request_id, @attempt_latency_ms, @response_body_truncated, @upstream_response_body_truncated,
     @source, @key_id, @key_name, @client_ip, @quota_points, @user_id, @group_name, @channel_key, @user_agent, @first_token_ms,
     @upstream_encoding, @upstream_raw_bytes, @upstream_sent_bytes, @compress_ms, @compress_status, @compress_note, @client_error, @proxy_node)`,
@@ -141,6 +143,7 @@ export async function recordLog(e: LogEntry, snapshot?: StorageSettings): Promis
       request_body_ref: storeReq ? await opt(e.request_body, putJson) : null,
       preprocessed_body_ref: storeReq ? await opt(e.preprocessed_body, putJson) : null,
       thinking_inject_ref: storeReq ? await opt(e.thinking_inject, putRaw) : null,
+      pack_trace_ref: await opt(e.pack_trace, putRaw),
       response_body_ref: storeRes ? await opt(e.response_body, putJson) : null,
       upstream_response_body_ref: storeRes ? await opt(e.upstream_response_body, putRaw) : null,
     }
@@ -213,7 +216,7 @@ export async function safeRecordLog(build: () => LogEntry, snapshot?: StorageSet
   }
 }
 
-export const LOG_BODY_FIELDS: LogBodyField[] = ['request_headers', 'request_body', 'response_body', 'preprocessed_body', 'thinking_inject', 'upstream_response_body']
+export const LOG_BODY_FIELDS: LogBodyField[] = ['request_headers', 'request_body', 'response_body', 'preprocessed_body', 'thinking_inject', 'pack_trace', 'upstream_response_body']
 const JSON_BODY_FIELDS = new Set<LogBodyField>(['request_body', 'response_body', 'preprocessed_body'])
 
 /** 不传 fields 时保持完整详情兼容；按需读取时额外返回 available_fields，未加载字段不冒充 null。 */
@@ -240,7 +243,8 @@ async function runCleanup(): Promise<void> {
   const cutoff = Date.now() - s.log_retention_days * 86_400_000
   const remove = db.prepare('DELETE FROM request_logs WHERE id IN (SELECT id FROM request_logs WHERE created_at < ? ORDER BY created_at LIMIT 500)')
   let removed = 0
-  for (let batch = 0; batch < 10; batch++) {
+  // 保留天数为 0 表示永久保留：跳过过期删除，块回收与冷块打包照常进行
+  for (let batch = 0; s.log_retention_days > 0 && batch < 10; batch++) {
     const n = remove.run(cutoff).changes
     removed += n
     if (n < 500) break

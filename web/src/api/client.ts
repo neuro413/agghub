@@ -24,8 +24,10 @@ import type {
   PartialLogDetail,
   LogFacets,
   LogItem,
+  PackTestResult,
   ParamRule,
   ParamTestResult,
+  RegexPack,
   Settings,
   Stats,
   SystemInfo,
@@ -214,6 +216,10 @@ export const api = {
   // ── 参数修改规则试运行 ──
   testParamRule: (data: { rule: ParamRule; body: string }) =>
     req<ParamTestResult>('/preprocess/param-test', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ── 正则包试运行（包里的模板与脚本会在服务端真实执行）──
+  testPack: (data: { pack: RegexPack; body: string; ua?: string; model?: string; entryFormat?: string; passthrough?: boolean }) =>
+    req<PackTestResult>('/preprocess/pack-test', { method: 'POST', body: JSON.stringify(data) }),
 
   // ── 代理池 ──
   poolStatus: (signal?: AbortSignal) => req<PoolStatus>('/pool/status', { signal }),

@@ -199,13 +199,18 @@ function ChannelMeta({ c }: { c: Channel }) {
     <span key="w">权重 {c.weight}</span>,
   ]
   if (c.key_total != null) {
+    const single = c.key_mode === 'race' && c.key_race_single
     parts.push(
       <span
         key="k"
         className={c.key_available === 0 ? 'ah-c-warn' : undefined}
-        title={c.key_mode === 'race' ? `多 key 并发 · 每次 ${c.key_concurrency} 个 key` : '多 key 轮询'}
+        title={
+          single ? `单 key 竞速 · 每次同一个 key 发 ${c.key_concurrency} 路`
+            : c.key_mode === 'race' ? `多 key 并发 · 每次 ${c.key_concurrency} 个 key`
+              : c.key_limit_threshold > 1 ? `多 key 轮询 · 连续限流 ${c.key_limit_threshold} 次才换 key` : '多 key 轮询'
+        }
       >
-        {c.key_mode === 'race' ? '并发 key' : '轮询 key'} {c.key_available}/{c.key_total}
+        {single ? '竞速 key' : c.key_mode === 'race' ? '并发 key' : '轮询 key'} {c.key_available}/{c.key_total}
       </span>,
     )
   }

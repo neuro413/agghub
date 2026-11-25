@@ -85,6 +85,8 @@ interface FormState {
   key_mode: KeyMode
   key_concurrency: string
   key_cooldown: string
+  key_limit_threshold: string
+  key_race_single: boolean
   /** '' = 跟随全局 */
   request_compression: '' | RequestCompression
   always_retry: boolean
@@ -103,6 +105,8 @@ function keyModeHint(f: FormState): string {
   if (!f.multi_key) return '开启后 API Key 改为每行一个，在多个 key 之间轮询或并发请求；key 失效（熔断状态码、429、402）时自动熔断该 key'
   if (f.key_mode === 'poll')
     return '每次请求先用排在最前的可用 key；key 失效时熔断它并立即换下一个，不消耗同渠道重试次数。全部 key 熔断时选路自动跳过本渠道'
+  if (f.key_race_single)
+    return '每次请求只用排在最前的可用 key，同时向上游发起 N 路请求，最先产出内容（流式）或最先完整返回（非流式）的结果转发给客户端，其余请求立即中断；该 key 熔断或冷却后改用下一个 key。上游实际被调用 N 次，落选请求也可能计费'
   return '每次请求轮流取 N 个可用 key 同时请求上游，最先产出内容（流式）或最先完整返回（非流式）的结果转发给客户端，其余请求立即中断；上游实际被调用 N 次，落选请求也可能计费'
 }
 
@@ -135,7 +139,8 @@ function initForm(c: Channel | null): FormState {
     return {
       name: '', type: 'openai', base_url: '', base_url_full: false, models_url: '', api_key: '', models: '', mapping: '', aliases: [], priority: 0, weight: 1, region: '', timeout: '',
       ua_override: false, ua_value: '', strip_headers: false, single_role: false, single_role_mode: 'user', merge_system: false,
-      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', request_compression: '', always_retry: false, fake_stream: false,
+      exclude_last_user: false, multi_key: false, key_mode: 'poll', key_concurrency: '2', key_cooldown: '300', key_limit_threshold: '1', key_race_single: false,
+      request_compression: '', always_retry: false, fake_stream: false,
       proxy_pool: false, proxy_pool_include: '', proxy_pool_exclude: '',
     }
   return {
@@ -163,6 +168,8 @@ function initForm(c: Channel | null): FormState {
     key_mode: c.key_mode || 'poll',
     key_concurrency: String(c.key_concurrency ?? 2),
     key_cooldown: String(c.key_cooldown_seconds ?? 300),
+    key_limit_threshold: String(c.key_limit_threshold ?? 1),
+    key_race_single: !!c.key_race_single,
     request_compression: c.request_compression ?? '',
     always_retry: !!c.always_retry,
     fake_stream: !!c.fake_stream,
@@ -212,6 +219,8 @@ function buildPayload(f: FormState): Partial<Channel> {
     key_mode: multiKey ? f.key_mode : null,
     key_concurrency: Number(f.key_concurrency) || 2,
     key_cooldown_seconds: Number(f.key_cooldown) || 300,
+    key_limit_threshold: Number(f.key_limit_threshold) || 1,
+    key_race_single: f.key_race_single,
     request_compression: f.request_compression || null,
     always_retry: f.always_retry,
     fake_stream: f.fake_stream,
@@ -706,11 +715,24 @@ export function ChannelModal({
               ))}
             </div>
           )}
+          {f.multi_key && f.key_mode === 'race' && (
+            <div className="ah-row" style={{ marginTop: 8 }}>
+              <Toggle checked={f.key_race_single} onChange={(v) => set('key_race_single', v)} />
+              <span className="ah-mini ah-muted">单 key 竞速（只用排最前的可用 key，同时发起多路请求）</span>
+            </div>
+          )}
           {f.multi_key && (
             <div className="ah-grid2" style={{ marginTop: 8 }}>
-              {f.key_mode === 'race' && (
-                <Field label="并发 key 数" hint="2~20；可用 key 不足时按实际数量">
+              {f.key_mode === 'race' ? (
+                <Field
+                  label={f.key_race_single ? '并发请求数' : '并发 key 数'}
+                  hint={f.key_race_single ? '2~20；同一个 key 同时发起的请求数' : '2~20；可用 key 不足时按实际数量'}
+                >
                   <Input type="number" min={2} max={20} value={f.key_concurrency} onChange={(e) => set('key_concurrency', e.target.value)} />
+                </Field>
+              ) : (
+                <Field label="连续限流次数" hint="1~100；同一个 key 连续 429/402 达到该次数才冷却并换下一个 key，未达到时等重试间隔后用同一个 key 重试">
+                  <Input type="number" min={1} max={100} value={f.key_limit_threshold} onChange={(e) => set('key_limit_threshold', e.target.value)} />
                 </Field>
               )}
               <Field label="限流冷却（秒）" hint="429/402 时冷却该 key；上游带 Retry-After 时以它为准">

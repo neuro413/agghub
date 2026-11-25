@@ -24,6 +24,12 @@ test('块存储保持字节还原、中文、非紧凑 JSON、原型同名数据
   const second = putJsonBody(text.replace('"model":"a"', '"model":"b"'))
   assert.deepEqual(children(first), children(second))
   assert.equal(getJsonBody(first), text)
+  // Gemini 上游请求体：contents 逐项切块，相邻两轮共享历史项
+  const turn = (n: number) => ({ role: 'user', parts: [{ text: `第${n}轮`.repeat(100) }] })
+  const gemini = [1, 2].map(n => JSON.stringify({ contents: Array.from({ length: n }, (_, i) => turn(i)), generationConfig: {} }))
+  const refs = gemini.map(putJsonBody)
+  assert.deepEqual(children(refs[1]).slice(0, 1), children(refs[0]))
+  gemini.forEach((body, i) => assert.equal(getJsonBody(refs[i]), body))
 })
 
 test('冷块打包后按偏移还原，manifest 与正文分开成包，未满最小包的新块等满一天再打', async () => {

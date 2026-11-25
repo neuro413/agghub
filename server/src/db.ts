@@ -232,6 +232,8 @@ addMissingColumns('channels', [
   ['key_mode', 'TEXT'],
   ['key_concurrency', 'INTEGER NOT NULL DEFAULT 2'],
   ['key_cooldown_seconds', 'INTEGER NOT NULL DEFAULT 300'],
+  ['key_limit_threshold', 'INTEGER NOT NULL DEFAULT 1'],
+  ['key_race_single', 'INTEGER NOT NULL DEFAULT 0'],
   ['request_compression', 'TEXT'],
   ['always_retry', 'INTEGER NOT NULL DEFAULT 0'],
   ['fake_stream', 'INTEGER NOT NULL DEFAULT 0'],
@@ -257,6 +259,7 @@ addMissingColumns('request_logs', [
   ['compress_note', 'TEXT'],
   ['client_error', 'TEXT'],
   ['proxy_node', 'TEXT'],
+  ['pack_trace_ref', 'INTEGER'],
 ])
 addMissingColumns('users', [['groups', `TEXT NOT NULL DEFAULT '[]'`], ['discord_id', 'TEXT'], ['discord_username', 'TEXT'], ['discord_guilds_at', 'INTEGER']])
 // 分组的 UA 黑名单与自定义提示（后加的列，已有库按缺失补齐）
@@ -401,6 +404,8 @@ export function rowToChannel(r: ChannelRow): Channel {
     key_mode: r.type !== 'vertex' && (r.key_mode === 'poll' || r.key_mode === 'race') ? r.key_mode : null,
     key_concurrency: r.key_concurrency ?? 2,
     key_cooldown_seconds: r.key_cooldown_seconds ?? 300,
+    key_limit_threshold: r.key_limit_threshold ?? 1,
+    key_race_single: !!r.key_race_single,
     ban_until: r.ban_until ?? null,
     request_compression: REQUEST_COMPRESSIONS.includes(r.request_compression as RequestCompression) ? r.request_compression as RequestCompression : null,
     always_retry: !!r.always_retry,

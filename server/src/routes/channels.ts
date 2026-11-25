@@ -55,6 +55,8 @@ interface ChannelInput {
   key_mode?: KeyMode | null
   key_concurrency?: number
   key_cooldown_seconds?: number
+  key_limit_threshold?: number
+  key_race_single?: boolean
   /** null = 跟随全局 */
   request_compression?: RequestCompression | null
   always_retry?: boolean
@@ -110,13 +112,15 @@ function fullUrlColumns(input: ChannelInput): { base_url_full: number; models_ur
   return { base_url_full: full ? 1 : 0, models_url: full ? input.models_url?.trim() || null : null }
 }
 
-/** 多 key 字段：Vertex 不支持；并发数限制在 2~20，冷却秒数至少 1 */
-function keyColumns(input: ChannelInput): { key_mode: KeyMode | null; key_concurrency: number; key_cooldown_seconds: number } {
+/** 多 key 字段：Vertex 不支持；并发数限制在 2~20，冷却秒数至少 1，限流次数限制在 1~100 */
+function keyColumns(input: ChannelInput): { key_mode: KeyMode | null; key_concurrency: number; key_cooldown_seconds: number; key_limit_threshold: number; key_race_single: number } {
   const mode = input.type !== 'vertex' && input.key_mode && KEY_MODES.includes(input.key_mode) ? input.key_mode : null
   return {
     key_mode: mode,
     key_concurrency: Math.min(20, Math.max(2, Math.round(Number(input.key_concurrency) || 2))),
     key_cooldown_seconds: Math.max(1, Math.round(Number(input.key_cooldown_seconds) || 300)),
+    key_limit_threshold: Math.min(100, Math.max(1, Math.round(Number(input.key_limit_threshold) || 1))),
+    key_race_single: input.key_race_single ? 1 : 0,
   }
 }
 
@@ -199,8 +203,8 @@ channelsRouter.post('/', (req, res) => {
   const now = Date.now()
   const info = db
     .prepare(
-      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, request_compression, always_retry, fake_stream, proxy_pool, proxy_pool_include, proxy_pool_exclude, created_at, updated_at)
-       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @request_compression, @always_retry, @fake_stream, @proxy_pool, @proxy_pool_include, @proxy_pool_exclude, @created_at, @updated_at)`,
+      `INSERT INTO channels (name, type, base_url, base_url_full, models_url, api_key, models, model_mapping, model_alias, priority, weight, status, region, timeout_ms, ua_override, ua_value, strip_headers, single_role, single_role_merge_system, single_role_exclude_last_user, key_mode, key_concurrency, key_cooldown_seconds, key_limit_threshold, key_race_single, request_compression, always_retry, fake_stream, proxy_pool, proxy_pool_include, proxy_pool_exclude, created_at, updated_at)
+       VALUES (@name, @type, @base_url, @base_url_full, @models_url, @api_key, @models, @model_mapping, @model_alias, @priority, @weight, @status, @region, @timeout_ms, @ua_override, @ua_value, @strip_headers, @single_role, @single_role_merge_system, @single_role_exclude_last_user, @key_mode, @key_concurrency, @key_cooldown_seconds, @key_limit_threshold, @key_race_single, @request_compression, @always_retry, @fake_stream, @proxy_pool, @proxy_pool_include, @proxy_pool_exclude, @created_at, @updated_at)`,
     )
     .run({
       name: input.name!.trim(),
@@ -252,6 +256,7 @@ channelsRouter.put('/:id', (req, res) => {
        region=@region, timeout_ms=@timeout_ms, ua_override=@ua_override, ua_value=@ua_value, strip_headers=@strip_headers,
        single_role=@single_role, single_role_merge_system=@single_role_merge_system, single_role_exclude_last_user=@single_role_exclude_last_user,
        key_mode=@key_mode, key_concurrency=@key_concurrency, key_cooldown_seconds=@key_cooldown_seconds,
+       key_limit_threshold=@key_limit_threshold, key_race_single=@key_race_single,
        request_compression=@request_compression, always_retry=@always_retry, fake_stream=@fake_stream, ban_until=@ban_until,
        proxy_pool=@proxy_pool, proxy_pool_include=@proxy_pool_include, proxy_pool_exclude=@proxy_pool_exclude,
        updated_at=@updated_at
@@ -381,7 +386,7 @@ function channelFromInput(input: ChannelInput): Channel {
     priority: 0, weight: 1, status: 1, region: input.region?.trim() || null, timeout_ms: null,
     ua_override: !!input.ua_override, ua_value: input.ua_value?.trim() || null, strip_headers: !!input.strip_headers,
     single_role: null, single_role_merge_system: false, single_role_exclude_last_user: false,
-    key_mode: null, key_concurrency: 2, key_cooldown_seconds: 300, ban_until: null,
+    key_mode: null, key_concurrency: 2, key_cooldown_seconds: 300, key_limit_threshold: 1, key_race_single: false, ban_until: null,
     request_compression: null, always_retry: false, fake_stream: false, ...poolFields(input), created_at: now, updated_at: now,
   }
 }

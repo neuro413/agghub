@@ -11,7 +11,8 @@ import { fmtLabel } from './preprocessShared'
 import { fmtBytes, prettyJson } from '../lib/format'
 import { money } from '../lib/money'
 import { Loading, StatusPill } from '../components/Primitives'
-import type { CallerSource, CompressStatus, LogBodyField, LogItem, PartialLogDetail } from '../types'
+import type { CallerSource, CompressStatus, LogBodyField, LogItem, PackTrace, PartialLogDetail } from '../types'
+import { PackTraceView } from './RegexPackTest'
 import { copyText } from '../lib/clipboard'
 
 const SENSITIVE = /authorization|api[-_]?key|x-api-key|cookie|token|secret|password|proxy-authorization/i
@@ -70,7 +71,7 @@ function Highlighted({ text, q }: { text: string; q: string }) {
   return <>{out}</>
 }
 
-type Tab = 'conv' | 'headers' | 'params' | 'response' | 'raw' | 'thinking'
+type Tab = 'conv' | 'headers' | 'params' | 'response' | 'raw' | 'thinking' | 'packs'
 
 export function LogDetailModal({
   id,
@@ -93,6 +94,7 @@ export function LogDetailModal({
   const activeField: LogBodyField = !showOriginal && hasField('preprocessed_body') ? 'preprocessed_body' : 'request_body'
   const wanted: LogBodyField = tab === 'headers' ? 'request_headers'
     : tab === 'thinking' ? 'thinking_inject'
+    : tab === 'packs' ? 'pack_trace'
     : tab === 'response' ? showUpstream ? 'upstream_response_body' : 'response_body'
     : activeField
   const bodyPending = !!detail && detail[wanted] === undefined && (detail.available_fields === undefined || hasField(wanted))
@@ -204,6 +206,11 @@ export function LogDetailModal({
                 思考块
               </button>
             )}
+            {hasField('pack_trace') && (
+              <button className={`ah-detail-tab${tab === 'packs' ? ' is-active' : ''}`} onClick={() => setTab('packs')}>
+                正则包
+              </button>
+            )}
           </div>
           {tab === 'response' ? <ResponseView detail={detail} error={!showOriginal && detail.client_error ? detail.client_error : detail.error_message}
             showUpstream={showUpstream} onToggle={() => setShowUpstream((v) => !v)} onCopy={copy}
@@ -214,6 +221,7 @@ export function LogDetailModal({
               {tab === 'params' && <JsonView text={JSON.stringify(paramsOf(activeBody) ?? {}, null, 2)} onCopy={copy} empty="（无额外参数）" />}
               {tab === 'raw' && <JsonView text={prettyJson(activeBody)} onCopy={copy} empty="（未存储请求正文）" />}
               {tab === 'thinking' && <ThinkingInjectView detail={detail} />}
+              {tab === 'packs' && <PackTracesView detail={detail} />}
             </>}
         </>
       )}
@@ -514,6 +522,31 @@ function JsonView({
       ) : (
         !error && <div className="ah-detail-empty">{empty}</div>
       )}
+    </div>
+  )
+}
+
+/** 本次请求命中的正则包及各步骤的执行情况 */
+function PackTracesView({ detail }: { detail: PartialLogDetail }) {
+  const traces = useMemo(() => {
+    try {
+      const parsed = JSON.parse(detail.pack_trace || '[]')
+      return Array.isArray(parsed) ? (parsed as PackTrace[]) : []
+    } catch {
+      return []
+    }
+  }, [detail.pack_trace])
+
+  if (!traces.length) return <div className="ah-detail-empty">（本次请求没有命中正则包）</div>
+
+  return (
+    <div>
+      {traces.map((trace, index) => (
+        <div key={index}>
+          <div className="ah-pk-trace-pack">{trace.pack}</div>
+          <PackTraceView trace={trace} />
+        </div>
+      ))}
     </div>
   )
 }

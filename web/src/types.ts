@@ -3,6 +3,7 @@ import type { Channel as ServerChannel, CallerSource, CompressionUnsupported, Co
 export type { LogBodyField } from '../../server/src/types'
 export type {
   ChannelType, SingleRoleMode, KeyMode, ChannelKeyStatus, EntryFormat, Settings, PreprocessRule, ToolFilterRule, ParamOpType, ParamOp, ParamRule,
+  RegexPack, RegexPackParam, RegexPackStep, RegexPackRegexStep, RegexPackInjectStep, RegexPackScriptStep, PackTrace, PackStepTrace, PackTestResult,
   CallerSource, ModelRatio, ApiKey, ApiKeyView, ApiKeyInput, KeyQuotaOp, KeyUsageDay, SystemInfo, BillingPreviewInput, BillingPreviewResult,
   UserView, UserListResult, DiscordGuild, DiscordGuildRanking, DiscordRuleGroup, DiscordGuildCondition, OpenRouterPrice, ChannelGroup, ChannelGroupView, ChannelGroupInput,
   Announcement, AnnouncementInput, AnnouncementType,
@@ -130,6 +131,8 @@ export interface LogItem {
   compress_ms?: number | null
   compress_status?: CompressStatus | null
   compress_note?: string | null
+  /** 客户端 User-Agent（列表接口不返回，只在详情里有） */
+  user_agent?: string | null
 }
 
 export type PartialLogDetail = LogItem & Partial<Pick<LogDetail, LogBodyField>> & { available_fields?: LogBodyField[] }
@@ -141,6 +144,8 @@ export interface LogDetail extends LogItem {
   response_body: string | null
   preprocessed_body: string | null
   thinking_inject: string | null
+  /** 正则包执行记录 JSON（PackTrace[]） */
+  pack_trace: string | null
   /** 上游原始回复：非流式为原始 JSON，流式为原始 SSE 帧，HTTP 错误为原始错误体 */
   upstream_response_body: string | null
 }

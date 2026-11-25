@@ -22,7 +22,11 @@ const upsertState = db.prepare(
 const deleteState = db.prepare('DELETE FROM channel_key_states WHERE channel_id = ? AND fingerprint = ?')
 
 const streaks = new Map<string, number>() // `${channelId}:${fingerprint}` → 连续命中熔断状态码次数
+const limitStreaks = new Map<string, number>() // `${channelId}:${fingerprint}` → 轮询模式下连续 429/402 次数
 const cursors = new Map<number, number>() // 并发模式的轮转游标
+
+/** key 请求失败后的处置：failed = key 失效，本次请求换下一个 key；retry = 限流未达次数，用同一个 key 重试；none = 与 key 无关 */
+export type KeyVerdict = 'failed' | 'retry' | 'none'
 
 /** 渠道的 key 列表：多 key 模式按行拆分并去重，单 key 模式整串原样使用 */
 export function channelKeys(channel: Pick<Channel, 'api_key' | 'key_mode'>): string[] {
@@ -74,36 +78,44 @@ export function pickRaceKeys(channel: KeyChannel, usable: string[], n: number): 
 }
 
 /**
- * 多 key 渠道的某个 key 请求失败；返回 true 表示 key 失效，本次请求应换下一个 key。
+ * 多 key 渠道的某个 key 请求失败，返回对这个 key 的处置。
  * 命中熔断状态码：连续达到阈值后熔断，时长跟随全局自动恢复分钟数（0 = 需手动恢复）；
- * 熔断过、恢复后尚未成功的 key（记录仍在）再命中一次立即熔断。
- * 429 / 402：立即冷却，时长优先取 Retry-After，否则用渠道的冷却秒数。
+ * 熔断过、恢复后尚未成功的 key（记录仍在）再命中一次立即熔断；未达阈值时本次请求也换下一个 key。
+ * 429 / 402：冷却，时长优先取 Retry-After，否则用渠道的冷却秒数；
+ * 轮询模式下连续达到渠道的限流次数才冷却，未达到时返回 retry，由调用方用同一个 key 重试。
  */
-export function onKeyFailure(channel: Pick<Channel, 'id' | 'key_mode' | 'key_cooldown_seconds'>, key: string, error: unknown, autoBanCodes: number[], settings: KeySettings, now = Date.now()): boolean {
-  if (!channel.key_mode || !(error instanceof UpstreamError)) return false
+export function onKeyFailure(channel: Pick<Channel, 'id' | 'key_mode' | 'key_cooldown_seconds' | 'key_limit_threshold'>, key: string, error: unknown, autoBanCodes: number[], settings: KeySettings, now = Date.now()): KeyVerdict {
+  if (!channel.key_mode || !(error instanceof UpstreamError)) return 'none'
   const fingerprint = keyFingerprint(key)
   const id = `${channel.id}:${fingerprint}`
   let until: number | null
   if (autoBanCodes.includes(error.status)) {
     const count = (streaks.get(id) ?? 0) + 1
     streaks.set(id, count)
-    if (count < Math.max(1, settings.auto_ban_threshold) && !hasState.get(channel.id, fingerprint)) return true
+    if (count < Math.max(1, settings.auto_ban_threshold) && !hasState.get(channel.id, fingerprint)) return 'failed'
     until = settings.auto_ban_cooldown_minutes > 0 ? now + settings.auto_ban_cooldown_minutes * 60_000 : null
   } else if (error.status === 429 || error.status === 402) {
+    const count = (limitStreaks.get(id) ?? 0) + 1
+    if (channel.key_mode === 'poll' && count < channel.key_limit_threshold) {
+      limitStreaks.set(id, count)
+      return 'retry'
+    }
     until = now + Math.max(1000, error.retryAfterMs ?? channel.key_cooldown_seconds * 1000)
   } else {
-    return false
+    return 'none'
   }
   streaks.delete(id)
+  limitStreaks.delete(id)
   upsertState.run(channel.id, fingerprint, until, error.status, extractUpstreamMessage(error.body).slice(0, 300), now)
-  return true
+  return 'failed'
 }
 
-/** 某个 key 请求成功：清零连续失败计数，删除残留的熔断记录 */
+/** 某个 key 请求成功：清零连续失败与连续限流计数，删除残留的熔断记录 */
 export function onKeySuccess(channel: Pick<Channel, 'id' | 'key_mode'>, key: string): void {
   if (!channel.key_mode) return
   const fingerprint = keyFingerprint(key)
   streaks.delete(`${channel.id}:${fingerprint}`)
+  limitStreaks.delete(`${channel.id}:${fingerprint}`)
   if (hasState.get(channel.id, fingerprint)) deleteState.run(channel.id, fingerprint)
 }
 
@@ -135,10 +147,13 @@ export function resetKeyStates(channelId: number, fingerprint?: string): void {
   if (fingerprint) {
     deleteState.run(channelId, fingerprint)
     streaks.delete(`${channelId}:${fingerprint}`)
+    limitStreaks.delete(`${channelId}:${fingerprint}`)
     return
   }
   db.prepare('DELETE FROM channel_key_states WHERE channel_id = ?').run(channelId)
-  for (const id of streaks.keys()) if (id.startsWith(`${channelId}:`)) streaks.delete(id)
+  for (const counts of [streaks, limitStreaks]) {
+    for (const id of counts.keys()) if (id.startsWith(`${channelId}:`)) counts.delete(id)
+  }
   cursors.delete(channelId)
 }
 

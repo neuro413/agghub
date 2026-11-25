@@ -12,6 +12,7 @@ import { getPoolSettings } from '../pool/settings'
 import { CandidateError, LocalRequestError, UpstreamError, UpstreamResponseError, errorKind, extractUpstreamMessage, parseAutoBanCodes, parseRetryAfter, sanitizePublicError, shouldDisable, shouldRetry, statusOnlyMessage } from './failover'
 import type { ErrorKind } from './failover'
 import { applyPreprocess } from './preprocess'
+import { applyRegexPacks } from './regexPacks'
 import { safeRecordLog, type LogEntry } from '../stats/recorder'
 import { estimatePromptTokens, parseSSEEvents } from '../convert/ir'
 import * as oaiConv from '../convert/openai'
@@ -19,7 +20,7 @@ import * as anthConv from '../convert/anthropic'
 import * as respConv from '../convert/responses'
 import * as gemConv from '../convert/gemini'
 import { cacheParts, emptyUsage, maxUsage, rawWireUsage, sumUsage } from '../convert/usage'
-import type { Caller, Channel, ChannelGroup, EntryFormat, IRUsage, Settings } from '../types'
+import type { Caller, Channel, ChannelGroup, EntryFormat, IRUsage, PackTrace, Settings } from '../types'
 import { applyParamRules, matchParamRules } from './paramRules'
 import { applySingleRole } from './singleRole'
 import { matchesPseudoThinking, applyPseudoThinkingRequest, createPseudoThinkingTransform, splitIRResponse } from './pseudoThinking'
@@ -99,6 +100,8 @@ interface AttemptState extends UpstreamContext {
   preprocessed?: boolean
   pseudo: boolean
   thinkingInject?: ThinkingInjectEntry[]
+  /** 命中的正则包的执行记录 */
+  packTrace?: PackTrace[]
   /** 输出计量，usage 缺失时用于估算计费 */
   meter: OutputMeter
   /** 请求是否已经发往上游 */
@@ -214,9 +217,20 @@ async function prepareRequest(ctx: RelayContext, state: AttemptState, settings: 
   const preprocess = settings.drop_thinking || settings.drop_redacted_thinking || settings.preprocess_rules.length || settings.tool_filter_rules.length || state.pseudo
   if (state.pseudo) state.thinkingInject = applyPseudoThinkingRequest(body, settings, thinkingStore.lookup)
   if (preprocess) applyPreprocess(body, meta, settings)
+  // 正则包排在普通规则之后；模板与脚本可能是异步的（如 fetch），结束后重置本次尝试的空闲计时
+  const packs = settings.regex_packs.some(pack => pack.enabled)
+  if (packs) {
+    const ua = ctx.rawHeaders?.['user-agent']
+    const traces = await applyRegexPacks(body, settings.regex_packs, {
+      meta, ua: ua ? String(ua) : null, headers: ctx.rawHeaders, channelName: channel.name, keyName: caller.key?.name ?? null,
+      upstreamModel, stream: ctx.stream, signal: lifecycle.signal,
+    })
+    if (traces.length) state.packTrace = traces
+    lifecycle.touch()
+  }
   const images = !state.passthrough && upstreamWire === 'gemini'
   if (images) await resolveImageUrls(body, settings, lifecycle.signal, { restrictPrivate: caller.surface === 'public' })
-  let changed = (!!preprocess || images) && JSON.stringify(body) !== JSON.stringify(source)
+  let changed = (!!preprocess || packs || images) && JSON.stringify(body) !== JSON.stringify(source)
   const upstreamStream = ctx.stream && !state.fakeStream
   const request = state.passthrough
     ? adaptor.buildPassthroughRequest!(channel, body, upstreamModel, upstreamStream, ctx.rawHeaders)
@@ -294,6 +308,8 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         request_body: rawJson, request_headers: headersJson,
         preprocessed: state?.preprocessed, preprocessed_body: state?.preprocessedBody,
         pseudo_thinking: state?.pseudo, thinking_inject: settings.store_request_body && state?.thinkingInject?.length ? JSON.stringify(state.thinkingInject) : undefined,
+        // 不存请求正文时，脚本输出可能带有提示词内容，只留步骤状态与报错
+        pack_trace: state?.packTrace ? JSON.stringify(settings.store_request_body ? state.packTrace : state.packTrace.map(({ logs: _logs, ...trace }) => trace)) : undefined,
         response_body: state?.response.text(), upstream_response_body: state?.upstream.text(),
         response_body_truncated: state?.response.truncated, upstream_response_body_truncated: state?.upstream.truncated,
         source: caller.source, key_id: caller.key?.id ?? null, key_name: caller.key?.name ?? null, client_ip: caller.ip, quota_points: points,
@@ -368,11 +384,16 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
       failedKeys.set(channel.id, failed)
       // 一律重试：熔断状态码（如把限流返回成 403 的上游）不停用渠道也不熔断 key，交给同渠道重试；429/402 的 key 冷却照常
       const banCodes = channel.always_retry ? [] : autoBanCodes
-      // 轮询模式换 key 不消耗同渠道重试次数；并发模式整组失败后再来一组要消耗
+      // 轮询模式：本次请求在各 key 上「限流未达次数」的累计，用来给同 key 重试封顶
+      const limitHits = new Map<string, number>()
+      // 轮询模式换 key、限流未达次数的同 key 重试都不消耗同渠道重试次数；并发模式整组失败后再来一组要消耗
       for (let index = 0; index <= settings.single_retry_times;) {
         lifecycle.signal.throwIfAborted()
         const usable = keysLeft(channel)
-        const keys = channel.key_mode === 'race' ? pickRaceKeys(channel, usable, channel.key_concurrency) : usable.slice(0, 1)
+        // 轮询取排最前的可用 key；并发按轮转取 N 个 key；单 key 竞速用排最前的可用 key 同时发 N 路
+        const keys = channel.key_mode !== 'race' ? usable.slice(0, 1)
+          : channel.key_race_single ? usable.slice(0, 1).flatMap(key => Array<string>(channel.key_concurrency).fill(key))
+            : pickRaceKeys(channel, usable, channel.key_concurrency)
         const states = keys.map(key => newState(channel, description, key))
         if (states.length > 1) startRace(states)
         last = states[states.length - 1]
@@ -385,10 +406,22 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
           error => { if (!isRaceLost(error)) failures.push({ state, error }) },
         )))
         let keyFailed = false
+        let keyRetry = false
+        // 单 key 竞速时一组请求共用一个 key：已有一路胜出就不计失败，整组失败也只计一次
+        const judged = new Set<string>()
         for (const { state, error } of failures) {
           if (lifecycle.signal.aborted) break
           if (channel.key_mode) {
-            if (onKeyFailure(channel, state.key, error, banCodes, settings)) {
+            if (state.key === winner?.state.key || judged.has(state.key)) continue
+            const verdict = onKeyFailure(channel, state.key, error, banCodes, settings)
+            if (verdict === 'none') continue
+            judged.add(state.key)
+            // 同 key 重试在单次请求内也以渠道的限流次数为限：连续计数被其他请求的成功清零时，本次请求不会一直重试，改为换下一个 key
+            const hits = (limitHits.get(state.key) ?? 0) + 1
+            if (verdict === 'retry' && hits < channel.key_limit_threshold) {
+              limitHits.set(state.key, hits)
+              keyRetry = true
+            } else {
               failed.add(state.key)
               keyFailed = true
             }
@@ -416,10 +449,12 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
           && !failures.some(f => f.error instanceof LocalRequestError || f.error instanceof UpstreamResponseError)
         const hasKey = canContinue && keysLeft(channel).length > 0
         const switchKey = channel.key_mode === 'poll' && hasKey && keyFailed
-        const retrySame = !switchKey && hasKey && !banned.has(channel.id) && index < settings.single_retry_times
+        // 限流未达次数：等一个重试间隔后用同一个 key 再发
+        const retryKey = !switchKey && hasKey && keyRetry
+        const retrySame = !switchKey && !retryKey && hasKey && !banned.has(channel.id) && index < settings.single_retry_times
           && (failures.some(f => shouldRetry(f.error, channel.always_retry)) || (channel.key_mode === 'race' && keyFailed))
         const nextChannel = canContinue && round < settings.channel_retry_times && available().some(c => c.id !== channel.id && !tried.has(c.id))
-        if (!switchKey && !retrySame && !nextChannel) {
+        if (!switchKey && !retryKey && !retrySame && !nextChannel) {
           await recordFailures(failures.slice(0, -1))
           if (!isClientGone()) sendErrorMessage(ctx, final.code, clientError(caller, final, settings))
           return
@@ -427,6 +462,7 @@ export async function handleRelay(ctx: RelayContext): Promise<void> {
         await recordFailures(failures)
         if (switchKey) continue
         if (settings.retry_interval_ms > 0) await sleep(settings.retry_interval_ms, lifecycle.signal)
+        if (retryKey) continue
         if (!retrySame) break
         index++
       }

@@ -75,7 +75,7 @@ export function LogsPage() {
     : undefined
 
   return (
-    <PageLayout title="使用日志" desc={`每次调用的模型、Token 与花费，记录保留 ${status.log_retention_days} 天`} actions={actions} footer={footer}>
+    <PageLayout title="使用日志" desc={`每次调用的模型、Token 与花费，${status.log_retention_days > 0 ? `记录保留 ${status.log_retention_days} 天` : '记录长期保留'}`} actions={actions} footer={footer}>
       {data == null ? (
         <div style={{ display: 'grid', gap: 8 }}>{[0, 1, 2, 3].map(i => <Skeleton key={i} height={52} />)}</div>
       ) : data.items.length === 0 ? (

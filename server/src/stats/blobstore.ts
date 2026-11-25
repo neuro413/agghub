@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS blob_packs (
 );
 `)
 
-const ARRAY_KEYS = ['messages', 'input', 'tools', 'system']
+// contents 是 Gemini 上游请求体的对话数组，与 messages 一样逐项切块，多轮历史与内联图片只存一份
+const ARRAY_KEYS = ['messages', 'input', 'contents', 'tools', 'system']
 const STRING_KEYS = ['system', 'instructions']
 /** s：去掉大块后的骨架；c：[路径, 块 id]。非 JSON 正文存为 { raw: 块 id } */
 type Manifest = { v: 2; s: any; c: [(string | number)[], number][] } | { v: 2; raw: number }
@@ -228,7 +229,7 @@ function splitJsonBody(text: string): { skeleton: any; parts: [(string | number)
   return { skeleton, parts }
 }
 
-/** JSON 请求/响应体：把 messages 等大数组逐项切块，多轮对话重复的历史消息只存一份 */
+/** JSON 请求/响应体：把 messages / input / contents 等大数组逐项切块，多轮对话重复的历史消息只存一份 */
 export function putJsonBody(text: string): number {
   const split = splitJsonBody(text)
   if (!split) return putManifest({ v: 2, raw: putBlob(text) })
@@ -296,7 +297,7 @@ export function getJsonBody(id: number | null | undefined): string | null {
 
 const REF_COLUMNS = [
   'request_headers_ref', 'request_body_ref', 'response_body_ref',
-  'preprocessed_body_ref', 'thinking_inject_ref', 'upstream_response_body_ref',
+  'preprocessed_body_ref', 'thinking_inject_ref', 'upstream_response_body_ref', 'pack_trace_ref',
 ]
 const JSON_REF_COLUMNS = new Set(['request_body_ref', 'response_body_ref', 'preprocessed_body_ref'])
 

@@ -110,6 +110,7 @@ test('设置结构拒绝 NaN、非整数、错误数组、危险操作，合法�
     { drop_thinking_channel_ids: ['1'] }, { pseudo_thinking_models: [2] },
     { param_rules: [{ id: 'x', enabled: true, ops: [{ type: 'set', key: '__proto__.x', value: '1' }] }] },
     { preprocess_rules: [{ id: 'x', enabled: true, source: 'regex', pattern: '[', flags: 'g', replacement: '' }] },
+    { preprocess_rules: [{ id: 'x', enabled: true, source: 'regex', pattern: 'x', flags: 'g', replacement: '', action: 'drop' }] },
   ]) assert.throws(() => validateSettingsPatch(settings, patch))
   assert.deepEqual(validateSettingsPatch(settings, { single_retry_times: 3 }), { single_retry_times: 3 })
 })

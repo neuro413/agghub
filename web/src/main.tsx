@@ -12,6 +12,7 @@ import './styles/pages/users.css'
 import './styles/pages/settings.css'
 import './styles/pages/pool.css'
 import './styles/pages/preprocess.css'
+import './styles/pages/packs.css'
 import './styles/pages/groups.css'
 import './styles/pages/notices.css'
 

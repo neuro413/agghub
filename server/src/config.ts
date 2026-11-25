@@ -56,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   mask_upstream_errors: false,
   /** 400 多为参数问题，原文有助于客户端排查，默认不脱敏 */
   mask_upstream_errors_exclude_codes: '400',
+  /** 0 = 永久保留，不自动删除 */
   log_retention_days: 30,
   store_request_body: true,
   store_response_body: true,
@@ -66,6 +67,7 @@ export const DEFAULT_SETTINGS: Settings = {
   drop_thinking_models: [],
   drop_redacted_thinking: false,
   preprocess_rules: [],
+  regex_packs: [],
   tool_filter_rules: [],
   param_rules: [],
   // 伪思考（伪原生思维链）：仅对 Anthropic 入口→Anthropic 上游直通生效，需 drop_thinking 先开启
@@ -139,7 +141,7 @@ export const DEFAULT_SETTINGS: Settings = {
 export const INTEGER_RANGES: Partial<Record<keyof Settings, [number, number]>> = {
   single_retry_times: [0, 100], channel_retry_times: [0, 20], retry_interval_ms: [0, 300_000],
   request_timeout_ms: [1, 86_400_000], request_max_duration_ms: [0, 86_400_000], stream_keepalive_ms: [0, 600_000],
-  log_retention_days: [1, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
+  log_retention_days: [0, 3650], drop_thinking_keep_last: [0, 100_000], pseudo_thinking_store_max: [0, 1_000_000], reasoning_store_max: [0, 1_000_000],
   log_response_max_bytes: [0, 64 * 1024 * 1024], stream_buffer_max_bytes: [1024, 256 * 1024 * 1024],
   image_max_bytes: [1, 100 * 1024 * 1024],
   auto_ban_threshold: [1, 100], auto_ban_cooldown_minutes: [0, 10_080],

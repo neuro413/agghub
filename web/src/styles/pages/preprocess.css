@@ -84,6 +84,11 @@
   background: var(--ok-soft);
   color: var(--ok-text);
 }
+/* 动作标签：命中即移除整条消息 */
+.ah-pp-src.is-remove {
+  background: var(--warn-soft);
+  color: var(--warn-text);
+}
 .ah-pp-invalid {
   color: var(--err);
   font-size: 14px;

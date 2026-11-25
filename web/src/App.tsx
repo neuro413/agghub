@@ -15,6 +15,7 @@ import { NoticesPage } from './pages/NoticesPage'
 import { StatsPage } from './pages/StatsPage'
 import { LogsPage } from './pages/LogsPage'
 import { PreprocessPage } from './pages/PreprocessPage'
+import { RegexPacksPage } from './pages/RegexPacksPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { PoolPage } from './pages/PoolPage'
 
@@ -97,6 +98,7 @@ export default function App() {
               {tab === 'stats' && <StatsPage onOpenLogs={() => go('logs')} onSearchUsers={(q) => go('users', { q })} />}
               {tab === 'logs' && <LogsPage />}
               {tab === 'preprocess' && <PreprocessPage />}
+              {tab === 'packs' && <RegexPacksPage />}
               {tab === 'pool' && <PoolPage />}
               {tab === 'settings' && <SettingsPage />}
             </>

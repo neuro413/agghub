@@ -10,6 +10,7 @@ import { applyPreprocess } from '../src/core/preprocess'
 import { buildRequest } from '../src/convert/gemini'
 import * as responses from '../src/convert/responses'
 import * as anthropic from '../src/convert/anthropic'
+import type { EntryFormat, PreprocessRule } from '../src/types'
 import { reset, channel, relay, logs, jsonResponse, oaiBody, gemBody } from './helpers/relay'
 
 const originalFetch = globalThis.fetch
@@ -114,4 +115,40 @@ test('D20: custom/function 黑名单完整移除定义、调用、结果，未�
   const body = JSON.stringify(anthropic.buildRequest(request, 'claude-synthetic'))
   assert.ok(!body.includes('blocked') && !body.includes('secret') && !body.includes('c1'))
   assert.ok(body.includes('keep') && body.includes('c2'))
+})
+
+test('提示词规则移除模式：命中即移除整条消息，工具调用与结果成对清理', () => {
+  const run = (body: any, entryFormat: EntryFormat, rule: Partial<PreprocessRule>) => {
+    const base: PreprocessRule = { id: 'r', enabled: true, source: 'regex', pattern: 'SECRET', flags: 'g', replacement: '', action: 'remove_message' }
+    applyPreprocess(body, { entryFormat, channelId: 1, model: 'alias', passthrough: true }, { ...getSettings(), preprocess_rules: [{ ...base, ...rule }] })
+    return body
+  }
+  // Chat：只作用于 assistant，命中的消息连同它的工具结果移除，同样含关键词的 system 不受影响
+  const chat = run({ messages: [
+    { role: 'system', content: 'SECRET' },
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: 'SECRET', tool_calls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'c1', content: 'ok' },
+    { role: 'user', content: 'bye' },
+  ] }, 'openai', { roles: ['assistant'] })
+  assert.deepEqual(chat.messages, [{ role: 'system', content: 'SECRET' }, { role: 'user', content: 'hi' }, { role: 'user', content: 'bye' }])
+
+  // Claude：顶层 system 整个移除；tool_result 命中只移除该结果及对应 tool_use，同条消息其余内容保留
+  const claude = run({ system: [{ type: 'text', text: 'SECRET' }], messages: [
+    { role: 'user', content: 'hi' },
+    { role: 'assistant', content: [{ type: 'thinking', thinking: 't', signature: 's' }, { type: 'tool_use', id: 'a', name: 'f', input: {} }, { type: 'tool_use', id: 'b', name: 'f', input: {} }] },
+    { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'a', content: 'SECRET' }, { type: 'tool_result', tool_use_id: 'b', content: 'ok' }, { type: 'text', text: 'next' }] },
+  ] }, 'anthropic', { roles: ['system', 'tool'] })
+  assert.equal(claude.system, undefined)
+  assert.deepEqual(claude.messages.map((m: any) => (Array.isArray(m.content) ? m.content.map((b: any) => b.id ?? b.tool_use_id ?? b.type) : m.content)), ['hi', ['thinking', 'b'], ['b', 'text']])
+
+  // Responses：深度 2 只看最后两项；结果项命中时连同调用项和它前面的 reasoning 一并移除
+  const resp = run({ instructions: 'keep', input: [
+    { role: 'user', content: [{ type: 'input_text', text: 'SECRET' }] },
+    { type: 'reasoning', id: 'rs', summary: [] },
+    { type: 'function_call', call_id: 'c1', name: 'f', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'c1', output: 'SECRET' },
+    { role: 'user', content: 'go' },
+  ] }, 'responses', { depth: 2 })
+  assert.deepEqual(resp, { instructions: 'keep', input: [{ role: 'user', content: [{ type: 'input_text', text: 'SECRET' }] }, { role: 'user', content: 'go' }] })
 })

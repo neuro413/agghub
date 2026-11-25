@@ -1,7 +1,7 @@
 import './helpers/isolated'
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { db } from '../src/db'
+import { db, setSettings } from '../src/db'
 import { cleanupOldLogs, recordLog } from '../src/stats/recorder'
 import { getJsonBody } from '../src/stats/blobstore'
 
@@ -23,4 +23,11 @@ test('维护单飞，小批删除期间新增日志不会被回收，旧日志�
   await cleanupOldLogs()
   assert.equal(db.prepare('SELECT COUNT(*) FROM request_logs WHERE created_at=1').pluck().get(), 0)
   assert.equal(getJsonBody(ref), body)
+})
+
+test('保留天数为 0 时不删除任何日志', async () => {
+  setSettings({ log_retention_days: 0 })
+  db.prepare("INSERT INTO request_logs(created_at,status) VALUES (1,'success')").run()
+  await cleanupOldLogs()
+  assert.equal(db.prepare('SELECT COUNT(*) FROM request_logs WHERE created_at=1').pluck().get(), 1)
 })

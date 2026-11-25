@@ -73,6 +73,8 @@ export interface ChannelRow {
   key_mode: string | null
   key_concurrency: number
   key_cooldown_seconds: number
+  key_limit_threshold: number
+  key_race_single: number
   ban_until: number | null
   request_compression: string | null
   always_retry: number
@@ -115,10 +117,14 @@ export interface Channel {
   single_role_exclude_last_user: boolean
   /** 多 key 模式，null = 单 key（api_key 整串使用）；开启时 api_key 每行一个 key（Vertex 不支持） */
   key_mode: KeyMode | null
-  /** 并发模式下同时请求的 key 数 */
+  /** 并发模式下同时请求的 key 数；单 key 竞速时为同一个 key 同时发起的请求数 */
   key_concurrency: number
   /** 多 key 模式下 429/402 熔断 key 的冷却秒数（上游带 Retry-After 时优先） */
   key_cooldown_seconds: number
+  /** 轮询模式下同一个 key 连续 429/402 达到该次数才冷却并换下一个 key，未达到时用同一个 key 重试；1 = 首次即冷却 */
+  key_limit_threshold: number
+  /** 并发模式下的单 key 竞速：只用排最前的可用 key，同时发起 key_concurrency 路请求 */
+  key_race_single: boolean
   /** 自动熔断的恢复时间（毫秒时间戳），null = 需手动恢复 */
   ban_until: number | null
   /** 发往上游的请求体压缩，null = 跟随全局 */
@@ -323,7 +329,7 @@ export interface OpenRouterPrice {
 }
 
 // ── 请求日志（统计 + 正文）───────────────────────────────
-export type LogBodyField = 'request_headers' | 'request_body' | 'response_body' | 'preprocessed_body' | 'thinking_inject' | 'upstream_response_body'
+export type LogBodyField = 'request_headers' | 'request_body' | 'response_body' | 'preprocessed_body' | 'thinking_inject' | 'pack_trace' | 'upstream_response_body'
 
 export interface LogRow {
   id: number
@@ -364,6 +370,8 @@ export interface LogRow {
   pseudo_thinking: number
   /** 伪思考入向续接注入信息 JSON：[{messageIndex, thinking}]（仅注入时记录）*/
   thinking_inject: string | null
+  /** 正则包执行记录 JSON（PackTrace[]）：命中的包、各步骤状态与报错；没有包命中时为 null */
+  pack_trace: string | null
   /** 调用来源；旧日志为 null，按 owner 显示 */
   source: CallerSource | null
   key_id: number | null
@@ -425,6 +433,8 @@ export interface Settings {
   /** 单独去除 redacted_thinking 块（不影响普通 thinking） */
   drop_redacted_thinking: boolean
   preprocess_rules: PreprocessRule[]
+  /** 正则包（提示词预处理高级模式），在普通提示词规则之后按顺序执行 */
+  regex_packs: RegexPack[]
   tool_filter_rules: ToolFilterRule[]
   param_rules: ParamRule[]
   // 伪思考（伪原生思维链）
@@ -568,6 +578,8 @@ export interface PreprocessRule extends CallerScope {
   flags: string
   /** 替换文本，空串 = 删除 */
   replacement: string
+  /** 命中后的动作：replace（缺省）= 替换匹配到的文本；remove_message = 消息文本命中即移除整条消息，replacement 不使用 */
+  action?: 'replace' | 'remove_message'
   /** 作用角色 system/user/assistant/tool，空/缺省 = 全部 */
   roles?: string[]
   /** 限定渠道 id，空/缺省 = 全部 */
@@ -578,6 +590,118 @@ export interface PreprocessRule extends CallerScope {
   models?: string[]
   /** 只处理最后 N 条消息，0/缺省 = 全部 */
   depth?: number
+}
+
+// ── 正则包（提示词预处理高级模式）────────────────────────
+/** 包级参数：在界面上填写，模板与脚本里用 params.key / {{param::key}} / {{key}} 读取 */
+export interface RegexPackParam {
+  /** 变量名，须为合法标识符 */
+  key: string
+  /** 界面显示名，缺省用 key */
+  label?: string
+  type: 'text' | 'boolean' | 'number'
+  value: string | boolean | number
+  description?: string
+}
+
+interface RegexPackStepBase {
+  id: string
+  enabled: boolean
+  name?: string
+  /** 条件表达式（JS，可用变量 / 包参数 / 请求上下文），结果为假则跳过本步；空 = 总是执行 */
+  condition?: string
+}
+
+/** 正则步骤：替换文本按模板渲染（宏 + EJS + $1 捕获组），每个匹配渲染一次 */
+export interface RegexPackRegexStep extends RegexPackStepBase {
+  type: 'regex'
+  pattern: string
+  flags: string
+  replacement: string
+  /** replace（缺省）= 替换匹配文本；remove_message = 消息文本命中即移除整条消息（仅对消息生效） */
+  action?: 'replace' | 'remove_message'
+  /** 作用目标：messages = 消息文本（缺省），tools = 工具定义的描述与参数说明 */
+  targets?: ('messages' | 'tools')[]
+  /** 作用角色 system/user/assistant/tool，空/缺省 = 全部；仅对消息生效 */
+  roles?: string[]
+  /** 只处理最后 N 条消息，0/缺省 = 全部；仅对消息生效 */
+  depth?: number
+}
+
+/** 注入步骤：把模板渲染出的文本插入请求 */
+export interface RegexPackInjectStep extends RegexPackStepBase {
+  type: 'inject'
+  content: string
+  /** system_start / system_end = 拼到系统提示词开头 / 结尾；depth = 作为一条新消息插到倒数第 depth 条之前（0 = 最末尾） */
+  position: 'system_start' | 'system_end' | 'depth'
+  /** position = depth 时新消息的角色；Anthropic 直通没有 system 消息，system 会按 user 插入 */
+  role?: 'system' | 'user' | 'assistant'
+  depth?: number
+}
+
+/** 脚本步骤：一段异步 JS，直接读写整个请求 */
+export interface RegexPackScriptStep extends RegexPackStepBase {
+  type: 'script'
+  code: string
+}
+
+export type RegexPackStep = RegexPackRegexStep | RegexPackInjectStep | RegexPackScriptStep
+
+export interface RegexPack extends CallerScope {
+  id: string
+  enabled: boolean
+  name: string
+  description?: string
+  /**
+   * UA 白名单，空/缺省 = 不限。条目默认按关键词包含匹配（不区分大小写）；
+   * 写成 /…/flags 时按正则匹配。命中任一条即通过，请求没有 UA 时视为不命中。
+   */
+  uaWhitelist?: string[]
+  /** 启用条件，与 UA 白名单及其余范围同时满足才启用：regex = 正则匹配系统提示词文本；expr = 返回布尔值的 JS 表达式 */
+  when?: { mode: 'regex' | 'expr'; source: string; flags?: string }
+  /** 限定渠道 id，空/缺省 = 全部 */
+  channelIds?: number[]
+  /** 限定入口格式，空/缺省 = 全部 */
+  formats?: EntryFormat[]
+  /** 限定请求模型名，空/缺省 = 全部 */
+  models?: string[]
+  params: RegexPackParam[]
+  steps: RegexPackStep[]
+}
+
+/** 单个步骤的执行结果：changed = 改动了请求；unchanged = 执行了但无改动；skipped = 条件为假；error = 出错，本步不生效 */
+export interface PackStepTrace {
+  name: string
+  type: RegexPackStep['type']
+  status: 'changed' | 'unchanged' | 'skipped' | 'error'
+  error?: string
+  ms?: number
+}
+
+/** 一个命中的包在一次请求里的执行记录 */
+export interface PackTrace {
+  pack: string
+  /** 启用条件求值出错时的报错（此时包不执行） */
+  error?: string
+  steps: PackStepTrace[]
+  /** 脚本与模板里 console.log 的输出 */
+  logs?: string[]
+}
+
+/** POST /api/preprocess/pack-test 的返回 */
+export interface PackTestResult {
+  /** 试运行采用的入口格式（未指定时按请求体形状推断） */
+  entryFormat: EntryFormat
+  /** 试运行的请求体形状：直通为入口格式本身，跨格式转换为中间表示 */
+  passthrough: boolean
+  /** 按给定的 UA / 模型 / 入口格式，这个包在真实请求里不会启用的原因；会启用时为 null */
+  inactiveReason: string | null
+  changed: boolean
+  before: any
+  after: any
+  trace: PackTrace
+  /** 执行结束时的请求级变量 */
+  vars: Record<string, any>
 }
 
 // ── 工具过滤规则 ────────────────────────────────────────

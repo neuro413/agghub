@@ -6,6 +6,7 @@ import {
   IconLayers,
   IconLogs,
   IconMenu,
+  IconPackage,
   IconSettings,
   IconSidebar,
   IconStats,
@@ -13,7 +14,7 @@ import {
   IconWand,
 } from './Icons'
 
-export type TabKey = 'channels' | 'groups' | 'keys' | 'users' | 'notices' | 'stats' | 'logs' | 'preprocess' | 'pool' | 'settings'
+export type TabKey = 'channels' | 'groups' | 'keys' | 'users' | 'notices' | 'stats' | 'logs' | 'preprocess' | 'packs' | 'pool' | 'settings'
 
 type TabDef = { key: TabKey; label: string; Icon: typeof IconChannels }
 
@@ -46,6 +47,7 @@ export const TAB_GROUPS: { label: string; tabs: TabDef[] }[] = [
     label: '配置',
     tabs: [
       { key: 'preprocess', label: '预处理', Icon: IconWand },
+      { key: 'packs', label: '正则包', Icon: IconPackage },
       { key: 'settings', label: '设置', Icon: IconSettings },
     ],
   },
